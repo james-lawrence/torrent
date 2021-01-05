@@ -1,4 +1,4 @@
-package torrent
+package testutil
 
 import (
 	"errors"
@@ -9,9 +9,12 @@ import (
 	"github.com/james-lawrence/torrent/storage"
 )
 
-type badStorage struct{}
+// NewBadStorage used for tests.
+func NewBadStorage() storage.ClientImpl {
+	return badStorage{}
+}
 
-var _ storage.ClientImpl = badStorage{}
+type badStorage struct{}
 
 func (bs badStorage) OpenTorrent(*metainfo.Info, metainfo.Hash) (storage.TorrentImpl, error) {
 	return bs, nil

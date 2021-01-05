@@ -1,16 +1,22 @@
 package torrent
 
 import (
+	"context"
 	"net"
-	"strconv"
-	"strings"
 
 	"github.com/pkg/errors"
+	"golang.org/x/net/proxy"
 )
 
-// NewDefaultClient setup a client and connect a using defaults settings.
-func NewDefaultClient() (c *Client, err error) {
-	return NewAutobind().Bind(NewClient(NewDefaultClientConfig()))
+type firewallCallback func(net.Addr) bool
+
+type dialer interface {
+	Dial(ctx context.Context, addr string) (net.Conn, error)
+}
+
+type socket interface {
+	net.Listener
+	dialer
 }
 
 // Binder binds network sockets to the client.
@@ -49,112 +55,28 @@ func (t socketsBind) Bind(cl *Client, err error) (*Client, error) {
 	return cl, nil
 }
 
-// NewAutobind used to automatically listen to available networks
-// on the system. limited configuration. use client.Bind for more
-// robust configuration.
-// DEPRECATED: use NewSocketsBind instead.
-func NewAutobind() Autobind {
-	return Autobind{
-		ListenHost: func(string) string { return "" },
-		ListenPort: 0,
-	}
+type psocket interface {
+	net.Listener
+	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
-// NewAutobindLoopback autobind to the loopback device.
-// DEPRECATED: use NewSocketsBind instead.
-func NewAutobindLoopback() Autobind {
-	return Autobind{
-		ListenHost: func(network string) string {
-			if strings.Contains(network, "4") {
-				return "127.0.0.1"
-			}
-			return "::1"
-		},
-		ListenPort: 0,
-	}
+// ProxySocket hope to get rid of this entirely, for now punting to testutil.
+type ProxySocket struct {
+	psocket
+	d proxy.Dialer
 }
 
-// NewAutobindSpecified for use in testing only, panics if invalid host/port.
-// DEPRECATED: use NewSocketsBind instead.
-func NewAutobindSpecified(dst string) Autobind {
-	var (
-		err         error
-		port        int
-		host, _port string
-	)
+// Dial ...
+func (t ProxySocket) Dial(ctx context.Context, addr string) (conn net.Conn, err error) {
+	if t.d != nil {
 
-	if host, _port, err = net.SplitHostPort(dst); err != nil {
-		panic(err)
+		return t.d.Dial(t.psocket.Addr().Network(), addr)
 	}
 
-	if port, err = strconv.Atoi(_port); err != nil {
-		panic(err)
-	}
-
-	return Autobind{
-		ListenHost: func(string) string { return host },
-		ListenPort: port,
-	}
+	return t.psocket.DialContext(ctx, t.psocket.Addr().Network(), addr)
 }
 
-// Autobind manages automatically binding a client to available networks.
-type Autobind struct {
-	// DEPRECATED: use NewSocketsBind instead.
-	// The address to listen for new uTP and TCP bittorrent protocol
-	// connections. DHT shares a UDP socket with uTP unless configured
-	// otherwise.
-	ListenHost func(network string) string
-	ListenPort int
-}
-
-// Bind the client to available networks. consumes the result of NewClient.
-func (t Autobind) Bind(cl *Client, err error) (*Client, error) {
-	var (
-		sockets []socket
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	if sockets, err = listenAll(t.listenNetworks(cl.config), t.ListenHost, t.ListenPort, cl.config.ProxyURL, cl.firewallCallback); err != nil {
-		return nil, err
-	}
-
-	// Check for panics.
-	cl.LocalPort()
-
-	for _, s := range sockets {
-		if peerNetworkEnabled(parseNetworkString(s.Addr().Network()), cl.config) {
-			if err = cl.Bind(s); err != nil {
-				cl.Close()
-				return nil, err
-			}
-		} else if !cl.config.NoDHT {
-			if err = cl.bindDHT(s); err != nil {
-				cl.Close()
-				return nil, err
-			}
-		}
-	}
-
-	return cl, nil
-}
-
-func (t Autobind) enabledPeerNetworks(c *ClientConfig) (ns []network) {
-	for _, n := range allPeerNetworks {
-		if peerNetworkEnabled(n, c) {
-			ns = append(ns, n)
-		}
-	}
-	return
-}
-
-func (t Autobind) listenNetworks(c *ClientConfig) (ns []network) {
-	for _, n := range allPeerNetworks {
-		if c.listenOnNetwork(n) {
-			ns = append(ns, n)
-		}
-	}
-	return
+// NewProxySocket ...
+func NewProxySocket(s psocket, d proxy.Dialer) ProxySocket {
+	return ProxySocket{psocket: s, d: d}
 }

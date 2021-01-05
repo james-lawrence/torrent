@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/james-lawrence/torrent"
+	"github.com/james-lawrence/torrent/autobind"
 	"github.com/james-lawrence/torrent/internal/testutil"
 	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/james-lawrence/torrent/storage"
@@ -93,7 +94,7 @@ func TestUnmountWedged(t *testing.T) {
 	cfg.NoDHT = true
 	cfg.DisableTCP = true
 	cfg.DisableUTP = true
-	client, err := torrent.NewAutobind().Bind(torrent.NewClient(cfg))
+	client, err := autobind.NewAutobind().Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer client.Close()
 	tt, _, err := client.MaybeStart(torrent.NewFromMetaInfo(layout.Metainfo))
@@ -169,7 +170,7 @@ func TestDownloadOnDemand(t *testing.T) {
 	cfg.DisableTrackers = true
 	cfg.NoDHT = true
 	cfg.Seed = true
-	seeder, err := torrent.NewAutobindLoopback().Bind(torrent.NewClient(cfg))
+	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer seeder.Close()
 	defer testutil.ExportStatusWriter(seeder, "s")()
@@ -187,7 +188,7 @@ func TestDownloadOnDemand(t *testing.T) {
 	cfg.NoDHT = true
 	cfg.DisableTCP = true
 	cfg.DefaultStorage = storage.NewMMap(filepath.Join(layout.BaseDir, "download"))
-	leecher, err := torrent.NewAutobindLoopback().Bind(torrent.NewClient(cfg))
+	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	testutil.ExportStatusWriter(leecher, "l")()
 	defer leecher.Close()

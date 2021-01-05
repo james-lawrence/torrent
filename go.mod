@@ -27,6 +27,7 @@ require (
 	github.com/gosuri/uilive v0.0.4 // indirect
 	github.com/gosuri/uiprogress v0.0.1
 	github.com/huandu/xstrings v1.3.0 // indirect
+	github.com/influxdata/influxdb v1.8.3
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/mattn/go-isatty v0.0.12 // indirect
 	github.com/pkg/errors v0.9.1

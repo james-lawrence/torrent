@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -16,6 +15,8 @@ import (
 	stdsync "sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/james-lawrence/torrent/connections"
 
 	"github.com/anacrolix/missinggo/slices"
 	"github.com/anacrolix/missinggo/v2"
@@ -42,13 +43,14 @@ type Client struct {
 	// An aggregate of stats over all connections. First in struct to ensure
 	// 64-bit alignment of fields. See #262.
 	stats ConnStats
+
 	// locking counts, TODO remove these.
 	lcount uint64
 	ucount uint64
 
 	_mu    *stdsync.RWMutex
 	event  sync.Cond
-	closed missinggo.Event
+	closed chan struct{}
 
 	config *ClientConfig
 
@@ -68,7 +70,6 @@ type Client struct {
 	badPeerIPs        map[string]struct{}
 	torrents          map[metainfo.Hash]*torrent
 
-	acceptLimiter   map[ipStr]int
 	dialRateLimiter *rate.Limiter
 }
 
@@ -111,12 +112,12 @@ func (cl *Client) start(t Metadata) (dlt *torrent, added bool, err error) {
 
 	cl.lock()
 	defer cl.unlock()
-	log.Println("announcing", dlt.Name())
+
 	cl.eachDhtServer(func(s *dht.Server) {
 		go dlt.dhtAnnouncer(s)
 	})
 	cl.torrents[t.InfoHash] = dlt
-	cl.clearAcceptLimits()
+
 	dlt.updateWantPeersEvent()
 	// Tickle Client.waitAccept, new torrent may want conns.
 	cl.event.Broadcast()
@@ -301,6 +302,7 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 
 	cl := &Client{
 		config:            cfg,
+		closed:            make(chan struct{}),
 		dopplegangerAddrs: make(map[string]struct{}),
 		torrents:          make(map[metainfo.Hash]*torrent),
 		dialRateLimiter:   rate.NewLimiter(10, 10),
@@ -312,8 +314,6 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 			cl.Close()
 		}
 	}()
-
-	go cl.acceptLimitClearer()
 
 	cl.extensionBytes = defaultPeerExtensionBytes()
 	cl.event.L = cl.locker()
@@ -379,6 +379,11 @@ func (cl *Client) newDhtServer(conn net.PacketConn) (s *dht.Server, err error) {
 	return s, nil
 }
 
+// Config underlying configuration for the client.
+func (cl *Client) Config() *ClientConfig {
+	return cl.config
+}
+
 // Bind the socket to this client.
 func (cl *Client) Bind(s socket) (err error) {
 	if err = cl.bindDHT(s); err != nil {
@@ -426,9 +431,9 @@ func (cl *Client) bindDHT(s socket) (err error) {
 
 // Closed returns a channel to detect when the client is closed.
 func (cl *Client) Closed() <-chan struct{} {
-	cl.lock()
-	defer cl.unlock()
-	return cl.closed.C()
+	cl.rLock()
+	defer cl.rUnlock()
+	return cl.closed
 }
 
 func (cl *Client) eachDhtServer(f func(*dht.Server)) {
@@ -448,7 +453,11 @@ func (cl *Client) closeSockets() {
 // Close stops the client. All connections to peers are closed and all activity will
 // come to a halt.
 func (cl *Client) Close() {
-	cl.closed.Set()
+	select {
+	case <-cl.closed:
+	default:
+		close(cl.closed)
+	}
 	cl.eachDhtServer(func(s *dht.Server) { s.Close() })
 	cl.closeSockets()
 
@@ -462,18 +471,6 @@ func (cl *Client) Close() {
 	cl.event.Broadcast()
 }
 
-func (cl *Client) ipBlockRange(ip net.IP) (r iplist.Range, blocked bool) {
-	if cl.ipBlockList == nil {
-		return
-	}
-	return cl.ipBlockList.Lookup(ip)
-}
-
-func (cl *Client) ipIsBlocked(ip net.IP) bool {
-	_, blocked := cl.ipBlockRange(ip)
-	return blocked
-}
-
 func (cl *Client) wantConns() bool {
 	for _, t := range cl.torrents {
 		if t.wantConns() {
@@ -485,85 +482,43 @@ func (cl *Client) wantConns() bool {
 
 func (cl *Client) waitAccept() {
 	for {
-		if cl.closed.IsSet() {
+		select {
+		case <-cl.closed:
 			return
+		default:
 		}
+
 		if cl.wantConns() {
 			return
 		}
+
 		cl.event.Wait()
 	}
 }
 
-func (cl *Client) rejectAccepted(conn net.Conn) error {
-	ra := conn.RemoteAddr()
-	rip := missinggo.AddrIP(ra)
-	if cl.config.DisableIPv4Peers && rip.To4() != nil {
-		return errors.New("ipv4 peers disabled")
-	}
-	if cl.config.DisableIPv4 && len(rip) == net.IPv4len {
-		return errors.New("ipv4 disabled")
-
-	}
-	if cl.config.DisableIPv6 && len(rip) == net.IPv6len && rip.To4() == nil {
-		return errors.New("ipv6 disabled")
-	}
-	if cl.rateLimitAccept(rip) {
-		return errors.New("source IP accepted rate limited")
-	}
-	if cl.badPeerIPPort(rip, missinggo.AddrPort(ra)) {
-		return errors.New("bad source addr")
-	}
-	return nil
-}
-
 func (cl *Client) acceptConnections(l net.Listener) {
+	var (
+		err  error
+		conn net.Conn
+	)
+
 	for {
-		if cl.closed.IsSet() {
+		select {
+		case <-cl.closed:
+			if conn != nil {
+				conn.Close()
+			}
 			return
+		default:
 		}
 
-		conn, err := l.Accept()
-		if err != nil {
+		if conn, err = cl.config.Handshaker.Accept(l); err != nil {
 			cl.config.debug().Println(errors.Wrap(err, "error accepting connection"))
 			continue
 		}
 
-		metrics.Add("client listener accepts", 1)
-		cl.acceptConnection(conn)
+		go cl.incomingConnection(conn)
 	}
-}
-
-func (cl *Client) acceptConnection(conn net.Conn) {
-	var (
-		reject error
-	)
-
-	// TODO: concerning that this check exists.... investigate at some point.
-	if conn == nil {
-		panic("nil conn passed to accept conn")
-	}
-
-	cl.rLock()
-	closed := cl.closed.IsSet()
-	reject = cl.rejectAccepted(conn)
-	cl.rUnlock()
-
-	if closed {
-		conn.Close()
-		return
-	}
-
-	if reject != nil {
-		metrics.Add("rejected accepted connections", 1)
-		cl.config.debug().Println(errors.Wrap(reject, "rejecting connection"))
-		conn.Close()
-		return
-	}
-
-	// cl.config.debug().Printf("accepted %s connection from %s\n", conn.RemoteAddr().Network(), conn.RemoteAddr())
-	metrics.Add(fmt.Sprintf("accepted conn network=%s", conn.RemoteAddr().Network()), 1)
-	go cl.incomingConnection(conn)
 }
 
 func (cl *Client) incomingConnection(nc net.Conn) {
@@ -590,14 +545,6 @@ func (cl *Client) torrent(ih metainfo.Hash) *torrent {
 
 type dialResult struct {
 	Conn net.Conn
-}
-
-func countDialResult(err error) {
-	if err == nil {
-		metrics.Add("successful dials", 1)
-	} else {
-		metrics.Add("unsuccessful dials", 1)
-	}
 }
 
 func reducedDialTimeout(minDialTimeout, max time.Duration, halfOpenLimit int, pendingPeers int) (ret time.Duration) {
@@ -656,16 +603,18 @@ func (cl *Client) dial(ctx context.Context, d dialer, addr string) net.Conn {
 	if ctx.Err() != nil {
 		return nil
 	}
+
 	c, err := d.Dial(ctx, addr)
+	if c == nil || err != nil {
+		return nil
+	}
+
 	// This is a bit optimistic, but it looks non-trivial to thread this through the proxy code. Set
 	// it now in case we close the connection forthwith.
 	if tc, ok := c.(*net.TCPConn); ok {
 		tc.SetLinger(0)
 	}
-	countDialResult(err)
-	if c == nil {
-		return nil
-	}
+
 	return closeWrapper{
 		Conn:   c,
 		closer: c.Close,
@@ -825,37 +774,34 @@ func (cl *Client) forSkeys(f func([]byte) bool) {
 
 // Do encryption and bittorrent handshakes as receiver.
 func (cl *Client) receiveHandshakes(c *connection) (t *torrent, err error) {
-	var rw io.ReadWriter
+	var (
+		rw       io.ReadWriter
+		infoHash metainfo.Hash
+	)
 	rw, c.headerEncrypted, c.cryptoMethod, err = handleEncryption(c.rw(), cl.forSkeys, cl.config.HeaderObfuscationPolicy, cl.config.CryptoSelector)
 	c.setRW(rw)
-	if err == nil || err == mse.ErrNoSecretKeyMatch {
-		if c.headerEncrypted {
-			metrics.Add("handshakes received encrypted", 1)
-		} else {
-			metrics.Add("handshakes received unencrypted", 1)
-		}
-	} else {
-		metrics.Add("handshakes received with error while handling encryption", 1)
-	}
+
 	if err != nil {
-		if err == mse.ErrNoSecretKeyMatch {
-			err = nil
-		}
-		return
+		return nil, err
 	}
+
 	if cl.config.HeaderObfuscationPolicy.RequirePreferred && c.headerEncrypted != cl.config.HeaderObfuscationPolicy.Preferred {
-		err = errors.New("connection not have required header obfuscation")
-		return
+		return nil, errors.New("connection not have required header obfuscation")
 	}
-	ih, err := cl.connBtHandshake(c, nil)
-	if err != nil {
-		err = xerrors.Errorf("during bt handshake: %w", err)
-		return
+
+	if infoHash, err = cl.connBtHandshake(c, nil); err != nil {
+		return nil, xerrors.Errorf("during bt handshake: %w", err)
 	}
+
 	cl.lock()
-	t = cl.torrents[ih]
+	t = cl.torrents[infoHash]
 	cl.unlock()
-	return
+
+	if t == nil {
+		return nil, errors.New("received handshake for an unavailable torrent")
+	}
+
+	return t, nil
 }
 
 func (cl *Client) connBtHandshake(c *connection, ih *metainfo.Hash) (ret metainfo.Hash, err error) {
@@ -878,24 +824,11 @@ func (cl *Client) runReceivedConn(c *connection) {
 
 	t, err := cl.receiveHandshakes(c)
 	if err != nil {
-		cl.config.debug().Println(errors.Wrap(err, "error receiving handshakes"))
-		metrics.Add("error receiving handshake", 1)
-		cl.lock()
-		cl.onBadAccept(c.remoteAddr)
-		cl.unlock()
+		cl.config.debug().Println(errors.Wrap(err, "error during handshake"))
+		cl.config.Handshaker.Release(c.conn, connections.BannedConnectionError(c.conn, err))
 		return
 	}
 
-	if t == nil {
-		metrics.Add("received handshake for unloaded torrent", 1)
-		cl.config.debug().Println("received handshake for an unavailable torrent")
-		cl.lock()
-		cl.onBadAccept(c.remoteAddr)
-		cl.unlock()
-		return
-	}
-
-	metrics.Add("received handshake for loaded torrent", 1)
 	cl.runHandshookConn(c, t)
 }
 
@@ -961,15 +894,11 @@ func (cl *Client) badPeerIPPort(ip net.IP, port int) bool {
 	if port == 0 {
 		return true
 	}
+
 	if cl.dopplegangerAddr(net.JoinHostPort(ip.String(), strconv.FormatInt(int64(port), 10))) {
 		return true
 	}
-	if _, ok := cl.ipBlockRange(ip); ok {
-		return true
-	}
-	if _, ok := cl.badPeerIPs[ip.String()]; ok {
-		return true
-	}
+
 	return false
 }
 
@@ -1039,12 +968,17 @@ func (cl *Client) allTorrentsCompleted() bool {
 func (cl *Client) WaitAll() bool {
 	cl.lock()
 	defer cl.unlock()
+
 	for !cl.allTorrentsCompleted() {
-		if cl.closed.IsSet() {
+		select {
+		case <-cl.closed:
 			return false
+		default:
 		}
+
 		cl.event.Wait()
 	}
+
 	return true
 }
 
@@ -1183,45 +1117,6 @@ func (cl *Client) ListenAddrs() (ret []net.Addr) {
 		return true
 	})
 	return
-}
-
-func (cl *Client) onBadAccept(addr IpPort) {
-	ip := maskIPForAcceptLimiting(addr.IP)
-	if cl.acceptLimiter == nil {
-		cl.acceptLimiter = make(map[ipStr]int)
-	}
-	cl.acceptLimiter[ipStr(ip.String())]++
-}
-
-func maskIPForAcceptLimiting(ip net.IP) net.IP {
-	if ip4 := ip.To4(); ip4 != nil {
-		return ip4.Mask(net.CIDRMask(24, 32))
-	}
-	return ip
-}
-
-func (cl *Client) clearAcceptLimits() {
-	cl.acceptLimiter = nil
-}
-
-func (cl *Client) acceptLimitClearer() {
-	for {
-		select {
-		case <-cl.closed.LockedChan(cl.locker()):
-			return
-		case <-time.After(15 * time.Minute):
-			cl.lock()
-			cl.clearAcceptLimits()
-			cl.unlock()
-		}
-	}
-}
-
-func (cl *Client) rateLimitAccept(ip net.IP) bool {
-	if cl.config.DisableAcceptRateLimiting {
-		return false
-	}
-	return cl.acceptLimiter[ipStr(maskIPForAcceptLimiting(ip).String())] > 0
 }
 
 var _ = atomic.AddInt32
