@@ -2,6 +2,7 @@ package storage
 
 import (
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -34,29 +35,30 @@ type fileClientImpl struct {
 	pathMaker FilePathMaker
 }
 
-// The Default path maker just returns the current path
-func defaultPathMaker(baseDir string, infoHash metainfo.Hash, info *metainfo.Info, fi *metainfo.FileInfo) string {
-	return filepath.Join(baseDir, info.Name, filepath.Join(langx.DerefOrZero(fi).Path...))
-}
-
 func infoHashPathMaker(baseDir string, infoHash metainfo.Hash, info *metainfo.Info, fi *metainfo.FileInfo) string {
 	return filepath.Join(baseDir, infoHash.HexString(), filepath.Join(langx.DerefOrZero(fi).Path...))
 }
 
 func infoHashPathMakerV0(baseDir string, infoHash metainfo.Hash, info *metainfo.Info, fi *metainfo.FileInfo) string {
-	return filepath.Join(baseDir, infoHash.HexString(), info.Name, filepath.Join(langx.DerefOrZero(fi).Path...))
+	return filepath.Join(baseDir, infoHash.HexString(), langx.DerefOrZero(info).Name, filepath.Join(langx.DerefOrZero(fi).Path...))
 }
 
 // All Torrent data stored in this baseDir
 func NewFile(baseDir string, options ...FileOption) *fileClientImpl {
 	return langx.Autoptr(langx.Clone(fileClientImpl{
 		baseDir:   baseDir,
-		pathMaker: defaultPathMaker,
+		pathMaker: infoHashPathMaker,
 	}, options...))
 }
 
 func (me *fileClientImpl) Close() error {
 	return nil
+}
+
+func (fs *fileClientImpl) Exists(id metainfo.Hash) bool {
+	_, err := os.Stat(fs.pathMaker(fs.baseDir, id, nil, nil))
+	log.Println("derp derp", err)
+	return err == nil
 }
 
 func (fs *fileClientImpl) OpenTorrent(info *metainfo.Info, infoHash metainfo.Hash) (TorrentImpl, error) {

@@ -30,7 +30,7 @@ func TestAppendToCopySlice(t *testing.T) {
 // Check that a torrent containing zero-length file(s) will start, and that
 // they're created in the filesystem. The client storage is assumed to be
 // file-based on the native filesystem based.
-func testEmptyFilesAndZeroPieceLength(t *testing.T, cfg *torrent.ClientConfig, options ...torrent.Option) {
+func testEmptyFilesAndZeroPieceLength(t *testing.T, dir string, cfg *torrent.ClientConfig, options ...torrent.Option) {
 	var (
 		digest = md5.New()
 	)
@@ -46,7 +46,7 @@ func testEmptyFilesAndZeroPieceLength(t *testing.T, cfg *torrent.ClientConfig, o
 		PieceLength: 0,
 	})
 	require.NoError(t, err)
-	fp := filepath.Join(cfg.DataDir, "empty")
+	fp := filepath.Join(dir, "empty")
 	os.Remove(fp)
 
 	assert.False(t, missinggo.FilePathExists(fp))
@@ -65,15 +65,23 @@ func testEmptyFilesAndZeroPieceLength(t *testing.T, cfg *torrent.ClientConfig, o
 }
 
 func TestEmptyFilesAndZeroPieceLengthWithFileStorage(t *testing.T) {
-	cfg := torrent.TestingConfig(t)
-	ci := storage.NewFile(cfg.DataDir)
+	dir := t.TempDir()
+	cfg := torrent.TestingConfig(
+		t,
+		torrent.ClientConfigStorageDir(dir),
+	)
+	ci := storage.NewFile(dir)
 	defer ci.Close()
-	testEmptyFilesAndZeroPieceLength(t, cfg, torrent.OptionStorage(ci))
+	testEmptyFilesAndZeroPieceLength(t, dir, cfg, torrent.OptionStorage(ci))
 }
 
 func TestEmptyFilesAndZeroPieceLengthWithMMapStorage(t *testing.T) {
-	cfg := torrent.TestingConfig(t)
-	ci := storage.NewMMap(cfg.DataDir)
+	dir := t.TempDir()
+	cfg := torrent.TestingConfig(
+		t,
+		torrent.ClientConfigStorageDir(dir),
+	)
+	ci := storage.NewMMap(dir)
 	defer ci.Close()
-	testEmptyFilesAndZeroPieceLength(t, cfg, torrent.OptionStorage(ci))
+	testEmptyFilesAndZeroPieceLength(t, dir, cfg, torrent.OptionStorage(ci))
 }

@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -219,21 +220,6 @@ func (cn *connection) cumInterest() time.Duration {
 	return ret
 }
 
-func (cn *connection) peerHasAllPieces() (all bool, known bool) {
-	if cn.peerSentHaveAll {
-		return true, true
-	}
-
-	if !cn.t.haveInfo() {
-		return false, false
-	}
-
-	cn.cmu().Lock()
-	m := cn.claimed.GetCardinality()
-	cn.cmu().Unlock()
-	return cn.t.chunks.cmaximum == int64(m), true
-}
-
 func (cn *connection) cmu() sync.Locker {
 	return cn._mu
 }
@@ -246,22 +232,6 @@ func (cn *connection) supportsExtension(ext pp.ExtensionName) bool {
 	return cn.extension(ext) != 0
 }
 
-// The best guess at number of pieces in the torrent for this peer.
-func (cn *connection) bestPeerNumPieces() pieceIndex {
-	if cn.t.haveInfo() {
-		return cn.t.numPieces()
-	}
-	return cn.peerMinPieces
-}
-
-func (cn *connection) completedString() string {
-	have := pieceIndex(cn.claimed.GetCardinality())
-	if cn.peerSentHaveAll {
-		have = cn.bestPeerNumPieces()
-	}
-	return fmt.Sprintf("%d/%d", have, cn.t.chunks.cmaximum)
-}
-
 // Correct the PeerPieces slice length. Return false if the existing slice is
 // invalid, such as by receiving badly sized BITFIELD, or invalid HAVE
 // messages.
@@ -271,13 +241,6 @@ func (cn *connection) setNumPieces(num pieceIndex) error {
 	cn.cmu().Unlock()
 	cn.peerPiecesChanged()
 	return nil
-}
-
-func eventAgeString(t time.Time) string {
-	if t.IsZero() {
-		return "never"
-	}
-	return fmt.Sprintf("%.2fs ago", time.Since(t).Seconds())
 }
 
 func (cn *connection) connectionFlags() (ret string) {
@@ -300,65 +263,8 @@ func (cn *connection) utp() bool {
 	return strings.Contains(cn.network, "udp")
 }
 
-// Inspired by https://github.com/transmission/transmission/wiki/Peer-Status-Text.
-func (cn *connection) statusFlags() (ret string) {
-	c := func(b byte) {
-		ret += string([]byte{b})
-	}
-	if cn.Interested {
-		c('i')
-	}
-	if cn.Choked {
-		c('c')
-	}
-	c('-')
-	ret += cn.connectionFlags()
-	c('-')
-	if cn.PeerInterested {
-		c('i')
-	}
-	if cn.PeerChoked {
-		c('c')
-	}
-	return
-}
-
 func (cn *connection) downloadRate() float64 {
 	return float64(cn.stats.BytesReadUsefulData.Int64()) / cn.cumInterest().Seconds()
-}
-
-func (cn *connection) WriteStatus(w io.Writer, t *torrent) {
-	// \t isn't preserved in <pre> blocks?
-	fmt.Fprintf(w, "%+-55q %s %s-%s\n", cn.PeerID, cn.PeerExtensionBytes, cn.localAddr(), cn.remoteAddr)
-	fmt.Fprintf(w, "    last msg: %s, connected: %s, last helpful: %s, itime: %s, etime: %s\n",
-		eventAgeString(cn.lastMessageReceived),
-		eventAgeString(cn.completedHandshake),
-		eventAgeString(cn.lastHelpful()),
-		cn.cumInterest(),
-		cn.totalExpectingTime(),
-	)
-	fmt.Fprintf(w,
-		"    %s completed, good chunks: %v/%v-%v reqq: (%d,%d,%d]-%d, flags: %s, dr: %.1f KiB/s\n",
-		cn.completedString(),
-		&cn.stats.ChunksReadUseful,
-		&cn.stats.ChunksRead,
-		&cn.stats.ChunksWritten,
-		cn.requestsLowWater,
-		cn.numLocalRequests(),
-		cn.nominalMaxRequests(),
-		len(cn.PeerRequests),
-		cn.statusFlags(),
-		cn.downloadRate()/(1<<10),
-	)
-	// fmt.Fprintf(w, "    next pieces: %v%s\n",
-	// 	iter.ToSlice(iter.Head(10, cn.iterPendingPiecesUntyped)),
-	// 	func() string {
-	// 		if cn.shouldRequestWithoutBias() {
-	// 			return " (fastest)"
-	// 		} else {
-	// 			return ""
-	// 		}
-	// 	}())
 }
 
 func (cn *connection) Close() {
@@ -1204,7 +1110,7 @@ func (cn *connection) mainReadLoop() (err error) {
 			return fmt.Errorf("received fast extension message (type=%v) but extension is disabled", msg.Type)
 		}
 
-		// log.Printf("(%d) c(%p) - RECEIVED MESSAGE: %s - pending(%d) - remaining(%d) - failed(%d) - outstanding(%d) - unverified(%d) - completed(%d)\n", os.Getpid(), cn, msg.Type, len(cn.requests), cn.t.chunks.Missing(), cn.t.chunks.failed.GetCardinality(), len(cn.t.chunks.outstanding), cn.t.chunks.unverified.GetCardinality(), cn.t.chunks.completed.GetCardinality())
+		log.Printf("(%d) c(%p) seed(%t) - RECEIVED MESSAGE: %s - pending(%d) - remaining(%d) - failed(%d) - outstanding(%d) - unverified(%d) - completed(%d)\n", os.Getpid(), cn, cn.t.config.Seed, msg.Type, len(cn.requests), cn.t.chunks.Missing(), cn.t.chunks.failed.GetCardinality(), len(cn.t.chunks.outstanding), cn.t.chunks.unverified.GetCardinality(), cn.t.chunks.completed.GetCardinality())
 
 		switch msg.Type {
 		case pp.Choke:

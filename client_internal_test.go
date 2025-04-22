@@ -14,6 +14,7 @@ import (
 	"github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/dht"
+	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/testutil"
 	"github.com/james-lawrence/torrent/internal/testx"
 	"github.com/james-lawrence/torrent/metainfo"
@@ -28,12 +29,14 @@ type tt interface {
 	TempDir() string
 }
 
-func TestingConfig(t tt) *ClientConfig {
-	cfg := NewDefaultClientConfig(ClientConfigBootstrapGlobal)
-	cfg.NoDHT = true
-	cfg.DataDir = testutil.Autodir(t)
-	cfg.NoDefaultPortForwarding = true
-	cfg.DisableAcceptRateLimiting = true
+func TestingConfig(t tt, options ...ClientConfigOption) *ClientConfig {
+	cfg := NewDefaultClientConfig(
+		storage.NewFile(t.TempDir()),
+		ClientConfigBootstrapGlobal,
+		ClientConfigDHTEnabled(false),
+		ClientConfigPortForward(false),
+		ClientConfigCompose(options...),
+	)
 	// cfg.Debug = log.New(os.Stderr, "[debug] ", log.Flags())
 	return cfg
 }
@@ -103,7 +106,10 @@ func TestTorrentInitialState(t *testing.T) {
 }
 
 func TestReducedDialTimeout(t *testing.T) {
-	cfg := NewDefaultClientConfig(ClientConfigBootstrapGlobal)
+	cfg := NewDefaultClientConfig(
+		storage.NewFile(t.TempDir()),
+		ClientConfigBootstrapGlobal,
+	)
 	for _, _case := range []struct {
 		Max             time.Duration
 		HalfOpenLimit   int
@@ -139,14 +145,18 @@ func DownloadCancelTest(t *testing.T, b Binder, ps TestDownloadCancelParams) {
 
 	greetingTempDir, mi := testutil.GreetingTestTorrent(t)
 	defer os.RemoveAll(greetingTempDir)
-	cfg := TestingConfig(t)
-	cfg.Seed = true
-	cfg.DataDir = greetingTempDir
+	cfg := TestingConfig(
+		t,
+		ClientConfigSeed(true),
+		ClientConfigStorageDir(greetingTempDir),
+	)
 	seeder, err := b.Bind(NewClient(cfg))
 	require.NoError(t, err)
 	defer seeder.Close()
 	defer testutil.ExportStatusWriter(seeder, "s")()
-	tt, err := NewFromMetaInfo(mi, OptionStorage(storage.NewFile(cfg.DataDir)))
+	tt, err := NewFromMetaInfo(mi)
+	// tt, err := NewFromMetaInfo(mi, OptionStorage(storage.NewFile(greetingTempDir)))
+	// tt, err := NewFromMetaInfo(mi, OptionStorage(storage.NewFile(cfg.DataDir)))
 	require.NoError(t, err)
 	seederTorrent, _, err := seeder.Start(tt)
 	require.NoError(t, err)
@@ -155,8 +165,8 @@ func DownloadCancelTest(t *testing.T, b Binder, ps TestDownloadCancelParams) {
 	leecherDataDir := t.TempDir()
 	defer os.RemoveAll(leecherDataDir)
 
-	cfg.DataDir = leecherDataDir
-	leecher, err := b.Bind(NewClient(cfg))
+	lcfg := langx.Clone(*cfg, ClientConfigStorageDir(leecherDataDir))
+	leecher, err := b.Bind(NewClient(&lcfg))
 	require.NoError(t, err)
 	defer leecher.Close()
 	defer testutil.ExportStatusWriter(leecher, "l")()
@@ -223,7 +233,6 @@ func TestSetMaxEstablishedConn(t *testing.T) {
 	mi := testutil.GreetingMetaInfo().HashInfoBytes()
 	for i := range iter.N(3) {
 		cfg := TestingConfig(t)
-		cfg.DisableAcceptRateLimiting = true
 		cfg.dropDuplicatePeerIds = true
 		cfg.Handshaker = connections.NewHandshaker(
 			connections.NewFirewall(),
@@ -285,7 +294,8 @@ func TestAddMetainfoWithNodes(t *testing.T) {
 		return
 	}
 	assert.EqualValues(t, 0, sum())
-	ts, err := NewFromMetaInfoFile("metainfo/testdata/issue_65a.torrent", OptionStorage(storage.NewFile(cfg.DataDir)))
+	ts, err := NewFromMetaInfoFile("metainfo/testdata/issue_65a.torrent")
+	// ts, err := NewFromMetaInfoFile("metainfo/testdata/issue_65a.torrent", OptionStorage(storage.NewFile(cfg.DataDir)))
 	require.NoError(t, err)
 	tt, _, err := cl.Start(ts)
 	require.NoError(t, err)

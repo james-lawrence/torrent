@@ -66,18 +66,6 @@ type torrentStorage struct {
 
 func (me *torrentStorage) Close() error { return nil }
 
-func (me *torrentStorage) Completion() storage.Completion {
-	return storage.Completion{}
-}
-
-func (me *torrentStorage) MarkComplete() error {
-	return nil
-}
-
-func (me *torrentStorage) MarkNotComplete() error {
-	return nil
-}
-
 func (me *torrentStorage) ReadAt([]byte, int64) (int, error) {
 	panic("shouldn't be called")
 }

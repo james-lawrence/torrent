@@ -5,23 +5,24 @@ import (
 	"crypto/rand"
 	"crypto/rc4"
 	"io"
-	"io/ioutil"
 	"net"
 	"sync"
 	"testing"
 
 	"github.com/bradfitz/iter"
+	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func sliceIter(skeys [][]byte) SecretKeyIter {
-	return func(callback func([]byte) bool) {
+func sliceIter(skeys [][]byte) SecretKey {
+	return func(id metainfo.Hash) bool {
 		for _, sk := range skeys {
-			if !callback(sk) {
-				break
+			if bytes.Equal(sk[:], id[:]) {
+				return true
 			}
 		}
+		return false
 	}
 }
 
@@ -130,7 +131,7 @@ func (tr *trackReader) Read(b []byte) (n int, err error) {
 
 func TestReceiveRandomData(t *testing.T) {
 	tr := trackReader{rand.Reader, 0}
-	_, _, err := ReceiveHandshake(readWriter{&tr, ioutil.Discard}, nil, DefaultCryptoSelector)
+	_, _, err := ReceiveHandshake(readWriter{&tr, io.Discard}, nil, DefaultCryptoSelector)
 	// No skey matches
 	require.Error(t, err)
 	// Establishing S, and then reading the maximum padding for giving up on

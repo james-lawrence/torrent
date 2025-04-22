@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
@@ -15,13 +16,17 @@ import (
 	"github.com/james-lawrence/torrent"
 	"github.com/james-lawrence/torrent/internal/utpx"
 	"github.com/james-lawrence/torrent/sockets"
+	"github.com/james-lawrence/torrent/storage"
 	"github.com/pkg/errors"
 	"golang.org/x/net/proxy"
 )
 
 // NewDefaultClient setup a client and connect a using defaults settings.
 func NewDefaultClient() (c *torrent.Client, err error) {
-	return New().Bind(torrent.NewClient(torrent.NewDefaultClientConfig(torrent.ClientConfigBootstrapGlobal)))
+	return New().Bind(torrent.NewClient(torrent.NewDefaultClientConfig(
+		storage.NewFile(os.TempDir()),
+		torrent.ClientConfigBootstrapGlobal,
+	)))
 }
 
 // Option for configuring autobind.

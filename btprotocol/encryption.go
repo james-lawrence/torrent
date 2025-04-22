@@ -3,6 +3,7 @@ package btprotocol
 import (
 	"bytes"
 	"io"
+	"log"
 
 	"github.com/james-lawrence/torrent/mse"
 	"github.com/pkg/errors"
@@ -10,7 +11,7 @@ import (
 
 // EncryptionHandshake encrypt a net.Conn
 type EncryptionHandshake struct {
-	Keys               mse.SecretKeyIter
+	Keys               mse.SecretKey
 	mse.CryptoSelector // available crypto algorithms
 }
 
@@ -22,6 +23,10 @@ func (t EncryptionHandshake) Incoming(rw io.ReadWriter) (updated io.ReadWriter, 
 		io.Reader
 		io.Writer
 	}
+	log.Println("encryption handshake initiated")
+	defer func() {
+		log.Println("encryption handshake completed", err)
+	}()
 
 	var (
 		buf = bytes.NewBuffer(make([]byte, 0, 68))
@@ -47,6 +52,7 @@ func (t EncryptionHandshake) Incoming(rw io.ReadWriter) (updated io.ReadWriter, 
 	}
 
 	if updated, _, err = mse.ReceiveHandshake(b, t.Keys, t.CryptoSelector); err != nil {
+		log.Println("checkpoint")
 		return rw, buffered{
 			Reader: io.MultiReader(bytes.NewBuffer(buf.Bytes()), rw),
 			Writer: rw,

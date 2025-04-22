@@ -12,14 +12,26 @@ import (
 	"expvar"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"log"
 	"math"
 	"math/big"
 	"strconv"
 	"sync"
 
 	"github.com/bradfitz/iter"
+	"github.com/james-lawrence/torrent/metainfo"
 )
+
+func StaticSecrets(skeys ...[]byte) SecretKey {
+	return func(id metainfo.Hash) bool {
+		for _, sk := range skeys {
+			if bytes.Equal(sk[:], id[:]) {
+				return true
+			}
+		}
+		return false
+	}
+}
 
 const (
 	maxPadLen = 512
@@ -209,10 +221,10 @@ func newPadLen() int64 {
 type handshake struct {
 	conn   io.ReadWriter
 	s      [96]byte
-	initer bool          // Whether we're initiating or receiving.
-	skeys  SecretKeyIter // Skeys we'll accept if receiving.
-	skey   []byte        // Skey we're initiating with.
-	ia     []byte        // Initial payload. Only used by the initiator.
+	initer bool      // Whether we're initiating or receiving.
+	skeys  SecretKey // Skeys we'll accept if receiving.
+	skey   []byte    // Skey we're initiating with.
+	ia     []byte    // Initial payload. Only used by the initiator.
 	// Return the bit for the crypto method the receiver wants to use.
 	chooseMethod CryptoSelector
 	// Sent to the receiver.
@@ -413,7 +425,6 @@ func (h *handshake) initerSteps() (ret io.ReadWriter, selected CryptoMethod, err
 	case CryptoMethodRC4:
 		return readWriter{r, &cipherWriter{e, h.conn, nil}}, selected, nil
 	case CryptoMethodPlaintext:
-		ret = h.conn
 		return h.conn, selected, nil
 	default:
 		return nil, selected, fmt.Errorf("receiver chose unsupported method: %x", method)
@@ -430,23 +441,28 @@ func (h *handshake) receiverSteps() (ret io.ReadWriter, chosen CryptoMethod, err
 		return ret, chosen, err
 	}
 
-	var b [20]byte
+	var b metainfo.Hash
 	if _, err = io.ReadFull(h.conn, b[:]); err != nil {
 		return ret, chosen, err
 	}
 
-	err = ErrNoSecretKeyMatch
-	h.skeys(func(skey []byte) bool {
-		if bytes.Equal(xor(hash(req2, skey), hash(req3, h.s[:])), b[:]) {
-			h.skey = skey
-			err = nil
-			return false
-		}
-		return true
-	})
-	if err != nil {
-		return ret, chosen, err
+	allowed := h.skeys(b)
+	if !allowed || !bytes.Equal(xor(hash(req2, b[:]), hash(req3, h.s[:])), b[:]) {
+		log.Println("DOH", metainfo.Hash(b[:]).HexString())
+		return ret, chosen, ErrNoSecretKeyMatch
 	}
+	// h.skeys(func(skey []byte) bool {
+	// 	if bytes.Equal(xor(hash(req2, skey), hash(req3, h.s[:])), b[:]) {
+	// 		h.skey = skey
+	// 		err = nil
+	// 		return false
+	// 	}
+	// 	return true
+	// })
+	// if err != nil {
+	// 	return ret, chosen, err
+	// }
+
 	r := newCipherReader(newEncrypt(true, h.s[:], h.skey), h.conn)
 	var (
 		vc       [8]byte
@@ -459,7 +475,7 @@ func (h *handshake) receiverSteps() (ret io.ReadWriter, chosen CryptoMethod, err
 	}
 	cryptoProvidesCount.Add(strconv.FormatUint(uint64(provides), 16), 1)
 	chosen = h.chooseMethod(provides)
-	if _, err = io.CopyN(ioutil.Discard, r, int64(padLen)); err != nil {
+	if _, err = io.CopyN(io.Discard, r, int64(padLen)); err != nil {
 		return ret, chosen, err
 	}
 	var lenIA uint16
@@ -539,7 +555,7 @@ func InitiateHandshake(rw io.ReadWriter, skey []byte, initialPayload []byte, cry
 	return h.Do()
 }
 
-func ReceiveHandshake(rw io.ReadWriter, skeys SecretKeyIter, selectCrypto CryptoSelector) (ret io.ReadWriter, method CryptoMethod, err error) {
+func ReceiveHandshake(rw io.ReadWriter, skeys SecretKey, selectCrypto CryptoSelector) (ret io.ReadWriter, method CryptoMethod, err error) {
 	h := handshake{
 		conn:         rw,
 		initer:       false,
@@ -549,9 +565,9 @@ func ReceiveHandshake(rw io.ReadWriter, skeys SecretKeyIter, selectCrypto Crypto
 	return h.Do()
 }
 
-// A function that given a function, calls it with secret keys until it
-// returns false or exhausted.
-type SecretKeyIter func(callback func(skey []byte) (more bool))
+// A function that returns whether a specific info hash is allowed to
+// be used for encryption.
+type SecretKey func(id metainfo.Hash) bool
 
 func DefaultCryptoSelector(provided CryptoMethod) CryptoMethod {
 	// We prefer plaintext for performance reasons.

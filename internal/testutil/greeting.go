@@ -56,7 +56,7 @@ func RandomDataTorrent(dir string, n int64) (d *os.File, err error) {
 	return IOTorrent(dir, rand.Reader, n)
 }
 
-// RandomDataTorrent generates a torrent from random data.
+// RandomDataTorrent generates a torrent from the provided io.Reader
 func IOTorrent(dir string, src io.Reader, n int64) (d *os.File, err error) {
 	if d, err = os.CreateTemp(dir, "random.torrent.*.bin"); err != nil {
 		return d, err

@@ -17,6 +17,7 @@ import (
 
 	"github.com/anacrolix/generics"
 	"github.com/anacrolix/missinggo/v2"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/iplist"
@@ -349,6 +350,7 @@ func (s *Server) processPacket(ctx context.Context, b []byte, addr Addr) {
 func (s *Server) serve() error {
 	var b [0x10000]byte
 	for {
+		log.Println("READING SOCKET")
 		n, addr, err := s.socket.ReadFrom(b[:])
 		if err != nil {
 			if ignoreReadFromError(err) {
@@ -356,7 +358,9 @@ func (s *Server) serve() error {
 			}
 			return err
 		}
-		expvars.Add("packets read", 1)
+
+		log.Println("read", n)
+
 		if n == len(b) {
 			logonce.Stderr.Printf("received dht packet exceeds buffer size")
 			continue
@@ -519,7 +523,7 @@ func (s *Server) handleQuery(ctx context.Context, source Addr, raw []byte, m krp
 			return
 		}
 	}
-
+	log.Println("DERP DERP", spew.Sdump(m))
 	if pattern, fn = s.mux.Handler(raw, &m); fn == nil {
 		log.Println("unable to locate a handler for", pattern)
 		return

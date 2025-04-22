@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	stdsync "sync"
 	"sync/atomic"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/dht/krpc"
+	"github.com/james-lawrence/torrent/storage"
 
 	"github.com/anacrolix/missinggo/v2"
 	"github.com/anacrolix/missinggo/v2/slices"
@@ -232,7 +234,7 @@ func (cl *Client) WriteStatus(_w io.Writer) {
 // NewClient create a new client from the provided config. nil is acceptable.
 func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 	if cfg == nil {
-		cfg = NewDefaultClientConfig(ClientConfigBootstrapGlobal)
+		cfg = NewDefaultClientConfig(storage.NewFile(filepath.Join(".", "torrents")), ClientConfigBootstrapGlobal)
 	}
 
 	if cfg.HTTPProxy == nil && cfg.ProxyURL != "" {
@@ -631,27 +633,12 @@ func (cl *Client) incomingPeerPort() int {
 }
 
 // Calls f with any secret keys.
-func (cl *Client) forSkeys(f func([]byte) bool) {
+func (cl *Client) forSkeys(id metainfo.Hash) bool {
 	cl.lock()
 	defer cl.unlock()
-	if false { // Emulate the bug from #114
-		var firstIh metainfo.Hash
-		for ih := range cl.torrents {
-			firstIh = ih
-			break
-		}
-		for range cl.torrents {
-			if !f(firstIh[:]) {
-				break
-			}
-		}
-		return
-	}
-	for ih := range cl.torrents {
-		if !f(ih[:]) {
-			break
-		}
-	}
+
+	_, ok := cl.torrents[id]
+	return ok
 }
 
 func (cl *Client) initiateHandshakes(c *connection, t *torrent) (err error) {
@@ -693,18 +680,21 @@ func (cl *Client) receiveHandshakes(c *connection) (t *torrent, err error) {
 	var (
 		buffered io.ReadWriter
 	)
-
+	log.Println("DERP DERP: receive handshakes")
 	encryption := pp.EncryptionHandshake{
 		Keys:           cl.forSkeys,
 		CryptoSelector: cl.config.CryptoSelector,
 	}
 
 	if _, buffered, err = encryption.Incoming(c.rw()); err != nil && cl.config.HeaderObfuscationPolicy.RequirePreferred {
+		log.Println("checkpoint")
 		return t, errors.Wrap(err, "connection does not have the required header obfuscation")
 	} else if err != nil && buffered == nil {
+		log.Println("checkpoint")
 		cl.config.debug().Println("encryption handshake failed", err)
 		return nil, err
 	} else if err != nil {
+		log.Println("checkpoint", err)
 		cl.config.debug().Println("encryption handshake failed", err)
 	}
 
@@ -726,9 +716,11 @@ func (cl *Client) receiveHandshakes(c *connection) (t *torrent, err error) {
 	cl.unlock()
 
 	if t == nil {
+		log.Println("NEEEEEEWP 0")
 		return nil, errors.New("received handshake for an unavailable torrent")
 	}
 
+	log.Println("NEEEEEEWP 1")
 	return t, nil
 }
 
