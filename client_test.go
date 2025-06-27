@@ -428,7 +428,6 @@ func TestClientSeedWithoutAdding(t *testing.T) {
 // Check that after completing leeching, a leecher transitions to a seeding
 // correctly. Connected in a chain like so: Seeder <-> Leecher <-> LeecherLeecher.
 func TestSeedAfterDownloading(t *testing.T) {
-	t.SkipNow()
 	ctx, _done := testx.Context(t)
 	defer _done()
 
@@ -658,7 +657,6 @@ func TestResponsive(t *testing.T) {
 }
 
 func TestTorrentDroppedDuringResponsiveRead(t *testing.T) {
-	t.SkipNow()
 	seederDataDir := t.TempDir()
 	mi := testutil.GreetingTestTorrent(seederDataDir)
 

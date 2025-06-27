@@ -295,7 +295,7 @@ func (cn *connection) PeerHasPiece(piece uint64) bool {
 
 // Writes a message into the write buffer.
 func (cn *connection) Post(msg pp.Message) (n int, err error) {
-	cn.cfg.debug().Output(2, fmt.Sprintf("c(%p) seed(%t) Post initiated: %s -> %s\n", cn, cn.t.seeding(), cn.conn.RemoteAddr(), msg.Type))
+	cn.cfg.debug().Output(2, fmt.Sprintf("c(%p) seed(%t) Post initiated: %s\n", cn, cn.t.seeding(), msg.Type))
 
 	encoded, err := msg.MarshalBinary()
 	if err != nil {

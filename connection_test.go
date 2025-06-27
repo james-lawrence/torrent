@@ -166,7 +166,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		msg, err := sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
 		torrenttest.RequireMessageType(t, pp.Extended, msg.Type)
-		require.Equal(t, 132, len(msg.ExtendedPayload))
+		require.Equal(t, 131, len(msg.ExtendedPayload))
 
 		msg, err = sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
@@ -216,10 +216,8 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, torrenttest.FilterMessageType(pp.Request, received...), 8)
 		require.Len(t, torrenttest.FilterMessageType(pp.Interested, received...), 1)
-		require.Len(t, torrenttest.FilterMessageType(pp.Unchoke, received...), 1)
-		require.Len(t, torrenttest.FilterMessageType(pp.Choke, received...), 1)
 		require.Len(t, torrenttest.FilterMessageType(pp.NotInterested, received...), 1)
-		require.Len(t, received, 12)
+		require.Len(t, received, 10)
 	})
 
 	t.Run("plaintext fastex sequence", func(t *testing.T) {
@@ -263,7 +261,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		msg, err := sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
 		torrenttest.RequireMessageType(t, pp.Extended, msg.Type)
-		require.Equal(t, 132, len(msg.ExtendedPayload))
+		require.Equal(t, 131, len(msg.ExtendedPayload))
 
 		// --------------------------------------- allow fast extension ----------------------------------------------
 		msg, err = sconn.ReadOne(ctx, d)
@@ -318,7 +316,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		require.Len(t, torrenttest.FilterMessageType(pp.Interested, received...), 1)
 		require.Len(t, torrenttest.FilterMessageType(pp.NotInterested, received...), 1)
 		require.GreaterOrEqual(t, len(received), 10)
-		require.LessOrEqual(t, len(received), 12)
+		require.LessOrEqual(t, len(received), 10)
 	})
 
 	t.Run("plaintext fastex + dht sequence", func(t *testing.T) {
@@ -362,7 +360,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		msg, err := sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
 		torrenttest.RequireMessageType(t, pp.Extended, msg.Type)
-		require.Equal(t, 132, len(msg.ExtendedPayload))
+		require.Equal(t, 131, len(msg.ExtendedPayload))
 
 		// --------------------------------------- allow fast extension ----------------------------------------------
 		msg, err = sconn.ReadOne(ctx, d)
