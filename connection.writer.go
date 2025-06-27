@@ -146,11 +146,11 @@ func connexfast(cn *connection, n cstate.T) cstate.T {
 
 			cn.sentHaves.AddRange(0, cn.t.chunks.pieces)
 
-			// for _, v := range cn.peerfastset.ToArray() {
-			// 	if _, err := cn.Post(pp.NewAllowedFast(v)); err != nil {
-			// 		return cstate.Failure(err)
-			// 	}
-			// }
+			for _, v := range cn.peerfastset.ToArray() {
+				if _, err := cn.Post(pp.NewAllowedFast(v)); err != nil {
+					return cstate.Failure(err)
+				}
+			}
 
 			return n
 		default:
