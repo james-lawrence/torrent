@@ -21,10 +21,6 @@ func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort int, upnpID
 	externalPort, err := d.AddPortMapping(proto, internalPort, internalPort, upnpID, 0)
 	if err != nil {
 		return _zero, errorsx.Wrapf(err, "error adding %s port mapping", proto)
-		// } else if externalPort != internalPort {
-		// 	cl.config.warn().Printf("external port %d does not match internal port %d in port mapping\n", externalPort, internalPort)
-		// } else {
-		// 	cl.config.debug().Printf("forwarded external %s port %d\n", proto, externalPort)
 	}
 
 	return netip.AddrPortFrom(netip.AddrFrom16([16]byte(ip.To16())), uint16(externalPort)), nil
@@ -42,6 +38,7 @@ func (cl *Client) forwardPort() {
 	}
 
 	for addrport := range addrs {
+		cl.dynamicaddr.Store(&addrport)
 		log.Println("dynamic ip update", cl.LocalPort(), "->", addrport)
 	}
 }

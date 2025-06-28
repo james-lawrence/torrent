@@ -38,9 +38,10 @@ type Client struct {
 	// 64-bit alignment of fields. See #262.
 	stats ConnStats
 
-	_mu    *sync.RWMutex
-	event  sync.Cond
-	closed chan struct{}
+	dynamicaddr atomic.Pointer[netip.AddrPort]
+	_mu         *sync.RWMutex
+	event       sync.Cond
+	closed      chan struct{}
 
 	config *ClientConfig
 
@@ -155,6 +156,10 @@ func (cl *Client) PeerID() int160.T {
 // this is method is odd given a client can be attached to multiple ports on different
 // listeners.
 func (cl *Client) LocalPort16() (port uint16) {
+	if port = langx.Autoderef(cl.dynamicaddr.Load()).Port(); port > 0 {
+		return port
+	}
+
 	cl.eachListener(func(l sockets.Socket) bool {
 		addr, err := netx.AddrPort(l.Addr())
 		if err != nil {
@@ -551,7 +556,7 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, addr netip
 		err error
 	)
 
-	cl.config.info().Println("opening connection", t.md.ID)
+	cl.config.debug().Println("opening connection", t.md.ID, cl.dynamicaddr.Load(), "->", addr)
 
 	if err = cl.config.dialRateLimiter.Wait(ctx); err != nil {
 		return errorsx.Wrap(err, "dial rate limit failed")
@@ -735,7 +740,7 @@ func (cl *Client) AddDHTNodes(nodes []string) {
 }
 
 func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr netip.AddrPort) (c *connection) {
-	c = newConnection(cl.config, nc, outgoing, remoteAddr, &cl.config.extensionbits, cl.LocalPort16(), cl.dhtPort())
+	c = newConnection(cl.config, nc, outgoing, remoteAddr, &cl.config.extensionbits, cl.LocalPort16(), &cl.dynamicaddr)
 	c.setRW(connStatsReadWriter{nc, c})
 	c.r = &rateLimitedReader{
 		l: cl.config.DownloadRateLimiter,

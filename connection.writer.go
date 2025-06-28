@@ -86,7 +86,9 @@ func connexinit(cn *connection, n cstate.T) cstate.T {
 			return n
 		}
 
-		defer log.Println("extended handshake extension completed", cn.localport, cn.dhtport)
+		dynamicport := langx.DefaultIfZero(cn.localport, langx.Autoderef(cn.dynamicaddr.Load()).Port())
+		defer log.Println("extended handshake extension completed", cn.localport, cn.dynamicaddr)
+
 		// TODO: We can figured the port and address out specific to the socket
 		// used.
 		msg := pp.ExtendedHandshakeMessage{
@@ -95,7 +97,7 @@ func connexinit(cn *connection, n cstate.T) cstate.T {
 			Reqq:         cn.cfg.maximumOutstandingRequests,
 			YourIp:       pp.CompactIp(cn.remoteAddr.Addr().AsSlice()),
 			Encryption:   cn.cfg.HeaderObfuscationPolicy.Preferred || cn.cfg.HeaderObfuscationPolicy.RequirePreferred,
-			Port:         cn.localport,
+			Port:         int(dynamicport),
 			MetadataSize: cn.t.metadatalen(),
 			Ipv4:         pp.CompactIp(cn.cfg.publicIP4.To4()),
 			Ipv6:         cn.cfg.publicIP6.To16(),
@@ -166,16 +168,15 @@ func connexfast(cn *connection, n cstate.T) cstate.T {
 
 func connexdht(cn *connection, n cstate.T) cstate.T {
 	return cstate.Fn(func(context.Context, *cstate.Shared) cstate.T {
-		if !(cn.extensions.Supported(cn.PeerExtensionBytes, pp.ExtensionBitDHT) && cn.dhtport > 0) {
-			cn.cfg.debug().Printf("posting dht not supported %t - %d\n", cn.extensions.Supported(cn.PeerExtensionBytes, pp.ExtensionBitDHT), cn.dhtport)
+		dynamicaddr := langx.Autoderef(cn.dynamicaddr.Load())
+		if !(cn.extensions.Supported(cn.PeerExtensionBytes, pp.ExtensionBitDHT) && dynamicaddr.Port() > 0) {
+			cn.cfg.debug().Printf("posting dht not supported %t - %s\n", cn.extensions.Supported(cn.PeerExtensionBytes, pp.ExtensionBitDHT), dynamicaddr)
 			return n
 		}
 
 		defer log.Println("dht extension completed")
 
-		// TODO: this seems incorrect. we're posting identically the same message
-		// as the localport below.
-		_, err := cn.Post(pp.NewPort(uint16(cn.dhtport)))
+		_, err := cn.Post(pp.NewPort(dynamicaddr.Port()))
 		if err != nil {
 			return cstate.Failure(err)
 		}

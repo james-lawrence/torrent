@@ -45,7 +45,7 @@ const (
 	peerSourcePex             = "X"
 )
 
-func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.AddrPort, extensions *pp.ExtensionBits, localport uint16, dhtport uint16) (c *connection) {
+func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.AddrPort, extensions *pp.ExtensionBits, localport uint16, dynamicaddr *atomic.Pointer[netip.AddrPort]) (c *connection) {
 	_mu := &sync.RWMutex{}
 
 	ts := time.Now()
@@ -60,8 +60,8 @@ func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.A
 		PendingMaxRequests:      cfg.maximumOutstandingRequests,
 		writeBuffer:             new(bytes.Buffer),
 		remoteAddr:              remote,
-		localport:               int(localport),
-		dhtport:                 dhtport,
+		localport:               localport,
+		dynamicaddr:             dynamicaddr,
 		touched:                 roaring.NewBitmap(),
 		peerfastset:             roaring.NewBitmap(),
 		fastset:                 roaring.NewBitmap(),
@@ -86,8 +86,8 @@ type connection struct {
 	// First to ensure 64-bit alignment for atomics. See #262.
 	stats ConnStats
 
-	localport int
-	dhtport   uint16
+	localport   uint16
+	dynamicaddr *atomic.Pointer[netip.AddrPort]
 
 	t *torrent
 
