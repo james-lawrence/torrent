@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/cryptox"
+	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/md5x"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/internal/testx"
@@ -70,6 +72,8 @@ func genconnection(t *testing.T, seed string, n uint64, pbits, sbits pp.Extensio
 	var (
 		__pconn chan net.Conn = make(chan net.Conn, 1)
 		_perr   error
+		asnetip atomic.Pointer[netip.AddrPort]
+		apnetip atomic.Pointer[netip.AddrPort]
 	)
 
 	l, err := utp.Listen(":0")
@@ -100,17 +104,17 @@ func genconnection(t *testing.T, seed string, n uint64, pbits, sbits pp.Extensio
 	require.NoError(t, _perr)
 	require.NotNil(t, _pconn)
 
-	snetip := testx.Must(netx.AddrPort(_pconn.RemoteAddr()))(t)
-	pnetip := testx.Must(netx.AddrPort(_pconn.LocalAddr()))(t)
+	asnetip.Store(langx.Autoptr(testx.Must(netx.AddrPort(_pconn.RemoteAddr()))(t)))
+	apnetip.Store(langx.Autoptr(testx.Must(netx.AddrPort(_pconn.LocalAddr()))(t)))
 
-	pconn := newConnection(cfgl, _pconn, true, snetip, &pbits, pnetip.Port(), pnetip.Port())
+	pconn := newConnection(cfgl, _pconn, true, *asnetip.Load(), &pbits, apnetip.Load().Port(), &apnetip)
 	pconn.PeerExtensionBytes = sbits
 	pconn.PeerID = int160.Random()
 	pconn.completedHandshake = time.Now()
 	pconn.t = newTorrent(pclient, meta)
 	pconn.t.chunks.fill(pconn.t.chunks.missing)
 
-	sconn := newConnection(cfgs, c, false, pnetip, &sbits, snetip.Port(), snetip.Port())
+	sconn := newConnection(cfgs, c, false, *apnetip.Load(), &sbits, asnetip.Load().Port(), &asnetip)
 	sconn.PeerExtensionBytes = pbits
 	sconn.PeerID = int160.Random()
 	sconn.completedHandshake = time.Now()

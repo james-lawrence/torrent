@@ -1027,7 +1027,11 @@ func (t *torrent) needData() bool {
 	default:
 	}
 
-	return true
+	if !t.haveInfo() {
+		return true
+	}
+
+	return t.chunks.Incomplete()
 }
 
 // Don't call this before the info is available.
@@ -1112,7 +1116,7 @@ func (t *torrent) seeding() bool {
 		return false
 	}
 
-	if t.needData() {
+	if t.chunks.Incomplete() {
 		return false
 	}
 
