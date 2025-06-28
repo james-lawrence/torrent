@@ -457,7 +457,7 @@ func (t _connwriterCommitBitmap) Update(ctx context.Context, _ *cstate.Shared) c
 	return t.next
 }
 func connwriteridle(ws *writerstate) cstate.T {
-	return cstate.Idle(connwriteractive(ws), ws.keepAliveTimeout/2, ws.connection.respond, ws.connection.t.chunks.cond)
+	return connwriterBitmap(cstate.Idle(connwriteractive(ws), ws.keepAliveTimeout/2, ws.connection.respond, ws.connection.t.chunks.cond), ws)
 }
 
 func connwriteractive(ws *writerstate) cstate.T {
