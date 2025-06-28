@@ -1116,6 +1116,10 @@ func (t *torrent) seeding() bool {
 		return false
 	}
 
+	if !t.haveInfo() {
+		return false
+	}
+
 	if t.chunks.Incomplete() {
 		return false
 	}
