@@ -1,7 +1,6 @@
 package bitmapx
 
 import (
-	"log"
 	"math/rand/v2"
 
 	"github.com/RoaringBitmap/roaring/v2"
@@ -15,7 +14,7 @@ func Bools(n int, m *roaring.Bitmap) (bf []bool) {
 	for i := m.Iterator(); i.HasNext() && int(i.PeekNext()) < len(bf); {
 		bf[i.Next()] = true
 	}
-	log.Println("WAAAAAAT", len(bf))
+
 	return bf
 }
 

@@ -154,7 +154,7 @@ func Run(ctx context.Context, s T, l logger) error {
 		case <-ctx.Done():
 			return context.Cause(ctx)
 		default:
-			l.Printf("running %T %s\n", s, s)
+			l.Printf("%T %s\n", s, s)
 			s = s.Update(ctx, &m)
 		}
 

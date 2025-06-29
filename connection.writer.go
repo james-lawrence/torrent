@@ -109,6 +109,8 @@ func connexinit(cn *connection, n cstate.T) cstate.T {
 			Ipv6:         cn.cfg.publicIP6.To16(),
 		}
 
+		// cn.cfg.debug().Printf("c(%p) seed(%t) extended handshake: %s\n", cn, cn.t.seeding(), spew.Sdump(msg))
+
 		encoded, err := bencode.Marshal(msg)
 		if err != nil {
 			return cstate.Failure(errorsx.Wrapf(err, "unable to encode message %T", msg))

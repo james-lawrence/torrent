@@ -493,7 +493,7 @@ func (cn *connection) Have(piece uint64) (n int, err error) {
 func (cn *connection) PostBitfield() (n int, err error) {
 	dup := cn.t.chunks.CompletedBitmap()
 
-	log.Printf("c(%p) seed(%t) calculated bitfield: b(%d)/p(%d)\n", cn, cn.t.seeding(), dup.GetCardinality(), cn.t.chunks.pieces)
+	cn.cfg.debug().Printf("c(%p) seed(%t) calculated bitfield: b(%d)/p(%d)\n", cn, cn.t.seeding(), dup.GetCardinality(), cn.t.chunks.pieces)
 	n, err = cn.Post(pp.NewBitField(cn.t.chunks.pieces, dup))
 	if err != nil {
 		return n, err
@@ -773,7 +773,7 @@ func (cn *connection) onReadRequest(r request) error {
 func (cn *connection) Flush() (int, error) {
 	// olen := cn.writeBuffer.Len()
 	// defer func() {
-	// 	log.Printf("c(%p) seed(%t) -------------------------------- flushed %d --------------------------------\n", cn, cn.t.seeding(), cn.writeBuffer.Len())
+	// 	log.Printf("c(%p) seed(%t) -------------------------------- flushed %d --------------------------------\n", cn, cn.t.seeding(), olen)
 	// }()
 
 	cn.cmu().Lock()

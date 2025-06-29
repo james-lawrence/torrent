@@ -10,9 +10,6 @@ import (
 type rateLimitedReader struct {
 	l *rate.Limiter
 	r io.Reader
-
-	// // This is the time of the last Read's reservation.
-	// lastRead time.Time
 }
 
 func (t *rateLimitedReader) Read(b []byte) (n int, err error) {
