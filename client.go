@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,6 +50,7 @@ type Client struct {
 	conns      []sockets.Socket
 	dhtServers []*dht.Server
 
+	dialing  *netx.RacingDialer
 	torrents *memoryseeding
 }
 
@@ -223,15 +225,15 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 		closed:   make(chan struct{}),
 		torrents: torrentCache(cfg.defaultMetadata, NewBitmapCache(cfg.defaultCacheDirectory)),
 		_mu:      &sync.RWMutex{},
+		dialing:  netx.NewRacing(uint16(runtime.NumCPU())),
 	}
+	cl.event.L = cl.locker()
 
 	defer func() {
 		if err != nil {
 			cl.Close()
 		}
 	}()
-
-	cl.event.L = cl.locker()
 
 	if cfg.localID, err = int160.RandomPrefixed(stringsx.Default(cfg.PeerID, cfg.Bep20)); err != nil {
 		return nil, errorsx.Wrap(err, "error generating peer id")
@@ -403,93 +405,9 @@ func (cl *Client) incomingConnection(nc net.Conn) {
 	cl.runReceivedConn(c)
 }
 
-func reducedDialTimeout(minDialTimeout, max time.Duration, halfOpenLimit int, pendingPeers int) (ret time.Duration) {
-	ret = max / time.Duration((pendingPeers+halfOpenLimit)/halfOpenLimit)
-	if ret < minDialTimeout {
-		ret = minDialTimeout
-	}
-	return
-}
-
-// Returns a connection over UTP or TCP, whichever is first to connect.
-func (cl *Client) dialFirst(ctx context.Context, addr string) (conn net.Conn, err error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	cl.lock()
-	conns := make([]sockets.Socket, len(cl.conns))
-	copy(conns, cl.conns)
-	cl.unlock()
-
-	if len(conns) == 0 {
-		return nil, errorsx.Errorf("unable to dial due to no servers")
-	}
-
-	for _, s := range conns {
-		if conn, err = cl.dial(ctx, s, addr); err == nil {
-			return conn, nil
-		}
-	}
-
-	return nil, err
-
-	// type dialResult struct {
-	// 	Conn net.Conn
-	// 	cause error
-	// }
-	// resCh := make(chan dialResult, left)
-	// for _, cs := range conns {
-	// 	go func(cs socket) {
-	// 		conn, err := cl.dial(ctx, cs, addr)
-	// 		log.Printf("dial result: %T - %s\n", conn, err)
-	// 		resCh <- dialResult{
-	// 			Conn:  conn,
-	// 			cause: err,
-	// 		}
-	// 	}(cs)
-	// }
-
-	// // Wait for a successful connection.
-	// for ; left > 0 && res.Conn == nil; left-- {
-	// 	res = <-resCh
-	// }
-
-	// // There are still incompleted dials.
-	// if left > 0 {
-	// 	go func() {
-	// 		for ; left > 0; left-- {
-	// 			conn := (<-resCh).Conn
-	// 			if conn != nil {
-	// 				conn.Close()
-	// 			}
-	// 		}
-	// 	}()
-	// }
-
-	// return res.Conn, res.cause
-}
-
-func (cl *Client) dial(ctx context.Context, d dialer, addr string) (c net.Conn, err error) {
-	// Try to avoid committing to a dial if the context is complete as it's difficult to determine
-	// which dial errors allow us to forget the connection tracking entry handle.
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-
-	if c, err = d.Dial(ctx, addr); c == nil || err != nil {
-		return nil, errorsx.Compact(err, ctx.Err(), errorsx.New("net.Conn missing (nil)"))
-	}
-
-	// This is a bit optimistic, but it looks non-trivial to thread this through the proxy code. Set
-	// it now in case we close the connection forthwith.
-	if tc, ok := c.(*net.TCPConn); ok {
-		tc.SetLinger(0)
-	}
-
-	return closeWrapper{
-		Conn:   c,
-		closer: c.Close,
-	}, nil
+func reducedDialTimeout(minDialTimeout, maximum time.Duration, halfOpenLimit int, pendingPeers int) (ret time.Duration) {
+	ret = maximum / time.Duration((pendingPeers+halfOpenLimit)/halfOpenLimit)
+	return max(ret, minDialTimeout)
 }
 
 // Returns nil connection and nil error if no connection could be established
@@ -499,17 +417,19 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 		nc net.Conn
 	)
 
-	dialCtx, dcancel := context.WithTimeout(ctx, t.dialTimeout())
+	dctx, dcancel := context.WithTimeout(ctx, t.dialTimeout())
 	defer dcancel()
 
-	if nc, err = cl.dialFirst(dialCtx, addr.String()); err != nil {
+	if nc, err = cl.dialing.Dial(dctx, addr.String()); err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err != nil {
-			nc.Close()
-		}
-	}()
+	defer nc.Close()
+
+	// This is a bit optimistic, but it looks non-trivial to thread this through the proxy code. Set
+	// it now in case we close the connection forthwith.
+	if tc, ok := nc.(*net.TCPConn); ok {
+		tc.SetLinger(0)
+	}
 
 	dl := time.Now().Add(cl.config.HandshakesTimeout)
 	if err = nc.SetDeadline(dl); err != nil {
@@ -699,13 +619,6 @@ func (cl *Client) runReceivedConn(c *connection) {
 	if err := RunHandshookConn(c, t); err != nil {
 		log.Printf("received connection failed %T - %v", err, err)
 	}
-}
-
-func (cl *Client) dhtPort() (ret uint16) {
-	cl.eachDhtServer(func(s *dht.Server) {
-		ret = uint16(errorsx.Zero(netx.NetPort(s.Addr())))
-	})
-	return
 }
 
 // Handle a file-like handle to some torrent data resource.

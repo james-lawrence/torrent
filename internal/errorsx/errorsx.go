@@ -33,25 +33,23 @@ func Log(err error) {
 	}
 }
 
+// log the error and return it.
+// useful for inline printing of errors
+// without needing interrupting the flow
+// of code.
+func LogErr(err error) error {
+	if cause := log.Output(2, fmt.Sprintln(err)); cause != nil {
+		log.Println(cause)
+	}
+	return err
+}
+
 func Must[T any](v T, err error) T {
 	if err == nil {
 		return v
 	}
 
 	panic(err)
-}
-
-// panic if zero value.
-func PanicZero[T comparable](v T) T {
-	var (
-		x T
-	)
-
-	if v == x {
-		panic("zero value detected")
-	}
-
-	return v
 }
 
 // Compact returns the first error in the set, if any.
