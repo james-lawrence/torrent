@@ -429,13 +429,16 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 		return nil, errorsx.Errorf("unable to dial due to no servers")
 	}
 
+	cl.config.debug().Println("dialing initiated", t.md.ID, cl.dynamicaddr.Load(), "->", addr)
 	dctx, dcancel := context.WithTimeout(ctx, t.dialTimeout())
 	defer dcancel()
 
 	if nc, err = cl.dialing.Dial(dctx, addr.String(), conns...); err != nil {
+		cl.config.debug().Println("dialing failed", t.md.ID, cl.dynamicaddr.Load(), "->", addr, err)
 		return nil, err
 	}
 	defer nc.Close()
+	cl.config.debug().Println("dialing completed", t.md.ID, cl.dynamicaddr.Load(), "->", addr)
 
 	// This is a bit optimistic, but it looks non-trivial to thread this through the proxy code. Set
 	// it now in case we close the connection forthwith.
@@ -487,8 +490,6 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, addr netip
 		c   *connection
 		err error
 	)
-
-	cl.config.debug().Println("opening connection", t.md.ID, cl.dynamicaddr.Load(), "->", addr)
 
 	if err = cl.config.dialRateLimiter.Wait(ctx); err != nil {
 		return errorsx.Wrap(err, "dial rate limit failed")
