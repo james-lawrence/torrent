@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"sync/atomic"
+	"time"
 
 	"github.com/james-lawrence/torrent/internal/asynccompute"
 	"github.com/james-lawrence/torrent/internal/atomicx"
@@ -25,7 +26,10 @@ func NewRacing(n uint16) *RacingDialer {
 			default:
 			}
 
-			c, err := w.network.Dial(ctx, w.address)
+			dctx, done := context.WithTimeout(ctx, w.timeout)
+			defer done()
+
+			c, err := w.network.Dial(dctx, w.address)
 			if err != nil {
 				w.failure.CompareAndSwap(nil, langx.Autoptr(err))
 				return nil
@@ -44,9 +48,10 @@ type DialableNetwork interface {
 	Dial(ctx context.Context, addr string) (net.Conn, error)
 }
 
-func initRacingDial(address string, done context.CancelCauseFunc) racingdialworkload {
+func initRacingDial(address string, d time.Duration, done context.CancelCauseFunc) racingdialworkload {
 	return racingdialworkload{
 		address: address,
+		timeout: d,
 		fastest: atomicx.Pointer(net.Conn(nil)),
 		failure: atomicx.Pointer(error(nil)),
 		done:    done,
@@ -56,6 +61,7 @@ func initRacingDial(address string, done context.CancelCauseFunc) racingdialwork
 type racingdialworkload struct {
 	network DialableNetwork
 	address string
+	timeout time.Duration
 	done    context.CancelCauseFunc
 	failure *atomic.Pointer[error]
 	fastest *atomic.Pointer[net.Conn]
@@ -65,11 +71,11 @@ type RacingDialer struct {
 	arena *asynccompute.Pool[racingdialworkload]
 }
 
-func (t RacingDialer) Dial(ctx context.Context, address string, networks ...DialableNetwork) (net.Conn, error) {
+func (t RacingDialer) Dial(ctx context.Context, timeout time.Duration, address string, networks ...DialableNetwork) (net.Conn, error) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
-	w := initRacingDial(address, cancel)
+	w := initRacingDial(address, timeout, cancel)
 
 	for _, n := range networks {
 		dup := w
@@ -82,11 +88,12 @@ func (t RacingDialer) Dial(ctx context.Context, address string, networks ...Dial
 
 	<-ctx.Done()
 
-	fastest := w.fastest.Load()
+	fastest := langx.Autoderef(w.fastest.Load())
 	failure := langx.Autoderef(w.failure.Load())
-	if fastest != nil {
-		failure = errorsx.Ignore(failure, context.Canceled)
+
+	if fastest == nil {
+		return nil, errorsx.Compact(failure, context.Cause(ctx))
 	}
 
-	return *w.fastest.Load(), errorsx.Compact(failure, context.Cause(ctx))
+	return fastest, errorsx.Ignore(errorsx.Compact(failure, context.Cause(ctx)), context.Canceled)
 }

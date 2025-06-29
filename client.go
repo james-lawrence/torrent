@@ -430,10 +430,7 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 	}
 
 	cl.config.debug().Println("dialing initiated", t.md.ID, cl.dynamicaddr.Load(), "->", addr)
-	dctx, dcancel := context.WithTimeout(ctx, t.dialTimeout())
-	defer dcancel()
-
-	if nc, err = cl.dialing.Dial(dctx, addr.String(), conns...); err != nil {
+	if nc, err = cl.dialing.Dial(ctx, t.dialTimeout(), addr.String(), conns...); err != nil {
 		cl.config.debug().Println("dialing failed", t.md.ID, cl.dynamicaddr.Load(), "->", addr, err)
 		return nil, err
 	}
