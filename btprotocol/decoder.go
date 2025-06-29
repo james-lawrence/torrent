@@ -20,7 +20,7 @@ func NewDecoder(i io.Reader, p *sync.Pool) *Decoder {
 }
 
 type Decoder struct {
-	R         io.Reader
+	R         *bufio.Reader
 	Pool      *sync.Pool
 	MaxLength Integer // TODO: Should this include the length header or not?
 }

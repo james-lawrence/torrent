@@ -1,7 +1,6 @@
 package torrent
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -21,8 +20,6 @@ import (
 	"github.com/james-lawrence/torrent/dht/krpc"
 	"github.com/james-lawrence/torrent/sockets"
 	"github.com/james-lawrence/torrent/storage"
-
-	"github.com/davecgh/go-spew/spew"
 
 	pp "github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/internal/errorsx"
@@ -184,31 +181,6 @@ func (cl *Client) LocalPort() (port int) {
 	return int(cl.LocalPort16())
 }
 
-func writeDhtServerStatus(w io.Writer, s *dht.Server) {
-	dhtStats := s.Stats()
-	fmt.Fprintf(w, "\t# Nodes: %d (%d good, %d banned)\n", dhtStats.Nodes, dhtStats.GoodNodes, dhtStats.BadNodes)
-	fmt.Fprintf(w, "\tServer ID: %x\n", s.ID())
-	fmt.Fprintf(w, "\tAnnounces: %d\n", dhtStats.SuccessfulOutboundAnnouncePeerQueries)
-	fmt.Fprintf(w, "\tOutstanding transactions: %d\n", dhtStats.OutstandingTransactions)
-}
-
-// WriteStatus writes out a human readable status of the client, such as for writing to a
-// HTTP status page.
-func (cl *Client) WriteStatus(_w io.Writer) {
-	cl.rLock()
-	defer cl.rUnlock()
-	w := bufio.NewWriter(_w)
-	defer w.Flush()
-	fmt.Fprintf(w, "Listen port: %d\n", cl.LocalPort())
-	fmt.Fprintf(w, "Peer ID: %+q\n", cl.PeerID())
-	fmt.Fprintf(w, "Announce key: %x\n", -1) // removed the method from the client didnt belong here.
-	cl.eachDhtServer(func(s *dht.Server) {
-		fmt.Fprintf(w, "%s DHT server at %s:\n", s.Addr().Network(), s.Addr().String())
-		writeDhtServerStatus(w, s)
-	})
-	spew.Fdump(w, &cl.stats)
-}
-
 // NewClient create a new client from the provided config. nil is acceptable.
 func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 	if cfg == nil {
@@ -225,7 +197,7 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 		closed:   make(chan struct{}),
 		torrents: NewCache(cfg.defaultMetadata, NewBitmapCache(cfg.defaultCacheDirectory)),
 		_mu:      &sync.RWMutex{},
-		dialing:  netx.NewRacing(uint16(runtime.NumCPU() * 128)),
+		dialing:  netx.NewRacing(uint16(runtime.NumCPU() * 4)), // four concurrent dials per cpu seems a reasonable starting point.
 	}
 	cl.event.L = cl.locker()
 
@@ -429,18 +401,23 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 		return nil, errorsx.Errorf("unable to dial due to no servers")
 	}
 
-	cl.config.debug().Println("dialing initiated", t.md.ID, cl.dynamicaddr.Load(), "->", addr)
 	if nc, err = cl.dialing.Dial(ctx, t.dialTimeout(), addr.String(), conns...); err != nil {
 		cl.config.debug().Println("dialing failed", t.md.ID, cl.dynamicaddr.Load(), "->", addr, err)
 		return nil, err
 	}
-	defer nc.Close()
+
 	cl.config.debug().Println("dialing completed", t.md.ID, cl.dynamicaddr.Load(), "->", addr)
+	defer func() {
+		if err != nil {
+			errorsx.Log(nc.Close())
+		}
+	}()
 
 	// This is a bit optimistic, but it looks non-trivial to thread this through the proxy code. Set
 	// it now in case we close the connection forthwith.
 	if tc, ok := nc.(*net.TCPConn); ok {
 		tc.SetLinger(0)
+		tc.SetKeepAlive(true)
 	}
 
 	dl := time.Now().Add(cl.config.HandshakesTimeout)
@@ -627,7 +604,7 @@ func (cl *Client) runReceivedConn(c *connection) {
 	}
 
 	if err := RunHandshookConn(c, t); err != nil {
-		log.Printf("received connection failed %T - %v", err, err)
+		log.Printf("received connection failed %T - %v\n", err, err)
 	}
 }
 

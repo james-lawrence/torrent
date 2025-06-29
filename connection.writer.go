@@ -162,7 +162,7 @@ func connexfast(cn *connection, n cstate.T) cstate.T {
 
 			return n
 		default:
-			cn.cfg.debug().Printf("c(%p) seed(%t) posting  bitfield: %d/%d\n", cn, cn.t.seeding(), readable, cn.t.chunks.cmaximum)
+			cn.cfg.debug().Printf("c(%p) seed(%t) posting bitfield: %d/%d\n", cn, cn.t.seeding(), readable, cn.t.chunks.cmaximum)
 			if _, err := cn.PostBitfield(); err != nil {
 				return cstate.Failure(err)
 			}
@@ -175,14 +175,15 @@ func connexfast(cn *connection, n cstate.T) cstate.T {
 func connexdht(cn *connection, n cstate.T) cstate.T {
 	return cstate.Fn(func(context.Context, *cstate.Shared) cstate.T {
 		dynamicaddr := langx.Autoderef(cn.dynamicaddr.Load())
-		if !(cn.extensions.Supported(cn.PeerExtensionBytes, pp.ExtensionBitDHT) && dynamicaddr.Port() > 0) {
-			cn.cfg.debug().Printf("posting dht not supported %t - %s\n", cn.extensions.Supported(cn.PeerExtensionBytes, pp.ExtensionBitDHT), dynamicaddr)
+		port := langx.DefaultIfZero(cn.t.cln.LocalPort16(), dynamicaddr.Port())
+		if !(cn.extensions.Supported(cn.PeerExtensionBytes, pp.ExtensionBitDHT) && port > 0) {
+			cn.cfg.debug().Printf("posting dht not supported extension supported(%t) - port(%d)\n", cn.extensions.Supported(cn.PeerExtensionBytes, pp.ExtensionBitDHT), port)
 			return n
 		}
 
 		defer log.Println("dht extension completed")
 
-		_, err := cn.Post(pp.NewPort(dynamicaddr.Port()))
+		_, err := cn.Post(pp.NewPort(port))
 		if err != nil {
 			return cstate.Failure(err)
 		}
@@ -194,9 +195,17 @@ func connexdht(cn *connection, n cstate.T) cstate.T {
 // Routine that writes to the peer. Some of what to write is buffered by
 // activity elsewhere in the Client, and some is determined locally when the
 // connection is writable.
-func connwriterinit(ctx context.Context, cn *connection, to time.Duration) error {
+func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err error) {
 	cn.cfg.debug().Printf("c(%p) writer initiated\n", cn)
 	defer cn.cfg.debug().Printf("c(%p) writer completed\n", cn)
+	defer func() {
+		// if we're closed that means the connection was shutdown
+		// and since we're just returning that means someone else already detected
+		// and reported the issue.
+		if cn.closed.Load() {
+			err = nil
+		}
+	}()
 
 	ts := time.Now()
 	ws := &writerstate{
@@ -211,7 +220,7 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) error
 	defer cn.checkFailures()
 	defer cn.deleteAllRequests()
 
-	return cstate.Run(ctx, connWriterSyncChunks(ws), cn.cfg.debug())
+	return errorsx.LogErr(cstate.Run(ctx, connWriterSyncChunks(ws), cn.cfg.debug()))
 }
 
 type writerstate struct {
@@ -357,7 +366,7 @@ type _connwriterRequests struct {
 }
 
 func (t _connwriterRequests) determineInterest(msg func(pp.Message) bool) (available *roaring.Bitmap) {
-	defer t.cfg.debug().Printf("c(%p) seed(%t) interest completed\n", t, t.t.seeding())
+	defer t.cfg.debug().Printf("c(%p) seed(%t) interest completed\n", t.connection, t.t.seeding())
 
 	if t.t.seeding() {
 		if t.Unchoke(msg) {
@@ -396,13 +405,14 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 	// cn.cfg.debug().Printf("c(%p) seed(%t) make requests initated\n", cn, cn.t.seeding())
 	// defer cn.cfg.debug().Printf("c(%p) seed(%t) make requests completed\n", cn, cn.t.seeding())
 
-	if len(t.requests) > t.requestsLowWater || t.t.chunks.Cardinality(t.t.chunks.missing) == 0 {
+	if available.IsEmpty() || len(t.requests) > t.requestsLowWater || t.t.chunks.Cardinality(t.t.chunks.missing) == 0 {
+		t.cfg.debug().Printf("%p seed(%t) avail(%d) || req(%d > %d) || have all data - skipping buffer fill", t.connection, t.t.seeding(), available.GetCardinality(), len(t.requests), t.requestsLowWater)
 		return
 	}
 
 	filledBuffer := false
 
-	max := min(max(0, t.PeerMaxRequests-len(t.requests)), 64)
+	max := max(0, t.PeerMaxRequests-len(t.requests))
 	if reqs, err = t.t.chunks.Pop(max, available); errors.As(err, &empty{}) {
 		if len(reqs) == 0 && !t.blacklisted.IsEmpty() {
 			// clear the blacklist when we run out of work to do.
@@ -411,7 +421,7 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 			t.cmu().Unlock()
 			t.t.chunks.MergeInto(t.t.chunks.missing, t.t.chunks.failed)
 			t.t.chunks.FailuresReset()
-			t.cfg.debug().Printf("c(%p) seed(%t) available(%t) no work available", t, t.t.seeding(), !available.IsEmpty())
+			t.cfg.debug().Printf("c(%p) seed(%t) available(%t) no work available", t.connection, t.t.seeding(), !available.IsEmpty())
 			return
 		}
 	} else if err != nil {
@@ -419,11 +429,11 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 		return
 	}
 
-	t.cfg.debug().Printf("%p seed(%t) filling buffer with requests %d - %d -> %d actual %d", t, t.t.seeding(), t.PeerMaxRequests, len(t.requests), max, len(reqs))
+	t.cfg.debug().Printf("c(%p) seed(%t) avail(%d) filling buffer with requests %d - %d -> %d actual %d", t.connection, t.t.seeding(), available.GetCardinality(), t.PeerMaxRequests, len(t.requests), max, len(reqs))
 
 	for max, req = range reqs {
 		if filledBuffer = !t.request(req, msg); filledBuffer {
-			t.cfg.debug().Printf("c(%p) seed(%t) done filling after(%d)\n", t, t.t.seeding(), max)
+			t.cfg.debug().Printf("c(%p) seed(%t) done filling after(%d)\n", t.connection, t.t.seeding(), max)
 			break
 		}
 
@@ -433,7 +443,7 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 	// advance to just the unused chunks.
 	if max += 1; len(reqs) > max {
 		reqs = reqs[max:]
-		t.cfg.debug().Printf("c(%p) seed(%t) filled - cleaning up %d reqs(%d)\n", t, t.t.seeding(), max, len(reqs))
+		t.cfg.debug().Printf("c(%p) seed(%t) filled - cleaning up %d reqs(%d)\n", t.connection, t.t.seeding(), max, len(reqs))
 		// release any unused requests back to the queue.
 		t.t.chunks.Retry(reqs...)
 	}
@@ -474,15 +484,16 @@ func (t _connwriterRequests) Update(ctx context.Context, _ *cstate.Shared) (r cs
 		)
 	}
 
-	return connwriterKeepalive(ws)
+	return connwriterKeepalive(ws, connwriteridle(ws))
 }
 
-func connwriterKeepalive(ws *writerstate) cstate.T {
-	return _connwriterKeepalive{writerstate: ws}
+func connwriterKeepalive(ws *writerstate, n cstate.T) cstate.T {
+	return _connwriterKeepalive{writerstate: ws, next: n}
 }
 
 type _connwriterKeepalive struct {
 	*writerstate
+	next cstate.T
 }
 
 func (t _connwriterKeepalive) Update(ctx context.Context, _ *cstate.Shared) cstate.T {
@@ -493,14 +504,14 @@ func (t _connwriterKeepalive) Update(ctx context.Context, _ *cstate.Shared) csta
 	ws := t.writerstate
 
 	if time.Since(ws.lastwrite) < ws.keepAliveTimeout {
-		return connwriterFlush(connwriteridle(ws), ws)
+		return connwriterFlush(t.next, ws)
 	}
 
 	if _, err = ws.Post(pp.NewKeepAlive()); err != nil {
 		return cstate.Failure(errorsx.Wrap(err, "keepalive encoding failed"))
 	}
 
-	return connwriterFlush(connwriteridle(ws), ws)
+	return connwriterFlush(t.next, ws)
 }
 
 func connwriterFlush(n cstate.T, ws *writerstate) cstate.T {
@@ -543,13 +554,14 @@ type _connwriterCommitBitmap struct {
 
 func (t _connwriterCommitBitmap) Update(ctx context.Context, _ *cstate.Shared) cstate.T {
 	ws := t.writerstate
-	defer func() {
-		ws.nextbitmap = time.Now().Add(time.Minute)
-	}()
 
 	if ws.nextbitmap.After(time.Now()) {
 		return t.next
 	}
+
+	defer func() {
+		ws.nextbitmap = time.Now().Add(time.Minute)
+	}()
 
 	if err := ws.t.cln.torrents.Sync(int160.FromBytes(ws.t.md.ID.Bytes())); err != nil {
 		return cstate.Warning(t.next, errorsx.Wrap(err, "failed to sync bitmap to disk"))

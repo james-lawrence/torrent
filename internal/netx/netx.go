@@ -136,7 +136,7 @@ func AddrFromIP(ip net.IP) netip.Addr {
 	if ip == nil {
 		return netip.IPv6Unspecified().Unmap()
 	}
-	// log.Println("DERP DERP", ip, netip.Addr{}.IsValid())
+
 	return netip.AddrFrom16([16]byte(ip.To16())).Unmap()
 }
 

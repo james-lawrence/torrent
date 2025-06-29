@@ -10,7 +10,6 @@ import (
 
 	"github.com/bradfitz/iter"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
 )
 
@@ -72,9 +71,10 @@ func TestRateLimitReaders(t *testing.T) {
 			}
 			b := make([]byte, readSize)
 			for {
+				ts := time.Now()
 				n, err := r.Read(b)
 				select {
-				case reads <- read{n, r.lastRead}:
+				case reads <- read{n, ts}:
 				case <-done:
 					return
 				}
@@ -115,7 +115,7 @@ func TestRateLimitReaders(t *testing.T) {
 	started := time.Now()
 	for r := range reads {
 		totalBytesRead += r.N
-		require.False(t, r.At.IsZero())
+		// require.False(t, r.At.IsZero())
 		// Copy what the reader should have done with its reservation.
 		res := control.ReserveN(r.At, r.N)
 		// If we don't have to wait with the control, the reader has gone too

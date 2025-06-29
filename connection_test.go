@@ -27,6 +27,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/md5x"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/internal/testx"
+	"github.com/james-lawrence/torrent/internal/x/bitmapx"
 	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/james-lawrence/torrent/torrenttest"
 )
@@ -113,6 +114,7 @@ func genconnection(t *testing.T, seed string, n uint64, pbits, sbits pp.Extensio
 	pconn.completedHandshake = time.Now()
 	pconn.t = newTorrent(pclient, meta)
 	pconn.t.chunks.fill(pconn.t.chunks.missing)
+	require.EqualValues(t, pconn.t.chunks.pieces, 1)
 
 	sconn := newConnection(cfgs, c, false, *apnetip.Load(), &sbits, asnetip.Load().Port(), &asnetip)
 	sconn.PeerExtensionBytes = pbits
@@ -120,6 +122,7 @@ func genconnection(t *testing.T, seed string, n uint64, pbits, sbits pp.Extensio
 	sconn.completedHandshake = time.Now()
 	sconn.t = newTorrent(sclient, meta)
 	sconn.t.chunks.fill(sconn.t.chunks.completed)
+	require.EqualValues(t, sconn.t.chunks.pieces, 1)
 	require.True(t, sconn.t.seeding(), "seeding should be enabled")
 
 	t.Cleanup(pconn.Close)
@@ -222,6 +225,52 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		require.Len(t, torrenttest.FilterMessageType(pp.Interested, received...), 1)
 		require.Len(t, torrenttest.FilterMessageType(pp.NotInterested, received...), 1)
 		require.Len(t, received, 10)
+	})
+
+	t.Run("plaintext bep03 sequence with a bad bitfield", func(t *testing.T) {
+		pconn, sconn, _, meta := genconnection(
+			t,
+			t.Name(),
+			uint64(iolimit),
+			pp.NewExtensionBits(),
+			pp.NewExtensionBits(),
+		)
+		_ = meta
+
+		require.NotNil(t, pconn)
+		require.NotNil(t, sconn)
+		n, err := pp.Write(pconn)
+		require.NoError(t, err)
+		require.Equal(t, 0, n)
+
+		ctx, cancel := context.WithCancelCause(t.Context())
+		defer cancel(nil)
+		go func() {
+			pt := pconn.t
+			pconn.t = nil
+			cancel(RunHandshookConn(pconn, pt))
+		}()
+
+		d := pp.NewDecoder(sconn.conn, sconn.t.chunks.pool)
+		deliver := func(dst *connection, msg ...encoding.BinaryMarshaler) (int, error) {
+			n1, err := pp.Write(dst, msg...)
+			if err != nil {
+				return n1, err
+			}
+			n2, err := dst.Flush()
+			require.Equal(t, n1, n2)
+			return n2, err
+		}
+		msg, err := sconn.ReadOne(ctx, d)
+		require.NoError(t, err)
+		torrenttest.RequireMessageType(t, pp.Bitfield, msg.Type)
+
+		n, err = deliver(sconn, pp.NewBitField(72, bitmapx.Fill(72)), pp.NewUnchoked())
+		require.NoError(t, err)
+		require.Equal(t, 19, n)
+
+		<-ctx.Done()
+		require.ErrorContains(t, context.Cause(ctx), "received a bitfield larger than the number of pieces")
 	})
 
 	t.Run("plaintext fastex sequence", func(t *testing.T) {

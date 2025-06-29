@@ -206,9 +206,6 @@ func testClientTransfer(t *testing.T, ps testClientTransferParams) {
 
 	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
-	if ps.ExportClientStatus {
-		defer testutil.ExportStatusWriter(seeder, "s")()
-	}
 
 	md, err := torrent.NewFromMetaInfo(mi, storageopt)
 	require.NoError(t, err)
@@ -248,9 +245,7 @@ func testClientTransfer(t *testing.T, ps testClientTransferParams) {
 	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer leecher.Close()
-	if ps.ExportClientStatus {
-		defer testutil.ExportStatusWriter(leecher, "l")()
-	}
+
 	leecherTorrent, added, err := leecher.MaybeStart(
 		torrent.NewFromMetaInfo(
 			mi,
@@ -443,7 +438,6 @@ func TestSeedAfterDownloading(t *testing.T) {
 	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer seeder.Close()
-	defer testutil.ExportStatusWriter(seeder, "s")()
 
 	seederTorrent, ok, err := seeder.MaybeStart(torrent.NewFromMetaInfo(mi, torrent.OptionStorage(storage.NewFile(greetingTempDir))))
 	require.NoError(t, err)
@@ -461,7 +455,6 @@ func TestSeedAfterDownloading(t *testing.T) {
 	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(lcfg))
 	require.NoError(t, err)
 	defer leecher.Close()
-	defer testutil.ExportStatusWriter(leecher, "l")()
 
 	lleecherdir := t.TempDir()
 	llcfg := torrent.TestingConfig(
@@ -473,7 +466,6 @@ func TestSeedAfterDownloading(t *testing.T) {
 	leecherLeecher, _ := autobind.NewLoopback().Bind(torrent.NewClient(llcfg))
 	require.NoError(t, err)
 	defer leecherLeecher.Close()
-	defer testutil.ExportStatusWriter(leecherLeecher, "ll")()
 	leecherGreeting, ok, err := leecher.MaybeStart(torrent.NewFromMetaInfo(mi, torrent.OptionChunk(2)))
 	require.NoError(t, err)
 	assert.True(t, ok)
@@ -884,7 +876,6 @@ func testSeederLeecherPair(t *testing.T, seeder func(*torrent.ClientConfig), lee
 	server, err := autobind.NewLoopback().Bind(torrent.NewClient(scfg))
 	require.NoError(t, err)
 	defer server.Close()
-	defer testutil.ExportStatusWriter(server, "s")()
 
 	magnet1 := makeMagnet(t, server, datadir, "test1")
 	// Extra torrents are added to test the seeder having to match incoming obfuscated headers
@@ -907,7 +898,6 @@ func testSeederLeecherPair(t *testing.T, seeder func(*torrent.ClientConfig), lee
 	client, err := autobind.NewLoopback().Bind(torrent.NewClient(lcfg))
 	require.NoError(t, err)
 	defer client.Close()
-	defer testutil.ExportStatusWriter(client, "c")()
 
 	ts, err := torrent.NewFromMagnet(magnet1)
 	require.NoError(t, err)

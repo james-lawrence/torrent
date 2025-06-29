@@ -1354,7 +1354,7 @@ func (t *torrent) addConnection(c *connection) (err error) {
 		t.dropConnection(d)
 	}
 
-	metrics.Add("added connections", 1)
+	t.cln.config.debug().Printf("added connections c(%p)\n", c)
 	return nil
 }
 

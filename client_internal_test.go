@@ -155,7 +155,7 @@ func DownloadCancelTest(t *testing.T, sb Binder, lb Binder, ps TestDownloadCance
 	seeder, err := sb.Bind(NewClient(cfg))
 	require.NoError(t, err)
 	defer seeder.Close()
-	defer testutil.ExportStatusWriter(seeder, "s")()
+
 	tt, err := NewFromMetaInfo(mi)
 	require.NoError(t, err)
 	seederTorrent, _, err := seeder.Start(tt)
@@ -172,7 +172,6 @@ func DownloadCancelTest(t *testing.T, sb Binder, lb Binder, ps TestDownloadCance
 	leecher, err := lb.Bind(NewClient(lcfg))
 	require.NoError(t, err)
 	defer leecher.Close()
-	defer testutil.ExportStatusWriter(leecher, "l")()
 
 	t2, err := NewFromMetaInfo(mi, OptionChunk(2), OptionStorage(storage.NewFile(leecherDataDir)))
 	require.NoError(t, err)
@@ -232,7 +231,7 @@ func TestClientDynamicListenPortAllProtocols(t *testing.T) {
 func TestSetMaxEstablishedConn(t *testing.T) {
 	var tts []Torrent
 	mi := testutil.GreetingMetaInfo()
-	for i := range 3 {
+	for range 3 {
 		cfg := TestingConfig(t, t.TempDir(), ClientConfigSeed(true))
 		cfg.dropDuplicatePeerIds = true
 		cfg.Handshaker = connections.NewHandshaker(
@@ -246,7 +245,6 @@ func TestSetMaxEstablishedConn(t *testing.T) {
 		tt, _, err := cl.Start(ts)
 		require.NoError(t, err)
 		require.NoError(t, tt.Tune(TuneMaxConnections(2)))
-		defer testutil.ExportStatusWriter(cl, fmt.Sprintf("%d", i))()
 		tts = append(tts, tt)
 	}
 
