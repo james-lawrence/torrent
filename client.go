@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/netip"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -197,7 +196,7 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 		closed:   make(chan struct{}),
 		torrents: NewCache(cfg.defaultMetadata, NewBitmapCache(cfg.defaultCacheDirectory)),
 		_mu:      &sync.RWMutex{},
-		dialing:  netx.NewRacing(uint16(runtime.NumCPU() * 4)), // four concurrent dials per cpu seems a reasonable starting point.
+		dialing:  netx.NewRacing(cfg.dialPoolSize), // four concurrent dials per cpu seems a reasonable starting point.
 	}
 	cl.event.L = cl.locker()
 

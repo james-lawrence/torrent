@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"runtime"
 	"time"
 
 	pp "github.com/james-lawrence/torrent/btprotocol"
@@ -23,6 +24,7 @@ import (
 	"github.com/james-lawrence/torrent/storage"
 	"github.com/james-lawrence/torrent/tracker"
 	"github.com/james-lawrence/torrent/x/conntrack"
+	"golang.org/x/exp/constraints"
 	"golang.org/x/time/rate"
 
 	"github.com/james-lawrence/torrent/mse"
@@ -66,6 +68,8 @@ type ClientConfig struct {
 
 	// Rate limit connection dialing
 	dialRateLimiter *rate.Limiter
+	// Number of dialing routines to run.
+	dialPoolSize uint16
 
 	bucketLimit int // maximum number of peers per bucket in the DHT.
 
@@ -399,6 +403,13 @@ func ClientConfigDialTimeouts(healthy, starving time.Duration) ClientConfigOptio
 	}
 }
 
+// specify the number of routines for dialing peers
+func ClientConfigDialPoolSize[T constraints.Integer](n T) ClientConfigOption {
+	return func(cc *ClientConfig) {
+		cc.dialPoolSize = max(uint16(n), 1)
+	}
+}
+
 // NewDefaultClientConfig default client configuration.
 func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, options ...ClientConfigOption) *ClientConfig {
 	cc := &ClientConfig{
@@ -424,6 +435,7 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		UploadRateLimiter:   rate.NewLimiter(rate.Limit(128*bytesx.MiB), bytesx.MiB),
 		DownloadRateLimiter: rate.NewLimiter(rate.Limit(256*bytesx.MiB), bytesx.MiB),
 		dialRateLimiter:     rate.NewLimiter(rate.Limit(32), 128),
+		dialPoolSize:        uint16(runtime.NumCPU() * 32),
 		ConnTracker:         conntrack.NewInstance(),
 		HeaderObfuscationPolicy: HeaderObfuscationPolicy{
 			Preferred:        false,
