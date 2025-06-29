@@ -2,12 +2,14 @@ package torrent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/v2"
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/bep0006"
 	pp "github.com/james-lawrence/torrent/btprotocol"
@@ -17,6 +19,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
+	"github.com/james-lawrence/torrent/internal/x/bitmapx"
 )
 
 func RunHandshookConn(c *connection, t *torrent) error {
@@ -191,8 +194,6 @@ func connexdht(cn *connection, n cstate.T) cstate.T {
 func connwriterinit(ctx context.Context, cn *connection, to time.Duration) error {
 	cn.cfg.debug().Printf("c(%p) writer initiated\n", cn)
 	defer cn.cfg.debug().Printf("c(%p) writer completed\n", cn)
-	defer cn.checkFailures()
-	defer cn.deleteAllRequests()
 
 	ts := time.Now()
 	ws := &writerstate{
@@ -203,6 +204,9 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) error
 		nextbitmap:       ts.Add(time.Minute),
 		resync:           atomicx.Pointer(ts.Add(to)),
 	}
+
+	defer cn.checkFailures()
+	defer cn.deleteAllRequests()
 
 	return cstate.Run(ctx, connWriterSyncChunks(ws), cn.cfg.debug())
 }
@@ -304,6 +308,10 @@ func (t _connWriterSyncChunks) Update(ctx context.Context, _ *cstate.Shared) (r 
 		}
 	}
 
+	if !dup.IsEmpty() {
+		ws.t.readabledataavailable.Store(true)
+	}
+
 	return next
 }
 
@@ -345,6 +353,96 @@ type _connwriterRequests struct {
 	*writerstate
 }
 
+func (t _connwriterRequests) determineInterest(msg func(pp.Message) bool) (available *roaring.Bitmap) {
+	defer t.cfg.debug().Printf("c(%p) seed(%t) interest completed\n", t, t.t.seeding())
+
+	if t.t.seeding() {
+		if t.Unchoke(msg) {
+			t.cfg.debug().Printf("c(%p) seed(%t) allowing peer to make requests\n", t, t.t.seeding())
+		}
+	} else {
+		if t.Choke(msg) {
+			t.cfg.debug().Printf("c(%p) seed(%t) disallowing peer to make requests\n", t, t.t.seeding())
+		}
+	}
+
+	if !t.SetInterested(t.peerHasWantedPieces(), msg) {
+		t.cfg.debug().Printf("c(%p) seed(%t) nothing available to request\n", t, t.t.seeding())
+	}
+
+	if !t.PeerChoked {
+		t.cfg.debug().Printf("c(%p) seed(%t) allowing claimed: %d\n", t, t.t.seeding(), t.claimed.GetCardinality())
+		available = t.claimed
+	} else {
+		t.cfg.debug().Printf("c(%p) seed(%t) allowing fastset %d\n", t, t.t.seeding(), t.fastset.GetCardinality())
+		available = t.fastset
+	}
+
+	t._mu.RLock()
+	defer t._mu.RUnlock()
+	return bitmapx.AndNot(available, t.blacklisted)
+}
+
+func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.Message) bool) {
+	var (
+		err  error
+		reqs []request
+		req  request
+	)
+
+	// cn.cfg.debug().Printf("c(%p) seed(%t) make requests initated\n", cn, cn.t.seeding())
+	// defer cn.cfg.debug().Printf("c(%p) seed(%t) make requests completed\n", cn, cn.t.seeding())
+
+	if len(t.requests) > t.requestsLowWater || t.t.chunks.Cardinality(t.t.chunks.missing) == 0 {
+		return
+	}
+
+	filledBuffer := false
+
+	max := min(max(0, t.PeerMaxRequests-len(t.requests)), 64)
+	if reqs, err = t.t.chunks.Pop(max, available); errors.As(err, &empty{}) {
+		if len(reqs) == 0 && !t.blacklisted.IsEmpty() {
+			// clear the blacklist when we run out of work to do.
+			t.cmu().Lock()
+			t.blacklisted.Clear()
+			t.cmu().Unlock()
+			t.t.chunks.MergeInto(t.t.chunks.missing, t.t.chunks.failed)
+			t.t.chunks.FailuresReset()
+			t.cfg.debug().Printf("c(%p) seed(%t) available(%t) no work available", t, t.t.seeding(), !available.IsEmpty())
+			return
+		}
+	} else if err != nil {
+		t.cfg.errors().Printf("failed to request piece: %T - %v\n", err, err)
+		return
+	}
+
+	t.cfg.debug().Printf("%p seed(%t) filling buffer with requests %d - %d -> %d actual %d", t, t.t.seeding(), t.PeerMaxRequests, len(t.requests), max, len(reqs))
+
+	for max, req = range reqs {
+		if filledBuffer = !t.request(req, msg); filledBuffer {
+			t.cfg.debug().Printf("c(%p) seed(%t) done filling after(%d)\n", t, t.t.seeding(), max)
+			break
+		}
+
+		// cn.cfg.debug().Printf("c(%p) seed(%t) choked(%t) requested(%d, %d, %d)\n", cn, cn.t.seeding(), cn.PeerChoked, req.Index, req.Begin, req.Length)
+	}
+
+	// advance to just the unused chunks.
+	if max += 1; len(reqs) > max {
+		reqs = reqs[max:]
+		t.cfg.debug().Printf("c(%p) seed(%t) filled - cleaning up %d reqs(%d)\n", t, t.t.seeding(), max, len(reqs))
+		// release any unused requests back to the queue.
+		t.t.chunks.Retry(reqs...)
+	}
+
+	// If we didn't completely top up the requests, we shouldn't mark
+	// the low water, since we'll want to top up the requests as soon
+	// as we have more write buffer space.
+	if !filledBuffer {
+		t.requestsLowWater = len(t.requests) / 2
+	}
+}
+
 func (t _connwriterRequests) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {
 	ws := t.writerstate
 
@@ -359,9 +457,9 @@ func (t _connwriterRequests) Update(ctx context.Context, _ *cstate.Shared) (r cs
 	}
 
 	ws.checkFailures()
-	available := ws.determineInterest(writer)
+	available := t.determineInterest(writer)
 	ws.upload(writer)
-	ws.genrequests(available, writer)
+	t.genrequests(available, writer)
 
 	// needresponse is tracking read that come in while we're in the critical section of this function
 	// to prevent the state machine from going idle just because we didnt write anything this cycle.

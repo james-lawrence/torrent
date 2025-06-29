@@ -1,6 +1,7 @@
 package torrent
 
 import (
+	"bytes"
 	"container/heap"
 	"context"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/v2"
 	"github.com/anacrolix/missinggo/pubsub"
 	"github.com/anacrolix/missinggo/slices"
 	"github.com/james-lawrence/torrent/bep0009"
@@ -331,6 +333,30 @@ func Verify(ctx context.Context, t Torrent) error {
 	return t.Tune(TuneVerifyFull)
 }
 
+// returns a bitmap of the verified data within the storage implementation.
+func VerifyStored(ctx context.Context, md *metainfo.MetaInfo, t io.ReaderAt) (missing *roaring.Bitmap, readable *roaring.Bitmap, _ error) {
+	info, err := metainfo.NewInfoFromReader(bytes.NewReader(md.InfoBytes))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	chunks := newChunks(defaultChunkSize, info)
+	digests := newDigests(t, func(i int) *metainfo.Piece {
+		return langx.Autoptr(info.Piece(i))
+	}, func(idx int, cause error) func() {
+		chunks.Hashed(uint64(idx), cause)
+		return func() {}
+	})
+
+	digests.EnqueueBitmap(bitmapx.Fill(chunks.pieces))
+	digests.Wait()
+
+	chunks.MergeInto(chunks.missing, chunks.failed)
+	chunks.FailuresReset()
+
+	return chunks.missing, chunks.ReadableBitmap(), nil
+}
+
 func newTorrent(cl *Client, src Metadata) *torrent {
 	const (
 		maxEstablishedConns = 200
@@ -476,7 +502,8 @@ type torrent struct {
 	peers          peerPool
 	wantPeersEvent chan struct{}
 
-	metainfoAvailable atomic.Bool
+	readabledataavailable atomic.Bool
+	metainfoAvailable     atomic.Bool
 
 	// The bencoded bytes of the info dict. This is actively manipulated if
 	// the info bytes aren't initially available, and we try to fetch them
@@ -486,8 +513,6 @@ type torrent struct {
 	// received that piece.
 	metadataCompletedChunks []bool
 	metadataChanged         sync.Cond
-
-	// Set when .Info is obtained.
 
 	// chunks management tracks the current status of the different chunks
 	chunks *chunks
@@ -1108,10 +1133,6 @@ func (t *torrent) seeding() bool {
 	default:
 	}
 
-	if t.cln.config.NoUpload {
-		return false
-	}
-
 	if !t.cln.config.Seed {
 		return false
 	}
@@ -1120,11 +1141,15 @@ func (t *torrent) seeding() bool {
 		return false
 	}
 
-	if t.chunks.Incomplete() {
-		return false
+	// check if we have determined if readable data available.
+	// if not, check and store the result.
+	if t.readabledataavailable.Load() {
+		return true
 	}
 
-	return true
+	t.readabledataavailable.Store(t.chunks.Readable() > 0)
+
+	return t.readabledataavailable.Load()
 }
 
 // Adds peers revealed in an announce until the announce ends, or we have

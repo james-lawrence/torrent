@@ -223,7 +223,7 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 	cl := &Client{
 		config:   cfg,
 		closed:   make(chan struct{}),
-		torrents: torrentCache(cfg.defaultMetadata, NewBitmapCache(cfg.defaultCacheDirectory)),
+		torrents: NewCache(cfg.defaultMetadata, NewBitmapCache(cfg.defaultCacheDirectory)),
 		_mu:      &sync.RWMutex{},
 		dialing:  netx.NewRacing(uint16(runtime.NumCPU())),
 	}
@@ -392,6 +392,7 @@ func (cl *Client) incomingConnection(nc net.Conn) {
 	defer nc.Close()
 	if tc, ok := nc.(*net.TCPConn); ok {
 		tc.SetLinger(0)
+		tc.SetKeepAlive(true)
 	}
 
 	addrport, err := netx.AddrPort(nc.RemoteAddr())

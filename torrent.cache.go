@@ -6,7 +6,7 @@ import (
 	"github.com/james-lawrence/torrent/dht/int160"
 )
 
-func torrentCache(s MetadataStore, b BitmapStore) *memoryseeding {
+func NewCache(s MetadataStore, b BitmapStore) *memoryseeding {
 	return &memoryseeding{
 		_mu:           &sync.RWMutex{},
 		MetadataStore: s,

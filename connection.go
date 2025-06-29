@@ -3,7 +3,6 @@ package torrent
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -443,96 +442,6 @@ func (cn *connection) request(r request, mw messageWriter) bool {
 	})
 }
 
-func (cn *connection) determineInterest(msg func(pp.Message) bool) (available *roaring.Bitmap) {
-	defer cn.cfg.debug().Printf("c(%p) seed(%t) interest completed\n", cn, cn.t.seeding())
-
-	if cn.uploadAllowed() {
-		if cn.Unchoke(msg) {
-			cn.cfg.debug().Printf("c(%p) seed(%t) allowing peer to make requests\n", cn, cn.t.seeding())
-		}
-	} else {
-		if cn.Choke(msg) {
-			cn.cfg.debug().Printf("c(%p) seed(%t) disallowing peer to make requests\n", cn, cn.t.seeding())
-		}
-	}
-
-	if !cn.SetInterested(cn.peerHasWantedPieces(), msg) {
-		cn.cfg.debug().Printf("c(%p) seed(%t) nothing available to request\n", cn, cn.t.seeding())
-	}
-
-	if cn.PeerChoked && !cn.fastset.IsEmpty() {
-		cn.cfg.debug().Printf("c(%p) seed(%t) allowing fastset %d\n", cn, cn.t.seeding(), cn.fastset.GetCardinality())
-		available = cn.fastset
-	} else {
-		cn.cfg.debug().Printf("c(%p) seed(%t) allowing claimed: %d\n", cn, cn.t.seeding(), cn.claimed.GetCardinality())
-		available = cn.claimed
-	}
-
-	cn._mu.RLock()
-	defer cn._mu.RUnlock()
-	return bitmapx.AndNot(available, cn.blacklisted)
-}
-
-func (cn *connection) genrequests(available *roaring.Bitmap, msg func(pp.Message) bool) {
-	var (
-		err  error
-		reqs []request
-		req  request
-	)
-
-	// cn.cfg.debug().Printf("c(%p) seed(%t) make requests initated\n", cn, cn.t.seeding())
-	// defer cn.cfg.debug().Printf("c(%p) seed(%t) make requests completed\n", cn, cn.t.seeding())
-
-	if len(cn.requests) > cn.requestsLowWater || cn.t.chunks.Cardinality(cn.t.chunks.missing) == 0 {
-		return
-	}
-
-	filledBuffer := false
-
-	max := min(max(0, cn.PeerMaxRequests-len(cn.requests)), 64)
-	if reqs, err = cn.t.chunks.Pop(max, available); errors.As(err, &empty{}) {
-		if len(reqs) == 0 {
-			// clear the blacklist when we run out of work to do.
-			cn.cmu().Lock()
-			cn.blacklisted.Clear()
-			cn.cmu().Unlock()
-			cn.t.chunks.MergeInto(cn.t.chunks.missing, cn.t.chunks.failed)
-			cn.t.chunks.FailuresReset()
-			cn.cfg.debug().Printf("c(%p) seed(%t) available(%t) no work available", cn, cn.t.seeding(), !available.IsEmpty())
-			return
-		}
-	} else if err != nil {
-		cn.cfg.errors().Printf("failed to request piece: %T - %v\n", err, err)
-		return
-	}
-
-	cn.cfg.debug().Printf("%p seed(%t) filling buffer with requests %d - %d -> %d actual %d", cn, cn.t.seeding(), cn.PeerMaxRequests, len(cn.requests), max, len(reqs))
-
-	for max, req = range reqs {
-		if filledBuffer = !cn.request(req, msg); filledBuffer {
-			cn.cfg.debug().Printf("c(%p) seed(%t) done filling after(%d)\n", cn, cn.t.seeding(), max)
-			break
-		}
-
-		// cn.cfg.debug().Printf("c(%p) seed(%t) choked(%t) requested(%d, %d, %d)\n", cn, cn.t.seeding(), cn.PeerChoked, req.Index, req.Begin, req.Length)
-	}
-
-	// advance to just the unused chunks.
-	if max += 1; len(reqs) > max {
-		reqs = reqs[max:]
-		cn.cfg.debug().Printf("c(%p) seed(%t) filled - cleaning up %d reqs(%d)\n", cn, cn.t.seeding(), max, len(reqs))
-		// release any unused requests back to the queue.
-		cn.t.chunks.Retry(reqs...)
-	}
-
-	// If we didn't completely top up the requests, we shouldn't mark
-	// the low water, since we'll want to top up the requests as soon
-	// as we have more write buffer space.
-	if !filledBuffer {
-		cn.requestsLowWater = len(cn.requests) / 2
-	}
-}
-
 // connections check their own failures, this amortizes the cost of failures to
 // the connections themselves instead of bottlenecking at the torrent.
 func (cn *connection) checkFailures() {
@@ -829,7 +738,7 @@ func (cn *connection) onReadRequest(r request) error {
 		return nil
 	}
 
-	if pending := len(cn.PeerRequests); pending > cn.PendingMaxRequests+maxRequestsGrace {
+	if pending := len(cn.PeerRequests); !cn.t.seeding() || pending > cn.PendingMaxRequests+maxRequestsGrace {
 		if cn.supported(pp.ExtensionBitFast) {
 			cn.cfg.debug().Printf("%p - onReadRequest: PeerRequests(%d) > maxRequests(%d), rejecting request\n", cn, pending, cn.PendingMaxRequests)
 			cn.reject(r)
@@ -948,8 +857,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		cn.updateRequests()
 		return msg, nil
 	case pp.Request:
-		r := newRequestFromMessage(&msg)
-		if err = cn.onReadRequest(r); err != nil {
+		if err = cn.onReadRequest(newRequestFromMessage(&msg)); err != nil {
 			return msg, err
 		}
 		cn.updateRequests()
@@ -1149,14 +1057,6 @@ func (cn *connection) receiveChunk(msg *pp.Message) error {
 	return nil
 }
 
-func (cn *connection) uploadAllowed() bool {
-	if cn.cfg.NoUpload {
-		return false
-	}
-
-	return cn.t.seeding()
-}
-
 func (cn *connection) setRetryUploadTimer(delay time.Duration) {
 	if cn.uploadTimer == nil {
 		cn.uploadTimer = time.AfterFunc(delay, cn.respond.Broadcast)
@@ -1167,15 +1067,11 @@ func (cn *connection) setRetryUploadTimer(delay time.Duration) {
 
 // Also handles choking and unchoking of the remote peer.
 func (cn *connection) upload(msg func(pp.Message) bool) bool {
-	// defer log.Printf("c(%p) seed(%t) upload completed", cn, cn.cfg.Seed)
-
-	// if we dont want to upload to this peer then we choke them.
-	if !cn.uploadAllowed() {
-		cn.cfg.debug().Printf("c(%p) seed(%t) upload restricted - disallowed\n", cn, cn.t.seeding())
-		return cn.Choke(msg)
+	// TODO: we should reject requests
+	if cn.Choked {
+		cn.cfg.debug().Printf("c(%p) seed(%t) choked(%t) upload restricted - disallowed\n", cn, cn.t.seeding(), cn.Choked)
+		return true
 	}
-
-	// cn.cfg.debug().Printf("c(%p) seed(%t) upload allowed\n", cn, cn.t.seeding())
 
 	cn.cmu().Lock()
 	defer cn.cmu().Unlock()
@@ -1208,6 +1104,7 @@ func (cn *connection) upload(msg func(pp.Message) bool) bool {
 			// an updated bitfield.
 			return cn.Choke(msg)
 		}
+
 		uploaded++
 		delete(cn.PeerRequests, r)
 
@@ -1286,23 +1183,10 @@ func (cn *connection) dupRequests() (requests []request) {
 }
 
 func (cn *connection) deleteAllRequests() {
-	// trace(fmt.Sprintf("c(%p) initiated", cn))
 	reqs := cn.dupRequests()
-	// defer trace(fmt.Sprintf("c(%p) completed reqs(%d)", cn, len(reqs)))
 	for _, r := range reqs {
 		cn.releaseRequest(r)
 	}
-	// cn.t.piecesM.Retry(reqs...)
-}
-
-func (cn *connection) postCancel(r request) bool {
-	if ok := cn.releaseRequest(r); !ok {
-		return false
-	}
-
-	cn.Post(makeCancelMessage(r))
-
-	return true
 }
 
 func (cn *connection) sendChunk(r request, msg func(pp.Message) bool) (more bool, err error) {
