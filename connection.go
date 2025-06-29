@@ -867,7 +867,10 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		cn.updateRequests()
 		return msg, nil
 	case pp.Piece:
-		defer cn.updateRequests()
+		if len(cn.requests) < cn.requestsLowWater {
+			defer cn.updateRequests()
+		}
+
 		if err = errorsx.Wrap(cn.receiveChunk(&msg), "failed to received chunk"); err != nil {
 			return msg, err
 		}
