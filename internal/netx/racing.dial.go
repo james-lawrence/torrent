@@ -18,26 +18,26 @@ import (
 func NewRacing(n uint16) *RacingDialer {
 	return &RacingDialer{
 		arena: asynccompute.New(func(ctx context.Context, w racingdialworkload) error {
-			// Try to avoid committing to a dial if the context is complete as it's difficult to determine
-			// which dial errors allow us to forget the connection tracking entry handle.
-			select {
-			case <-ctx.Done():
-				return nil
-			default:
-			}
-
 			dctx, done := context.WithTimeout(ctx, w.timeout)
 			defer done()
 
 			c, err := w.network.Dial(dctx, w.address)
-			if err != nil {
-				w.failure.CompareAndSwap(nil, langx.Autoptr(err))
+			if err == nil {
+				select {
+				case <-ctx.Done():
+				case w.fastest <- c:
+					w.done(nil)
+				}
+				atomic.AddUint64(w.outstanding, ^uint64(0))
+
 				return nil
 			}
 
-			// report we have liftoff.
-			w.fastest.CompareAndSwap(nil, langx.Autoptr(c))
-			w.done(nil)
+			errorsx.LogErr(c.Close())
+			w.failure.CompareAndSwap(nil, langx.Autoptr(err))
+			if atomic.AddUint64(w.outstanding, ^uint64(0)) == 0 {
+				w.done(err)
+			}
 
 			return nil
 		}, asynccompute.Backlog[racingdialworkload](n)),
@@ -48,23 +48,25 @@ type DialableNetwork interface {
 	Dial(ctx context.Context, addr string) (net.Conn, error)
 }
 
-func initRacingDial(address string, d time.Duration, done context.CancelCauseFunc) racingdialworkload {
+func initRacingDial(address string, d time.Duration, n uint64, done context.CancelCauseFunc) racingdialworkload {
 	return racingdialworkload{
-		address: address,
-		timeout: d,
-		fastest: atomicx.Pointer(net.Conn(nil)),
-		failure: atomicx.Pointer(error(nil)),
-		done:    done,
+		address:     address,
+		timeout:     d,
+		fastest:     make(chan net.Conn, 1),
+		failure:     atomicx.Pointer[error](nil),
+		done:        done,
+		outstanding: langx.Autoptr(n),
 	}
 }
 
 type racingdialworkload struct {
-	network DialableNetwork
-	address string
-	timeout time.Duration
-	done    context.CancelCauseFunc
-	failure *atomic.Pointer[error]
-	fastest *atomic.Pointer[net.Conn]
+	network     DialableNetwork
+	address     string
+	timeout     time.Duration
+	done        context.CancelCauseFunc
+	failure     *atomic.Pointer[error]
+	fastest     chan net.Conn
+	outstanding *uint64
 }
 
 type RacingDialer struct {
@@ -75,25 +77,31 @@ func (t RacingDialer) Dial(ctx context.Context, timeout time.Duration, address s
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
-	w := initRacingDial(address, timeout, cancel)
+	w := initRacingDial(address, timeout, uint64(len(networks)), cancel)
 
 	for _, n := range networks {
 		dup := w
 		dup.network = n
 
 		if err := t.arena.Run(ctx, dup); err != nil {
+			cancel(err)
 			return nil, err
 		}
 	}
 
-	<-ctx.Done()
+	var fastest net.Conn
 
-	fastest := langx.Autoderef(w.fastest.Load())
+	select {
+	case <-ctx.Done():
+	case fastest = <-w.fastest:
+	}
+
 	failure := langx.Autoderef(w.failure.Load())
 
 	if fastest == nil {
 		return nil, errorsx.Compact(failure, context.Cause(ctx))
 	}
 
-	return fastest, errorsx.Ignore(errorsx.Compact(failure, context.Cause(ctx)), context.Canceled)
+	failure = errorsx.Compact(failure, context.Cause(ctx))
+	return fastest, errorsx.Ignore(failure, context.Canceled)
 }

@@ -24,6 +24,8 @@ import (
 
 func RunHandshookConn(c *connection, t *torrent) error {
 	const retrydelay = 10 * time.Second
+
+	remotreaddr := c.conn.RemoteAddr()
 	c.setTorrent(t)
 
 	c.conn.SetWriteDeadline(time.Time{})
@@ -58,9 +60,10 @@ func RunHandshookConn(c *connection, t *torrent) error {
 
 	if err := c.mainReadLoop(ctx); err != nil {
 		err = errorsx.StdlibTimeout(err, retrydelay, syscall.ECONNRESET)
+		err = errorsx.Wrapf(err, "%s - %s: error during main read loop", c.PeerClientName, remotreaddr)
 		cancel(err)
 		c.cfg.Handshaker.Release(c.conn, err)
-		return errorsx.Wrapf(err, "%s - %s: error during main read loop", c.PeerClientName, c.conn.RemoteAddr())
+		return err
 	}
 
 	return context.Cause(ctx)
