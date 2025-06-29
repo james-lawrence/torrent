@@ -16,6 +16,7 @@ import (
 	"github.com/james-lawrence/torrent/cstate"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/atomicx"
+	"github.com/james-lawrence/torrent/internal/backoffx"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
@@ -215,6 +216,7 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		connection:       cn,
 		keepAliveTimeout: to,
 		lastwrite:        ts,
+		chokeduntil:      ts.Add(-1 * time.Minute),
 		nextbitmap:       ts.Add(time.Minute),
 		resync:           atomicx.Pointer(ts.Add(to)),
 	}
@@ -231,6 +233,7 @@ type writerstate struct {
 	keepAliveTimeout time.Duration
 	lastwrite        time.Time
 	nextbitmap       time.Time
+	chokeduntil      time.Time
 	resync           *atomic.Pointer[time.Time]
 }
 
@@ -274,14 +277,17 @@ func (t _connWriterClosed) Update(ctx context.Context, _ *cstate.Shared) (r csta
 		return connwriterFlush(connwriteridle(ws), ws)
 	}
 
-	// detect effectively dead connections
+	// detect effectively dead connections, choking them for at least 1 minute.
 	if timedout(ws.connection, ws.t.chunks.gracePeriod) {
-		ws.clearRequests(ws.dupRequests()...)
-		return cstate.Failure(
-			errorsx.Timedout(
-				errorsx.Errorf("c(%p) peer isnt sending chunks in a timely manner requests (%d > %d) last(%s)", ws, len(ws.requests), ws.PeerMaxRequests, ws.lastUsefulChunkReceived),
-				10*time.Second,
-			),
+		if _, err := ws.PostImmediate(pp.NewChoked()); err != nil {
+			return cstate.Failure(errorsx.Wrapf(err, "c(%p) peer isnt sending chunks in a timely manner requests (%d > %d) last(%s) and we failed to choke them", ws, len(ws.requests), ws.PeerMaxRequests, ws.lastUsefulChunkReceived))
+		}
+
+		ws.chokeduntil = time.Now().Add(backoffx.DynamicHash1m(ws.PeerID.String()) + backoffx.Random(10*time.Minute))
+
+		return cstate.Warning(
+			t.next,
+			errorsx.Errorf("c(%p) peer isnt sending chunks in a timely manner requests (%d > %d) last(%s)", ws, len(ws.requests), ws.PeerMaxRequests, ws.lastUsefulChunkReceived),
 		)
 	}
 
@@ -370,7 +376,7 @@ type _connwriterRequests struct {
 func (t _connwriterRequests) determineInterest(msg func(pp.Message) bool) (available *roaring.Bitmap) {
 	defer t.cfg.debug().Printf("c(%p) seed(%t) interest completed\n", t.connection, t.t.seeding())
 
-	if t.t.seeding() {
+	if t.t.seeding() || t.chokeduntil.After(time.Now()) {
 		if t.Unchoke(msg) {
 			t.cfg.debug().Printf("c(%p) seed(%t) allowing peer to make requests\n", t.connection, t.t.seeding())
 		}
@@ -407,8 +413,18 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 	// cn.cfg.debug().Printf("c(%p) seed(%t) make requests initated\n", cn, cn.t.seeding())
 	// defer cn.cfg.debug().Printf("c(%p) seed(%t) make requests completed\n", cn, cn.t.seeding())
 
-	if available.IsEmpty() || len(t.requests) > t.requestsLowWater || t.t.chunks.Cardinality(t.t.chunks.missing) == 0 {
-		t.cfg.debug().Printf("%p seed(%t) avail(%d) || req(%d > %d) || have all data - skipping buffer fill", t.connection, t.t.seeding(), available.GetCardinality(), len(t.requests), t.requestsLowWater)
+	if available.IsEmpty() || len(t.requests) > t.requestsLowWater {
+		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - avail(%d) || req(%d > %d)", t.connection, t.t.seeding(), available.GetCardinality(), len(t.requests), t.requestsLowWater)
+		return
+	}
+
+	if ts := langx.Autoderef(t.lastRejectReceived.Load()); ts.Before(time.Now().Add(time.Minute)) {
+		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - recently saw a rejection (%s)", t.connection, t.t.seeding(), time.Since(ts))
+		return
+	}
+
+	if t.t.chunks.Cardinality(t.t.chunks.missing) == 0 {
+		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - have all data", t.connection, t.t.seeding())
 		return
 	}
 

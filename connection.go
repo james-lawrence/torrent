@@ -72,6 +72,7 @@ func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.A
 		drop:                    make(chan error, 1),
 		PeerExtensionIDs:        make(map[pp.ExtensionName]pp.ExtensionNumber),
 		lastMessageReceived:     atomicx.Pointer(ts),
+		lastRejectReceived:      atomicx.Pointer(ts),
 		lastUsefulChunkReceived: ts,
 		extensions:              extensions,
 		cfg:                     cfg,
@@ -114,6 +115,7 @@ type connection struct {
 	reconciledHandshakeStats bool
 
 	lastMessageReceived     *atomic.Pointer[time.Time]
+	lastRejectReceived      *atomic.Pointer[time.Time]
 	completedHandshake      time.Time
 	lastUsefulChunkReceived time.Time
 	lastChunkSent           time.Time
@@ -911,7 +913,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		if !cn.supported(pp.ExtensionBitFast) {
 			return msg, fmt.Errorf("reject recevied, fast not enabled")
 		}
-
+		cn.lastRejectReceived.Store(langx.Autoptr(time.Now()))
 		cn.clearRequests(req)
 		return msg, nil
 	case pp.AllowedFast:
