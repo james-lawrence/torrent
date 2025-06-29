@@ -389,6 +389,16 @@ func ClientConfigCacheDirectory(s string) ClientConfigOption {
 	}
 }
 
+// specify dialing timeouts healthy timeout for when the the torrent has sufficient peers connected.
+// and starving when it lacks peers. defaults are 4 and 16 respectively. generally, when starving
+// you'll want to be more forgiving and set a larger timeout.
+func ClientConfigDialTimeouts(healthy, starving time.Duration) ClientConfigOption {
+	return func(cc *ClientConfig) {
+		cc.NominalDialTimeout = starving
+		cc.MinDialTimeout = healthy
+	}
+}
+
 // NewDefaultClientConfig default client configuration.
 func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, options ...ClientConfigOption) *ClientConfig {
 	cc := &ClientConfig{
