@@ -225,7 +225,7 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 		closed:   make(chan struct{}),
 		torrents: NewCache(cfg.defaultMetadata, NewBitmapCache(cfg.defaultCacheDirectory)),
 		_mu:      &sync.RWMutex{},
-		dialing:  netx.NewRacing(uint16(runtime.NumCPU())),
+		dialing:  netx.NewRacing(uint16(runtime.NumCPU() * 128)),
 	}
 	cl.event.L = cl.locker()
 

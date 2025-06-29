@@ -27,7 +27,7 @@ func NewRacing(n uint16) *RacingDialer {
 
 			c, err := w.network.Dial(ctx, w.address)
 			if err != nil {
-				w.failed.CompareAndSwap(nil, langx.Autoptr(err))
+				w.failure.CompareAndSwap(nil, langx.Autoptr(err))
 				return nil
 			}
 
@@ -48,7 +48,7 @@ func initRacingDial(address string, done context.CancelCauseFunc) racingdialwork
 	return racingdialworkload{
 		address: address,
 		fastest: atomicx.Pointer(net.Conn(nil)),
-		failed:  atomicx.Pointer(error(nil)),
+		failure: atomicx.Pointer(error(nil)),
 		done:    done,
 	}
 }
@@ -57,7 +57,7 @@ type racingdialworkload struct {
 	network DialableNetwork
 	address string
 	done    context.CancelCauseFunc
-	failed  *atomic.Pointer[error]
+	failure *atomic.Pointer[error]
 	fastest *atomic.Pointer[net.Conn]
 }
 
@@ -67,6 +67,8 @@ type RacingDialer struct {
 
 func (t RacingDialer) Dial(ctx context.Context, address string, networks ...DialableNetwork) (net.Conn, error) {
 	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
 	w := initRacingDial(address, cancel)
 
 	for _, n := range networks {
@@ -79,5 +81,12 @@ func (t RacingDialer) Dial(ctx context.Context, address string, networks ...Dial
 	}
 
 	<-ctx.Done()
-	return *w.fastest.Load(), errorsx.Compact(langx.Autoderef(w.failed.Load()), context.Cause(ctx))
+
+	fastest := w.fastest.Load()
+	failure := langx.Autoderef(w.failure.Load())
+	if fastest != nil {
+		failure = errorsx.Ignore(failure, context.Canceled)
+	}
+
+	return *w.fastest.Load(), errorsx.Compact(failure, context.Cause(ctx))
 }
