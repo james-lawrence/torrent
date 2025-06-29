@@ -20,7 +20,6 @@ type request struct {
 	Digest   uint64
 	Index    pp.Integer
 	Reserved time.Time
-	Priority int
 	chunkSpec
 }
 
@@ -48,16 +47,6 @@ func newRequest(index, begin, length pp.Integer) request {
 		Digest:    request{}.rDigest(uint32(index), uint32(begin), uint32(length)),
 		Index:     index,
 		chunkSpec: chunkSpec{begin, length},
-	}
-}
-
-func newRequest2(index, begin, length pp.Integer, prio int) request {
-	return request{
-		Digest:    request{}.rDigest(uint32(index), uint32(begin), uint32(length)),
-		Index:     index,
-		Priority:  prio,
-		chunkSpec: chunkSpec{begin, length},
-		Reserved:  time.Now(),
 	}
 }
 

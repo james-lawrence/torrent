@@ -38,6 +38,10 @@ func Log(err error) {
 // without needing interrupting the flow
 // of code.
 func LogErr(err error) error {
+	if err == nil {
+		return err
+	}
+
 	if cause := log.Output(2, fmt.Sprintln(err)); cause != nil {
 		log.Println(cause)
 	}

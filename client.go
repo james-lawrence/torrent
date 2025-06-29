@@ -417,10 +417,21 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 		nc net.Conn
 	)
 
+	cl.lock()
+	conns := make([]netx.DialableNetwork, 0, len(cl.conns))
+	for _, c := range cl.conns {
+		conns = append(conns, c)
+	}
+	cl.unlock()
+
+	if len(conns) == 0 {
+		return nil, errorsx.Errorf("unable to dial due to no servers")
+	}
+
 	dctx, dcancel := context.WithTimeout(ctx, t.dialTimeout())
 	defer dcancel()
 
-	if nc, err = cl.dialing.Dial(dctx, addr.String()); err != nil {
+	if nc, err = cl.dialing.Dial(dctx, addr.String(), conns...); err != nil {
 		return nil, err
 	}
 	defer nc.Close()

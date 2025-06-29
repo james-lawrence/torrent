@@ -40,7 +40,7 @@ func NewRacing(n uint16) *RacingDialer {
 	}
 }
 
-type dialablenetwork interface {
+type DialableNetwork interface {
 	Dial(ctx context.Context, addr string) (net.Conn, error)
 }
 
@@ -54,7 +54,7 @@ func initRacingDial(address string, done context.CancelCauseFunc) racingdialwork
 }
 
 type racingdialworkload struct {
-	network dialablenetwork
+	network DialableNetwork
 	address string
 	done    context.CancelCauseFunc
 	failed  *atomic.Pointer[error]
@@ -65,7 +65,7 @@ type RacingDialer struct {
 	arena *asynccompute.Pool[racingdialworkload]
 }
 
-func (t RacingDialer) Dial(ctx context.Context, address string, networks ...dialablenetwork) (net.Conn, error) {
+func (t RacingDialer) Dial(ctx context.Context, address string, networks ...DialableNetwork) (net.Conn, error) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	w := initRacingDial(address, cancel)
 

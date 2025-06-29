@@ -1,6 +1,7 @@
 package torrent
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -100,10 +101,10 @@ func newChunks(clength uint64, m *metainfo.Info, options ...chunkopt) *chunks {
 		clength:     int64(clength),
 		gracePeriod: 2 * time.Minute,
 		outstanding: make(map[uint64]request),
-		missing:     roaring.NewBitmap(),
-		unverified:  roaring.NewBitmap(),
-		failed:      roaring.NewBitmap(),
-		completed:   roaring.NewBitmap(),
+		missing:     roaring.New(),
+		unverified:  roaring.New(),
+		failed:      roaring.New(),
+		completed:   roaring.New(),
 		pool: &sync.Pool{
 			New: func() interface{} {
 				b := make([]byte, clength)
@@ -227,7 +228,7 @@ func (t *chunks) lastChunk(pid int) int {
 	return (pid * int(cpp)) + int(chunks-1)
 }
 
-func (t *chunks) request(cidx int64, prio int) (r request, err error) {
+func (t *chunks) request(cidx int64) (r request, err error) {
 	if t.cmaximum <= cidx {
 		return r, fmt.Errorf("chunk index out of range: %d - %d", cidx, t.cmaximum)
 	}
@@ -235,7 +236,7 @@ func (t *chunks) request(cidx int64, prio int) (r request, err error) {
 	pidx := pindex(cidx, t.meta.PieceLength, t.clength)
 	start := chunkOffset(cidx, t.meta.PieceLength, t.clength)
 	length := chunkLength(t.meta.TotalLength(), cidx, t.meta.PieceLength, t.clength, cidx == t.cmaximum-1)
-	return newRequest2(pp.Integer(pidx), pp.Integer(start), pp.Integer(length), prio), nil
+	return newRequest(pp.Integer(pidx), pp.Integer(start), pp.Integer(length)), nil
 }
 
 func (t *chunks) requestCID(r request) int {
@@ -262,7 +263,7 @@ func (t *chunks) peek(available *roaring.Bitmap) (cidx int, req request, err err
 	}
 
 	cidx = int(union.Minimum())
-	if req, err = t.request(int64(cidx), int(-1*(cidx+1))); err != nil {
+	if req, err = t.request(int64(cidx)); err != nil {
 		return cidx, req, errorsx.Wrap(err, "invalid request")
 	}
 
@@ -363,33 +364,11 @@ func (t *chunks) DataAvailableForOffset(offset int64) (allowed int64) {
 // Chunks returns the chunk requests for the given piece.
 func (t *chunks) chunksRequests(idx uint64) (requests []request) {
 	for cidx, cidn := t.Range(idx); cidx < cidn; cidx++ {
-		req, _ := t.request(int64(cidx), -1*int(cidx+1))
+		req, _ := t.request(int64(cidx))
 		requests = append(requests, req)
 	}
 
 	return requests
-}
-
-func (t *chunks) ChunksAdjust(pid uint64) (changed bool) {
-	// trace(fmt.Sprintf("initiated: %p", t.mu.(*DebugLock).m))
-	// defer trace(fmt.Sprintf("completed: %p", t.mu.(*DebugLock).m))
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.completed.ContainsInt(int(pid)) {
-		return false
-	}
-
-	for cidx, cidn := t.Range(pid); cidx < cidn; cidx++ {
-		tmp := t.missing.CheckedAdd(uint32(cidx))
-		if tmp {
-			t.unverified.Remove(uint32(cidx))
-		}
-		// log.Output(2, fmt.Sprintf("%p CHUNK PRIORITY ADJUSTED: %d %s prios %d %d %t %d\n", t, c, fmt.Sprintf("(%d)", pid), oprio, prio, tmp, t.missing.Len()))
-		changed = changed || tmp
-	}
-
-	return changed
 }
 
 // ChunksPend marks all the chunks for the given piece to the priority.
@@ -497,11 +476,22 @@ func (t *chunks) Pop(n int, available *roaring.Bitmap) (reqs []request, err erro
 	reqs = make([]request, 0, n)
 	for i := 0; i < n; i++ {
 		var (
-			cidx int
-			req  request
+			cidx     int
+			req      request
+			emptyerr empty
 		)
 
-		if cidx, req, err = t.peek(available); err != nil {
+		if cidx, req, err = t.peek(available); errors.As(err, &emptyerr) {
+			if emptyerr.Missing == 0 && emptyerr.Outstanding > 0 && i == 0 {
+				for _, req := range t.outstanding {
+					if available.Contains(uint32(t.requestCID(req))) {
+						return []request{newRequest(req.Index, req.Begin, req.Length)}, nil
+					}
+				}
+			}
+
+			return reqs, emptyerr
+		} else if err != nil {
 			// log.Println("Popped empty", i, "<", n, ",", err)
 			return reqs, err
 		}
@@ -510,8 +500,6 @@ func (t *chunks) Pop(n int, available *roaring.Bitmap) (reqs []request, err erro
 		t.missing.Remove(uint32(cidx))
 
 		reqs = append(reqs, req)
-
-		// log.Output(2, fmt.Sprintf("(%d) c(%p) popped: d(%020d - %d) r(%d,%d,%d) - %t\n", os.Getpid(), t, req.Digest, cidx, req.Index, req.Begin, req.Length, t.missing.Contains(cidx)))
 	}
 
 	return reqs, nil
