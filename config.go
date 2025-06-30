@@ -3,7 +3,6 @@ package torrent
 import (
 	"context"
 	"iter"
-	"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -254,13 +253,13 @@ func ClientConfigBucketLimit(i int) ClientConfigOption {
 }
 
 // ClientConfigInfoLogger set the info logger
-func ClientConfigInfoLogger(l *log.Logger) ClientConfigOption {
+func ClientConfigInfoLogger(l logging) ClientConfigOption {
 	return func(c *ClientConfig) {
 		c.Logger = l
 	}
 }
 
-func ClientConfigDebugLogger(l *log.Logger) ClientConfigOption {
+func ClientConfigDebugLogger(l logging) ClientConfigOption {
 	return func(c *ClientConfig) {
 		c.Debug = l
 	}
