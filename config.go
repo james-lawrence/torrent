@@ -410,6 +410,14 @@ func ClientConfigDialPoolSize[T constraints.Integer](n T) ClientConfigOption {
 	}
 }
 
+// specify the low and high watermarks for torrent peering
+func ClientConfigPeerLimits[T constraints.Integer](low, high T) ClientConfigOption {
+	return func(cc *ClientConfig) {
+		cc.TorrentPeersLowWater = int(low)
+		cc.TorrentPeersHighWater = int(high)
+	}
+}
+
 // NewDefaultClientConfig default client configuration.
 func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, options ...ClientConfigOption) *ClientConfig {
 	cc := &ClientConfig{
@@ -425,8 +433,8 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		NominalDialTimeout:             16 * time.Second,
 		MinDialTimeout:                 4 * time.Second,
 		HalfOpenConnsPerTorrent:        32,
-		TorrentPeersHighWater:          512,
-		TorrentPeersLowWater:           128,
+		TorrentPeersHighWater:          128,
+		TorrentPeersLowWater:           48,
 		HandshakesTimeout:              4 * time.Second,
 		dynamicip:                      UPnPPortForward,
 		DhtStartingNodes: func(network string) dht.StartingNodesGetter {
