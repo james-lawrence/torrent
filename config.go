@@ -82,9 +82,9 @@ type ClientConfig struct {
 	CryptoSelector mse.CryptoSelector
 
 	DisableIPv4Peers bool
-	Logger           logger // standard logging for errors, defaults to stderr
-	Warn             logger // warn logging
-	Debug            logger // debug logging, defaults to discard
+	Logger           logging // standard logging for errors, defaults to stderr
+	Warn             logging // warn logging
+	Debug            logging // debug logging, defaults to discard
 
 	// HTTPProxy defines proxy for HTTP requests.
 	// Format: func(*Request) (*url.URL, error),
@@ -167,20 +167,20 @@ func (cfg *ClientConfig) AnnounceRequest() tracker.Announce {
 	}
 }
 
-func (cfg *ClientConfig) errors() llog {
-	return llog{logger: cfg.Logger}
+func (cfg *ClientConfig) errors() logging {
+	return cfg.Logger
 }
 
-func (cfg *ClientConfig) warn() llog {
-	return llog{logger: cfg.Warn}
+func (cfg *ClientConfig) warn() logging {
+	return cfg.Warn
 }
 
-func (cfg *ClientConfig) info() llog {
-	return llog{logger: cfg.Logger}
+func (cfg *ClientConfig) info() logging {
+	return cfg.Logger
 }
 
-func (cfg *ClientConfig) debug() llog {
-	return llog{logger: cfg.Debug}
+func (cfg *ClientConfig) debug() logging {
+	return cfg.Debug
 }
 
 // ClientConfigOption options for the client configuration

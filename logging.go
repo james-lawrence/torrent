@@ -12,6 +12,12 @@ type logger interface {
 	Output(int, string) error
 }
 
+type logging interface {
+	Println(v ...interface{})
+	Printf(format string, v ...interface{})
+	Print(v ...interface{})
+}
+
 // implements the additional methods used by the package for logging.
 type llog struct {
 	logger
@@ -54,7 +60,7 @@ type logoutput interface {
 }
 
 // if possible use the provided logger as a base, otherwise fallback to the default
-func newlogger(l logger, prefix string, flags int) *log.Logger {
+func newlogger(l logging, prefix string, flags int) *log.Logger {
 	if l, ok := l.(logoutput); ok {
 		return log.New(l.Writer(), prefix, flags)
 	}
