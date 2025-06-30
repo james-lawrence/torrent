@@ -218,6 +218,7 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		lastwrite:        ts,
 		chokeduntil:      ts.Add(-1 * time.Minute),
 		nextbitmap:       ts.Add(time.Minute),
+		refreshavailable: atomicx.Pointer(ts),
 		resync:           atomicx.Pointer(ts.Add(to)),
 	}
 
@@ -235,6 +236,8 @@ type writerstate struct {
 	nextbitmap       time.Time
 	chokeduntil      time.Time
 	resync           *atomic.Pointer[time.Time]
+	refreshavailable *atomic.Pointer[time.Time]
+	cachedavailable  *roaring.Bitmap
 }
 
 func (t *writerstate) String() string {
@@ -390,6 +393,11 @@ func (t _connwriterRequests) determineInterest(msg func(pp.Message) bool) (avail
 		t.cfg.debug().Printf("c(%p) seed(%t) nothing available to request\n", t.connection, t.t.seeding())
 	}
 
+	if t.refreshavailable.Load().After(time.Now()) {
+		t.cfg.debug().Printf("c(%p) seed(%t) allowing fastset %d\n", t.connection, t.t.seeding(), t.cachedavailable.GetCardinality())
+		return t.cachedavailable
+	}
+
 	if !t.PeerChoked {
 		t.cfg.debug().Printf("c(%p) seed(%t) allowing claimed: %d\n", t.connection, t.t.seeding(), t.claimed.GetCardinality())
 		available = t.claimed
@@ -400,7 +408,8 @@ func (t _connwriterRequests) determineInterest(msg func(pp.Message) bool) (avail
 
 	t._mu.RLock()
 	defer t._mu.RUnlock()
-	return bitmapx.AndNot(available, t.blacklisted)
+	t.cachedavailable = bitmapx.AndNot(available, t.blacklisted)
+	return t.cachedavailable
 }
 
 func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.Message) bool) {

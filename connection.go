@@ -507,7 +507,6 @@ func (cn *connection) PostBitfield() (n int, err error) {
 
 func (cn *connection) updateRequests() {
 	cn.needsresponse.Store(true)
-	// log.Printf("waking up c(%p) - seed(%t)\n", cn, cn.t.seeding())
 	cn.respond.Broadcast()
 }
 
@@ -912,10 +911,11 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		cn.updateRequests()
 		return msg, nil
 	case pp.Reject:
-		req := newRequestFromMessage(&msg)
 		if !cn.supported(pp.ExtensionBitFast) {
 			return msg, fmt.Errorf("reject recevied, fast not enabled")
 		}
+
+		req := newRequestFromMessage(&msg)
 		cn.lastRejectReceived.Store(langx.Autoptr(time.Now()))
 		cn.clearRequests(req)
 		return msg, nil
