@@ -38,6 +38,17 @@ func (discard) Output(int, string) error {
 	return nil
 }
 
+// Println replicates the behaviour of the standard logger.
+func (t discard) Println(v ...interface{}) {
+}
+
+func (t discard) Printf(format string, v ...interface{}) {
+}
+
+func (t discard) Print(v ...interface{}) {
+
+}
+
 type logoutput interface {
 	Writer() io.Writer
 }

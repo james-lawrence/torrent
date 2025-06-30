@@ -2,7 +2,6 @@ package torrent
 
 import (
 	"context"
-	"io"
 	"iter"
 	"log"
 	"net"
@@ -451,7 +450,7 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		},
 		CryptoSelector:   mse.DefaultCryptoSelector,
 		CryptoProvides:   mse.AllSupportedCrypto,
-		Logger:           log.New(io.Discard, "[torrent] ", log.Flags()),
+		Logger:           discard{},
 		Warn:             discard{},
 		Debug:            discard{},
 		DHTAnnouncePeer:  func(ih metainfo.Hash, ip net.IP, port int, portOk bool) {},
