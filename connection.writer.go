@@ -408,6 +408,8 @@ func (t _connwriterRequests) determineInterest(msg func(pp.Message) bool) (avail
 
 	t._mu.RLock()
 	defer t._mu.RUnlock()
+
+	t.refreshavailable.Store(langx.Autoptr(time.Now().Add(15 * time.Second)))
 	t.cachedavailable = bitmapx.AndNot(available, t.blacklisted)
 	return t.cachedavailable
 }
