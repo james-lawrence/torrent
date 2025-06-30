@@ -67,3 +67,7 @@ func newlogger(l logging, prefix string, flags int) *log.Logger {
 
 	return log.New(io.Discard, prefix, log.Flags())
 }
+
+func LogDiscard() discard {
+	return discard{}
+}
