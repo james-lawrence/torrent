@@ -91,6 +91,10 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 
 			if errorsx.Is(err, tracker.ErrMissingInfoHash) {
 				t.cln.config.errors().Println(err)
+				if len(trackers) == 1 {
+					return
+				}
+
 				continue
 			}
 

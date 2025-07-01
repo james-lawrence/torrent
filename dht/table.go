@@ -88,6 +88,9 @@ func (tbl *table) getNode(addr Addr, id int160.T) *node {
 }
 
 func (tbl *table) closestNodes(k int, target int160.T, filter func(*node) bool) (ret []*node) {
+	tbl.m.Lock()
+	defer tbl.m.Unlock()
+
 	for bi := func() int {
 		if target == tbl.rootID {
 			return len(tbl.buckets) - 1
