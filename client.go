@@ -2,6 +2,7 @@ package torrent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -558,13 +559,16 @@ func (cl *Client) receiveHandshakes(c *connection) (t *torrent, err error) {
 		CryptoSelector: cl.config.CryptoSelector,
 	}
 
-	if _, buffered, err = encryption.Incoming(c.rw()); err != nil && cl.config.HeaderObfuscationPolicy.RequirePreferred {
+	if _, buffered, err = encryption.Incoming(c.rw()); errors.Is(err, io.EOF) {
+		cl.config.debug().Println("encryption handshake timedout", err)
+		return nil, errorsx.Timedout(err, 0)
+	} else if err != nil && cl.config.HeaderObfuscationPolicy.RequirePreferred {
 		return t, errorsx.Wrap(err, "connection does not have the required header obfuscation")
 	} else if err != nil && buffered == nil {
-		cl.config.debug().Println("encryption handshake failed", err)
+		cl.config.debug().Println("encryption handshake", err)
 		return nil, err
 	} else if err != nil {
-		cl.config.debug().Println("encryption handshake failed", err)
+		cl.config.debug().Println("encryption handshake", err)
 	}
 
 	ebits, info, err := pp.Handshake{
@@ -591,12 +595,22 @@ func (cl *Client) receiveHandshakes(c *connection) (t *torrent, err error) {
 }
 
 func (cl *Client) runReceivedConn(c *connection) {
+	var (
+		timedout errorsx.Timeout
+	)
+
 	if err := c.conn.SetDeadline(time.Now().Add(cl.config.HandshakesTimeout)); err != nil {
 		cl.config.errors().Println(errorsx.Wrap(err, "failed setting handshake deadline"))
 		return
 	}
 
 	t, err := cl.receiveHandshakes(c)
+	if errors.As(err, &timedout) {
+		cl.config.debug().Printf("received connection timed out %T - %v\n", err, err)
+		cl.config.Handshaker.Release(c.conn, err)
+		return
+	}
+
 	if err != nil {
 		cl.config.Handshaker.Release(c.conn, connections.NewBanned(c.conn, errorsx.Wrap(err, "error during handshake")))
 		return

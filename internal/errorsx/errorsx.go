@@ -100,7 +100,7 @@ type Timeout interface {
 
 // Timedout represents a timeout. the duration is a suggestion
 // on how long to wait before attempting again.
-func Timedout(cause error, d time.Duration) error {
+func Timedout(cause error, d time.Duration) timeout {
 	return timeout{
 		error: cause,
 		d:     d,
@@ -145,6 +145,13 @@ func (t timeout) Timedout() time.Duration {
 
 func (t timeout) Timeout() bool {
 	return true
+}
+
+func (t timeout) Unwrap() error {
+	return t.error
+}
+func (t timeout) Cause() error {
+	return t.error
 }
 
 // Notification presents an error that will be displayed to the user
@@ -375,6 +382,10 @@ func Panic(err error) {
 
 // returns nil if the error matches any of the targets
 func Ignore(err error, targets ...error) error {
+	if err == nil {
+		return err
+	}
+
 	for _, target := range targets {
 		if errors.Is(err, target) {
 			return nil
@@ -386,6 +397,10 @@ func Ignore(err error, targets ...error) error {
 
 // returns true if the error matches any of the targets.
 func Is(err error, targets ...error) bool {
+	if err == nil {
+		return false
+	}
+
 	for _, target := range targets {
 		if errors.Is(err, target) {
 			return true

@@ -19,7 +19,7 @@ func TestMetadataExtension(t *testing.T) {
 	// ensure a client with just the magnet link can bootstrap the info data
 	const datan = 32 * bytesx.MiB
 
-	ctx, done := testx.ContextWithTimeout(t, 5*time.Second)
+	ctx, done := testx.ContextWithTimeout(t, 1*time.Second)
 	defer done()
 
 	seedingdir := t.TempDir()
@@ -57,7 +57,10 @@ func TestMetadataExtension(t *testing.T) {
 	)
 
 	c, err := torrent.NewClient(cfg)
-	leecher, err := autobind.NewLoopback(autobind.DisableIPv6).Bind(c, err)
+	// we limit ourselves to tcp ipv4 here because of racing dialer.
+	// basically the receiving end will see multiple connections but only one
+	// will work. and the delay causes this test to take longer than it should.
+	leecher, err := autobind.NewLoopback(autobind.DisableIPv6, autobind.DisableUTP).Bind(c, err)
 	require.NoError(t, err)
 	defer leecher.Close()
 
