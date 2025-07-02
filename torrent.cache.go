@@ -124,9 +124,6 @@ func (t *memoryseeding) Load(cl *Client, id int160.T) (_ *torrent, cached bool, 
 		return x, true, nil
 	}
 
-	t._mu.Lock()
-	defer t._mu.Unlock()
-
 	if x, ok := t.torrents[id]; ok {
 		return x, true, nil
 	}
@@ -146,6 +143,9 @@ func (t *memoryseeding) Load(cl *Client, id int160.T) (_ *torrent, cached bool, 
 	// lets randomly verify some of the data.
 	// will block until complete.
 	dlt.Tune(TuneVerifySample(8))
+
+	t._mu.Lock()
+	defer t._mu.Unlock()
 
 	t.torrents[id] = dlt
 

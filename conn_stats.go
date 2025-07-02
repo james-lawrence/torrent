@@ -6,6 +6,7 @@ import (
 	"io"
 	"reflect"
 	"sync/atomic"
+	"time"
 
 	pp "github.com/james-lawrence/torrent/btprotocol"
 )
@@ -116,13 +117,14 @@ type connStatsReadWriter struct {
 }
 
 func (me connStatsReadWriter) Write(b []byte) (n int, err error) {
+	me.c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	n, err = me.rw.Write(b)
 	me.c.wroteBytes(int64(n))
-	return
+	return n, err
 }
 
 func (me connStatsReadWriter) Read(b []byte) (n int, err error) {
 	n, err = me.rw.Read(b)
 	me.c.readBytes(int64(n))
-	return
+	return n, err
 }

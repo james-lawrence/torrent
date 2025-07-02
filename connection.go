@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"iter"
 	"log"
 	"math/rand"
 	"net"
@@ -69,7 +70,6 @@ func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.A
 		sentHaves:               roaring.NewBitmap(),
 		requests:                make(map[uint64]request, cfg.maximumOutstandingRequests),
 		PeerRequests:            make(map[request]struct{}, cfg.maximumOutstandingRequests),
-		drop:                    make(chan error, 1),
 		PeerExtensionIDs:        make(map[pp.ExtensionName]pp.ExtensionNumber),
 		lastMessageReceived:     atomicx.Pointer(ts),
 		lastRejectReceived:      atomicx.Pointer(ts),
@@ -116,6 +116,8 @@ type connection struct {
 
 	lastMessageReceived     *atomic.Pointer[time.Time]
 	lastRejectReceived      *atomic.Pointer[time.Time]
+	chunksRejected          atomic.Int32
+	chunksReceived          atomic.Int32
 	completedHandshake      time.Time
 	lastUsefulChunkReceived time.Time
 	lastChunkSent           time.Time
@@ -176,11 +178,33 @@ type connection struct {
 	PeerClientName     string
 
 	writeBuffer   *bytes.Buffer
-	uploadTimer   *time.Timer
 	respond       *sync.Cond
 	needsresponse atomic.Bool // used to track when responses need to be sent that might be missed by the respond condition.
+}
 
-	drop chan error
+func (cn *connection) requestseq() iter.Seq[request] {
+	return func(yield func(request) bool) {
+		for {
+			var (
+				req request
+			)
+
+			cn._mu.RLock()
+			for req = range cn.PeerRequests {
+				break
+			}
+			n := len(cn.PeerRequests)
+			cn._mu.RUnlock()
+
+			if n == 0 {
+				return
+			}
+
+			if !yield(req) {
+				return
+			}
+		}
+	}
 }
 
 func (cn *connection) updateExpectingChunks() {
@@ -446,14 +470,14 @@ func (cn *connection) request(r request, mw messageWriter) bool {
 
 // connections check their own failures, this amortizes the cost of failures to
 // the connections themselves instead of bottlenecking at the torrent.
-func (cn *connection) checkFailures() {
+func (cn *connection) checkFailures() error {
 	cn.cmu().Lock()
 	defer cn.cmu().Unlock()
 
 	failed := cn.t.chunks.Failed(cn.touched.Clone())
 
 	if failed.IsEmpty() {
-		return
+		return nil
 	}
 
 	for iter, prev, pid := failed.ReverseIterator(), -1, 0; iter.HasNext(); prev = pid {
@@ -469,16 +493,10 @@ func (cn *connection) checkFailures() {
 	}
 
 	if cn.stats.PiecesDirtiedBad.Int64() > 10 {
-		cn.ban(errorsx.New("too many bad pieces"))
+		return connections.NewBanned(cn.conn, errorsx.New("too many bad pieces"))
 	}
-}
 
-func (cn *connection) ban(cause error) {
-	select {
-	case cn.drop <- connections.NewBanned(cn.conn, cause):
-		cn.Close()
-	default:
-	}
+	return nil
 }
 
 func (cn *connection) Have(piece uint64) (n int, err error) {
@@ -526,7 +544,6 @@ func (cn *connection) raisePeerMinPieces(newMin uint64) {
 }
 
 func (cn *connection) peerSentHave(piece uint64) error {
-	// l2.Printf("(%d) c(%p) - RECEIVED HAVE: r(%d,-,-)\n", os.Getpid(), cn, piece)
 	if piece >= cn.t.chunks.pieces {
 		return errorsx.New("invalid piece")
 	}
@@ -780,8 +797,9 @@ func (cn *connection) Flush() (int, error) {
 	cn.cmu().Lock()
 	buf := cn.writeBuffer.Bytes()
 	cn.writeBuffer.Reset()
-	n, err := cn.w.Write(buf)
 	cn.cmu().Unlock()
+
+	n, err := cn.w.Write(buf)
 
 	if err != nil {
 		return n, errorsx.Wrap(err, "failed to flush buffer")
@@ -796,15 +814,6 @@ func (cn *connection) Flush() (int, error) {
 
 func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.Message, err error) {
 	err = decoder.Decode(&msg)
-
-	// check for any error signals from the writer.
-	select {
-	case err := <-cn.drop:
-		return msg, err
-	case <-ctx.Done():
-		return msg, context.Cause(ctx)
-	default:
-	}
 
 	if err != nil {
 		return msg, err
@@ -916,7 +925,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		}
 
 		req := newRequestFromMessage(&msg)
-		cn.lastRejectReceived.Store(langx.Autoptr(time.Now()))
+		cn.chunksRejected.Add(1)
 		cn.clearRequests(req)
 		return msg, nil
 	case pp.AllowedFast:
@@ -948,6 +957,13 @@ func (cn *connection) mainReadLoop(ctx context.Context) (err error) {
 		if err != nil {
 			return err
 		}
+
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		default:
+		}
+
 	}
 }
 
@@ -1040,6 +1056,7 @@ func (cn *connection) receiveChunk(msg *pp.Message) error {
 	cn.allStats(add(1, func(cs *ConnStats) *count { return &cs.ChunksReadUseful }))
 	cn.allStats(add(int64(len(msg.Piece)), func(cs *ConnStats) *count { return &cs.BytesReadUsefulData }))
 	cn.lastUsefulChunkReceived = time.Now()
+	cn.chunksReceived.Add(1)
 
 	if err := cn.t.writeChunk(int(msg.Index), int64(msg.Begin), msg.Piece); err != nil {
 		return errorsx.Wrap(err, "failed to write chunk")
@@ -1059,71 +1076,7 @@ func (cn *connection) receiveChunk(msg *pp.Message) error {
 	cn.touched.AddInt(cn.t.chunks.requestCID(req))
 	cn.cmu().Unlock()
 
-	// cn.t.publishPieceChange(uint64(req.Index))
-
 	return nil
-}
-
-func (cn *connection) setRetryUploadTimer(delay time.Duration) {
-	if cn.uploadTimer == nil {
-		cn.uploadTimer = time.AfterFunc(delay, cn.respond.Broadcast)
-	} else {
-		cn.uploadTimer.Reset(delay)
-	}
-}
-
-// Also handles choking and unchoking of the remote peer.
-func (cn *connection) upload(msg func(pp.Message) bool) bool {
-	// TODO: we should reject requests
-	if cn.Choked || cn.peerSentHaveAll {
-		cn.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) upload restricted - disallowed\n", cn, cn.t.seeding(), cn.Choked, cn.peerSentHaveAll)
-		return true
-	}
-
-	cn.cmu().Lock()
-	defer cn.cmu().Unlock()
-
-	uploaded := 0
-	for r := range cn.PeerRequests {
-		res := cn.cfg.UploadRateLimiter.ReserveN(time.Now(), int(r.Length))
-		if !res.OK() {
-			cn.cfg.debug().Printf("upload rate limiter burst size < %d\n", r.Length)
-			go cn.ban(errorsx.Errorf("upload length is larger than rate limit: %d", r.Length)) // pan this IP address, we'll never be able to support them.
-			return false
-		}
-
-		if delay := res.Delay(); delay > 0 {
-			cn.cfg.errors().Println("maximum upload rate exceed", delay)
-			res.Cancel()
-			cn.setRetryUploadTimer(delay)
-			return true
-		}
-
-		cn.cmu().Unlock()
-		more, err := cn.sendChunk(r, msg)
-		cn.cmu().Lock()
-		if err != nil {
-			cn.cfg.errors().Println("error sending chunk to peer, choking peer", err)
-			// If we failed to send a chunk, choke the peer to ensure they
-			// flush all their requests. We've probably dropped a piece,
-			// but there's no way to communicate this to the peer. If they
-			// ask for it again, we'll kick them to allow us to send them
-			// an updated bitfield.
-			return cn.Choke(msg)
-		}
-
-		uploaded++
-		delete(cn.PeerRequests, r)
-
-		if !more {
-			// log.Printf("(%d) c(%p) seed(%t) upload - %d", os.Getpid(), cn, cn.cfg.Seed, uploaded)
-			return false
-		}
-	}
-
-	// log.Printf("(%d) c(%p) seed(%t) upload - %d", os.Getpid(), cn, cn.cfg.Seed, uploaded)
-
-	return true
 }
 
 func (cn *connection) peerHasWantedPieces() bool {

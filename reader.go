@@ -24,14 +24,12 @@ type blockingreader struct {
 }
 
 func (t *blockingreader) ReadAt(p []byte, offset int64) (n int, err error) {
-	// log.Println("blocking reading initiated", offset)
-	// defer log.Println("blocking reading completed", offset)
 	var allowed int64
 	t.c.cond.L.Lock()
 	pid := uint64(t.c.meta.OffsetToIndex(offset))
 
 	once := sync.OnceFunc(func() {
-		// log.Println("enqueuing chunk", pid, offset, t.c.missing.String(), t.c.unverified.String())
+		// log.Println("enqueuing chunk", pid, offset, t.c)
 		t.d.Enqueue(pid)
 	})
 

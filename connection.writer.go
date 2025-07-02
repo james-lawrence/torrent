@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"os"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -13,6 +13,7 @@ import (
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/bep0006"
 	pp "github.com/james-lawrence/torrent/btprotocol"
+	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/cstate"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/atomicx"
@@ -20,6 +21,8 @@ import (
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
+	"github.com/james-lawrence/torrent/internal/slicesx"
+	"github.com/james-lawrence/torrent/internal/timex"
 	"github.com/james-lawrence/torrent/internal/x/bitmapx"
 )
 
@@ -47,8 +50,7 @@ func RunHandshookConn(c *connection, t *torrent) error {
 	c.cfg.debug().Printf("%p exchanging extensions\n", c)
 
 	if err := ConnExtensions(ctx, c); err != nil {
-		errorsx.Log(err)
-		err = errorsx.Wrap(err, "error sending configuring connection")
+		err = errorsx.LogErr(errorsx.Wrap(err, "error sending configuring connection"))
 		cancel(err)
 		return err
 	}
@@ -56,10 +58,13 @@ func RunHandshookConn(c *connection, t *torrent) error {
 	go func() {
 		err := connwriterinit(ctx, c, 10*time.Second)
 		err = errorsx.StdlibTimeout(err, retrydelay, syscall.ECONNRESET)
-		cancel(err)
+		cancel(errorsx.LogErr(err))
+		c.Close()
 	}()
 
 	if err := c.mainReadLoop(ctx); err != nil {
+		// check for errors from the writer.
+		err = errorsx.Compact(context.Cause(ctx), err)
 		err = errorsx.StdlibTimeout(err, retrydelay, syscall.ECONNRESET)
 		err = errorsx.Wrapf(err, "%s - %s: error during main read loop", c.PeerClientName, remotreaddr)
 		cancel(err)
@@ -67,13 +72,13 @@ func RunHandshookConn(c *connection, t *torrent) error {
 		return err
 	}
 
-	return context.Cause(ctx)
+	return errorsx.LogErr(context.Cause(ctx))
 }
 
 // See the order given in Transmission's tr_peerMsgsNew.
 func ConnExtensions(ctx context.Context, cn *connection) error {
-	log.Println("conn extensions initiated")
-	defer log.Println("conn extensions completed")
+	cn.cfg.debug().Println("conn extensions initiated")
+	defer cn.cfg.debug().Println("conn extensions completed")
 	return cstate.Run(ctx, connexinit(cn, connexfast(cn, connexdht(cn, connflush(cn, nil)))), cn.cfg.debug())
 }
 
@@ -94,7 +99,7 @@ func connexinit(cn *connection, n cstate.T) cstate.T {
 		}
 
 		dynamicport := langx.DefaultIfZero(cn.localport, langx.Autoderef(cn.dynamicaddr.Load()).Port())
-		defer log.Println("extended handshake extension completed", cn.localport, cn.dynamicaddr)
+		defer cn.cfg.debug().Println("extended handshake extension completed", cn.localport, cn.dynamicaddr)
 
 		// TODO: We can figured the port and address out specific to the socket
 		// used.
@@ -184,7 +189,7 @@ func connexdht(cn *connection, n cstate.T) cstate.T {
 			return n
 		}
 
-		defer log.Println("dht extension completed")
+		defer cn.cfg.debug().Println("dht extension completed")
 
 		_, err := cn.Post(pp.NewPort(port))
 		if err != nil {
@@ -212,14 +217,15 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 
 	ts := time.Now()
 	ws := &writerstate{
-		bufferLimit:      64 * bytesx.KiB,
-		connection:       cn,
-		keepAliveTimeout: to,
-		lastwrite:        ts,
-		chokeduntil:      ts.Add(-1 * time.Minute),
-		nextbitmap:       ts.Add(time.Minute),
-		refreshavailable: atomicx.Pointer(ts),
-		resync:           atomicx.Pointer(ts.Add(to)),
+		bufferLimit:         64 * bytesx.KiB,
+		connection:          cn,
+		keepAliveTimeout:    to,
+		chokeduntil:         ts.Add(-1 * time.Minute),
+		nextbitmap:          ts.Add(time.Minute),
+		refreshavailable:    atomicx.Pointer(ts),
+		uploadavailable:     atomicx.Pointer(ts),
+		keepaliverequired:   atomicx.Pointer(ts.Add(to)),
+		lowrequestwatermark: max(1, cn.PeerMaxRequests/4),
 	}
 
 	defer cn.checkFailures()
@@ -230,14 +236,15 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 
 type writerstate struct {
 	*connection
-	bufferLimit      int
-	keepAliveTimeout time.Duration
-	lastwrite        time.Time
-	nextbitmap       time.Time
-	chokeduntil      time.Time
-	resync           *atomic.Pointer[time.Time]
-	refreshavailable *atomic.Pointer[time.Time]
-	cachedavailable  *roaring.Bitmap
+	bufferLimit         int
+	keepAliveTimeout    time.Duration
+	nextbitmap          time.Time
+	chokeduntil         time.Time
+	keepaliverequired   *atomic.Pointer[time.Time]
+	refreshavailable    *atomic.Pointer[time.Time]
+	uploadavailable     *atomic.Pointer[time.Time]
+	cachedavailable     *roaring.Bitmap
+	lowrequestwatermark int
 }
 
 func (t *writerstate) String() string {
@@ -309,7 +316,7 @@ func (t _connWriterSyncChunks) Update(ctx context.Context, _ *cstate.Shared) (r 
 	ws := t.writerstate
 	next := connWriterSyncComplete(ws)
 
-	if ws.resync.Load().After(time.Now()) {
+	if ws.keepaliverequired.Load().After(time.Now()) {
 		return next
 	}
 
@@ -393,8 +400,8 @@ func (t _connwriterRequests) determineInterest(msg func(pp.Message) bool) (avail
 		t.cfg.debug().Printf("c(%p) seed(%t) nothing available to request\n", t.connection, t.t.seeding())
 	}
 
-	if t.refreshavailable.Load().After(time.Now()) {
-		t.cfg.debug().Printf("c(%p) seed(%t) allowing fastset %d\n", t.connection, t.t.seeding(), t.cachedavailable.GetCardinality())
+	if ts := langx.Autoderef(t.refreshavailable.Load()); ts.After(time.Now()) {
+		t.cfg.debug().Printf("c(%p) seed(%t) allowing cached %d - %s\n", t.connection, t.t.seeding(), t.cachedavailable.GetCardinality(), time.Until(ts))
 		return t.cachedavailable
 	}
 
@@ -409,7 +416,6 @@ func (t _connwriterRequests) determineInterest(msg func(pp.Message) bool) (avail
 	t._mu.RLock()
 	defer t._mu.RUnlock()
 
-	t.refreshavailable.Store(langx.Autoptr(time.Now().Add(15 * time.Second)))
 	t.cachedavailable = bitmapx.AndNot(available, t.blacklisted)
 	return t.cachedavailable
 }
@@ -421,27 +427,32 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 		req  request
 	)
 
-	// cn.cfg.debug().Printf("c(%p) seed(%t) make requests initated\n", cn, cn.t.seeding())
-	// defer cn.cfg.debug().Printf("c(%p) seed(%t) make requests completed\n", cn, cn.t.seeding())
+	t.cfg.debug().Printf("c(%p) seed(%t) make requests initated\n", t.connection, t.t.seeding())
+	defer t.cfg.debug().Printf("c(%p) seed(%t) make requests completed\n", t.connection, t.t.seeding())
 
-	if available.IsEmpty() || len(t.requests) > t.requestsLowWater {
-		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - avail(%d) || req(%d > %d)", t.connection, t.t.seeding(), available.GetCardinality(), len(t.requests), t.requestsLowWater)
+	if available.IsEmpty() || len(t.requests) > t.lowrequestwatermark {
+		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - avail(%d) || req(current(%d) > low watermark(%d))", t.connection, t.t.seeding(), available.GetCardinality(), len(t.requests), t.lowrequestwatermark)
 		return
 	}
 
-	if ts := langx.Autoderef(t.lastRejectReceived.Load()); ts.After(time.Now().Add(time.Minute)) {
-		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - recently saw a rejection (%s)", t.connection, t.t.seeding(), time.Since(ts))
+	// once we fall below the low watermark dynamic adjust it based on what we saw.
+	// never allowing it to go above the original low watermark and with a floor of a single request.
+	t.lowrequestwatermark += int(t.chunksReceived.Swap(0)*4 - t.chunksRejected.Swap(0))
+	t.lowrequestwatermark = max(1, min(t.lowrequestwatermark, t.PeerMaxRequests-(t.PeerMaxRequests/4)))
+
+	if m := t.t.chunks.Cardinality(t.t.chunks.completed); uint64(m) == t.t.chunks.pieces {
+		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - have all data m(%d) o(%d) c(%d) p(%d)\n", t.connection, t.t.seeding(), m, len(t.t.chunks.outstanding), t.t.chunks.Cardinality(t.t.chunks.completed), t.t.chunks.pieces)
 		return
 	}
 
-	if t.t.chunks.Cardinality(t.t.chunks.missing) == 0 {
-		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - have all data", t.connection, t.t.seeding())
+	if m := t.t.chunks.Cardinality(t.t.chunks.missing); m == 0 {
+		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - nothing to request m(%d) o(%d) c(%d) p(%d)\n", t.connection, t.t.seeding(), m, len(t.t.chunks.outstanding), t.t.chunks.Cardinality(t.t.chunks.completed), t.t.chunks.pieces)
 		return
 	}
 
 	filledBuffer := false
 
-	max := max(0, t.PeerMaxRequests-len(t.requests)) / 2
+	max := max(0, min(t.lowrequestwatermark, t.PeerMaxRequests)-len(t.requests))
 	if reqs, err = t.t.chunks.Pop(max, available); errors.As(err, &empty{}) {
 		if len(reqs) == 0 && !t.blacklisted.IsEmpty() {
 			// clear the blacklist when we run out of work to do.
@@ -458,7 +469,7 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 		return
 	}
 
-	t.cfg.debug().Printf("c(%p) seed(%t) avail(%d) filling buffer with requests %d - %d -> %d actual %d", t.connection, t.t.seeding(), available.GetCardinality(), t.PeerMaxRequests, len(t.requests), max, len(reqs))
+	t.cfg.debug().Printf("c(%p) seed(%t) avail(%d) filling buffer with requests low(%d) - max(%d) outstanding(%d) -> allowed(%d) actual %d", t.connection, t.t.seeding(), available.GetCardinality(), t.lowrequestwatermark, t.PeerMaxRequests, len(t.requests), max, len(reqs))
 
 	for max, req = range reqs {
 		if filledBuffer = !t.request(req, msg); filledBuffer {
@@ -485,6 +496,71 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 	}
 }
 
+// Also handles choking and unchoking of the remote peer.
+func (t _connwriterRequests) upload(msg func(pp.Message) bool) (time.Duration, error) {
+	// TODO: we should reject requests
+	if t.Choked || t.peerSentHaveAll {
+		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) req(%d) upload restricted - disallowed\n", t.connection, t.t.seeding(), t.Choked, t.peerSentHaveAll, len(t.PeerRequests))
+		return time.Minute, nil
+	}
+
+	if ts, n := langx.Autoderef(t.uploadavailable.Load()), time.Now(); ts.After(n) {
+		return time.Until(ts), nil
+	}
+
+	t.cfg.debug().Printf("c(%p) seed(%t) req(%d) uploading - allowed\n", t.connection, t.t.seeding(), len(t.PeerRequests))
+	defer t.cfg.debug().Printf("c(%p) seed(%t) req(%d) uploading - competed\n", t.connection, t.t.seeding(), len(t.PeerRequests))
+	uploaded := 0
+	for r := range t.requestseq() {
+		res := t.cfg.UploadRateLimiter.ReserveN(time.Now(), int(r.Length))
+		if !res.OK() {
+			t.cfg.debug().Printf("upload rate limiter burst size < %d\n", r.Length)
+			return 0, connections.NewBanned(t.conn, errorsx.Errorf("upload length is larger than rate limit: %d", r.Length))
+		}
+
+		if delay := res.Delay(); delay > 0 {
+			t.cfg.errors().Printf("c(%p) seed(%t) maximum upload rate exceed n(%d) - delay(%v) - bytes(%d)\n", t.connection, t.t.seeding(), uploaded, delay, r.Length)
+			res.Cancel()
+			return delay, nil
+		}
+
+		more, err := t.sendChunk(r, msg)
+		if err != nil {
+			t.cfg.errors().Println("error sending chunk to peer, choking peer", err)
+			// If we failed to send a chunk, choke the peer to ensure they
+			// flush all their requests. We've probably dropped a piece,
+			// but there's no way to communicate this to the peer. If they
+			// ask for it again, we'll kick them to allow us to send them
+			// an updated bitfield.
+			t.Choke(msg)
+			return 0, nil
+		}
+
+		uploaded++
+		t.cmu().Lock()
+		delete(t.PeerRequests, r)
+		t.cmu().Unlock()
+
+		if !more {
+			t.cfg.debug().Printf("(%d) c(%p) seed(%t) upload - %d\n", os.Getpid(), t.connection, t.t.seeding(), uploaded)
+			return 0, nil
+		}
+	}
+
+	t.cfg.debug().Printf("(%d) c(%p) seed(%t) upload - %d\n", os.Getpid(), t.connection, t.t.seeding(), uploaded)
+
+	return 0, nil
+}
+
+func (t _connwriterRequests) resetuploadavailability(delay time.Duration) {
+	if delay == 0 {
+		return
+	}
+
+	next := time.Now().Add(delay)
+	t.uploadavailable.Store(langx.Autoptr(next))
+}
+
 func (t _connwriterRequests) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {
 	ws := t.writerstate
 
@@ -498,15 +574,23 @@ func (t _connwriterRequests) Update(ctx context.Context, _ *cstate.Shared) (r cs
 		return ws.writeBuffer.Len() < ws.bufferLimit
 	}
 
-	ws.checkFailures()
+	if err := ws.checkFailures(); err != nil {
+		return cstate.Failure(err)
+	}
+
 	available := t.determineInterest(writer)
-	ws.upload(writer)
+	if d, err := t.upload(writer); err != nil {
+		return cstate.Failure(err)
+	} else {
+		t.resetuploadavailability(d)
+	}
+
 	t.genrequests(available, writer)
 
 	// needresponse is tracking read that come in while we're in the critical section of this function
 	// to prevent the state machine from going idle just because we didnt write anything this cycle.
 	// needresponse tracks that a message can in that requires a message be sent.
-	if ws.writeBuffer.Len() > 0 || ws.needsresponse.CompareAndSwap(true, false) {
+	if ws.writeBuffer.Len() > 0 {
 		return connwriterFlush(
 			connwriteractive(ws),
 			ws,
@@ -532,7 +616,7 @@ func (t _connwriterKeepalive) Update(ctx context.Context, _ *cstate.Shared) csta
 
 	ws := t.writerstate
 
-	if time.Since(ws.lastwrite) < ws.keepAliveTimeout {
+	if time.Since(langx.Autoderef(ws.keepaliverequired.Load())) < ws.keepAliveTimeout {
 		return connwriterFlush(t.next, ws)
 	}
 
@@ -565,8 +649,7 @@ func (t _connwriterFlush) Update(ctx context.Context, _ *cstate.Shared) cstate.T
 	}
 
 	if n != 0 {
-		ws.lastwrite = time.Now()
-		ws.resync.Store(langx.Autoptr(ws.lastwrite.Add(ws.keepAliveTimeout)))
+		ws.keepaliverequired.Store(langx.Autoptr(time.Now().Add(ws.keepAliveTimeout)))
 	}
 
 	return t.next
@@ -599,7 +682,37 @@ func (t _connwriterCommitBitmap) Update(ctx context.Context, _ *cstate.Shared) c
 	return t.next
 }
 func connwriteridle(ws *writerstate) cstate.T {
-	return connwriterBitmap(cstate.Idle(connwriteractive(ws), ws.keepAliveTimeout/2, ws.connection.respond, ws.connection.t.chunks.cond), ws)
+	now := time.Now()
+
+	responseneeded := ws.needsresponse.CompareAndSwap(true, false)
+	keepalive := now.Add(ws.keepAliveTimeout / 2)
+	if responseneeded {
+		keepalive = now
+	}
+
+	delays := slicesx.MapTransform(
+		func(ts time.Time) time.Duration {
+			if ts.Before(now) {
+				return ws.keepAliveTimeout / 2
+			}
+			return time.Until(ts)
+		},
+		keepalive,
+		ws.nextbitmap,
+		ws.chokeduntil,
+		langx.Autoderef(ws.keepaliverequired.Load()),
+		langx.Autoderef(ws.refreshavailable.Load()),
+		langx.Autoderef(ws.uploadavailable.Load()),
+	)
+
+	mind := timex.DurationMin(delays...)
+	if mind <= 0 {
+		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle uploads(%t) downloads(%t) response needed(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.Choked, !ws.PeerChoked, responseneeded, ws.t.chunks, mind, delays)
+		return connwriteractive(ws)
+	}
+
+	ws.cfg.debug().Printf("c(%p) seed(%t) idling uploads(%t) downloads(%t) response needed(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.Choked, !ws.PeerChoked, responseneeded, ws.t.chunks, mind, delays)
+	return connwriterBitmap(cstate.Idle(connwriteractive(ws), mind, ws.connection.respond, ws.connection.t.chunks.cond), ws)
 }
 
 func connwriteractive(ws *writerstate) cstate.T {

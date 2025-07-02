@@ -26,7 +26,20 @@ func (b *bucket) Len() int {
 }
 
 func (b *bucket) NodeIter() iter.Seq[*node] {
-	return maps.Keys(b.nodes)
+	return func(yield func(*node) bool) {
+		next, stop := iter.Pull(maps.Keys(b.nodes))
+		defer stop()
+		_next := func() (*node, bool) {
+			b._m.RLock()
+			defer b._m.RUnlock()
+			return next()
+		}
+		for n, ok := _next(); ok; n, ok = _next() {
+			if !yield(n) {
+				return
+			}
+		}
+	}
 }
 
 // Returns true if f returns true for all nodes. Iteration stops if f returns false.

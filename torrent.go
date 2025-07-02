@@ -1405,7 +1405,7 @@ func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
 	}
 
 	go func() {
-		for range 5 {
+		for {
 			var (
 				timedout errorsx.Timeout
 			)
@@ -1416,6 +1416,7 @@ func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
 
 			// outgoing connection has a dial rate limit
 			if err := t.cln.outgoingConnection(ctx, t, addr, peer.Source, peer.Trusted); err == nil {
+				log.Printf("outgoing connection completed\n")
 				return
 			} else if errors.As(err, &timedout) {
 				log.Printf("timeout detected, placing back in peerset %T - %v - %s - %t\n", err, err, timedout.Timedout(), peer.Trusted)

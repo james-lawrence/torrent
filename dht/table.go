@@ -98,7 +98,7 @@ func (tbl *table) closestNodes(k int, target int160.T, filter func(*node) bool) 
 			return tbl.bucketIndex(target)
 		}
 	}(); bi >= 0 && len(ret) < k; bi-- {
-		for n := range tbl.buckets[bi].nodes {
+		for n := range tbl.buckets[bi].NodeIter() {
 			if filter(n) {
 				ret = append(ret, n)
 			}

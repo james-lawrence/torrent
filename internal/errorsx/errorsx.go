@@ -117,12 +117,11 @@ func StdlibTimeout(err error, d time.Duration, additional ...error) error {
 	}
 
 	type timeout interface {
-		error
 		Timeout() bool
 	}
 
 	var to timeout
-	if errors.Is(err, to) {
+	if errors.As(err, &to) && to.Timeout() {
 		return Timedout(err, d)
 	}
 
