@@ -123,6 +123,10 @@ func (tbl *table) addNode(n *node) error {
 		return errors.New("bucket is full")
 	}
 	b.AddNode(n, tbl.k)
+
+	tbl.m.Lock()
+	defer tbl.m.Unlock()
+
 	if tbl.addrs == nil {
 		tbl.addrs = make(map[string]map[int160.T]struct{}, 160*tbl.k)
 	}
@@ -131,8 +135,6 @@ func (tbl *table) addNode(n *node) error {
 		tbl.addrs[as] = make(map[int160.T]struct{}, 1)
 	}
 
-	tbl.m.Lock()
-	defer tbl.m.Unlock()
 	tbl.addrs[as][n.Id] = struct{}{}
 	return nil
 }
