@@ -813,9 +813,7 @@ func (cn *connection) Flush() (int, error) {
 }
 
 func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.Message, err error) {
-	err = decoder.Decode(&msg)
-
-	if err != nil {
+	if err = decoder.Decode(&msg); err != nil {
 		return msg, err
 	}
 
@@ -875,7 +873,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		cn.updateRequests()
 		return msg, nil
 	case pp.Piece:
-		if len(cn.requests) < cn.requestsLowWater {
+		if !cn.needsresponse.Load() {
 			defer cn.updateRequests()
 		}
 
@@ -930,7 +928,9 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		return msg, nil
 	case pp.AllowedFast:
 		defer cn.updateRequests()
+		cn._mu.Lock()
 		cn.fastset.AddRange(cn.t.chunks.Range(uint64(msg.Index)))
+		cn._mu.Unlock()
 		return msg, nil
 	case pp.Extended:
 		defer cn.updateRequests()

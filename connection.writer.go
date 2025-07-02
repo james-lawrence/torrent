@@ -204,14 +204,6 @@ func connexdht(cn *connection, n cstate.T) cstate.T {
 func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err error) {
 	cn.cfg.debug().Printf("c(%p) writer initiated\n", cn)
 	defer cn.cfg.debug().Printf("c(%p) writer completed\n", cn)
-	defer func() {
-		// if we're closed that means the connection was shutdown
-		// and since we're just returning that means someone else already detected
-		// and reported the issue.
-		if cn.closed.Load() {
-			err = nil
-		}
-	}()
 
 	ts := time.Now()
 	ws := &writerstate{
@@ -448,8 +440,6 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 		return
 	}
 
-	filledBuffer := false
-
 	max := max(0, min(t.lowrequestwatermark, t.PeerMaxRequests)-len(t.requests))
 	if reqs, err = t.t.chunks.Pop(max, available); errors.As(err, &empty{}) {
 		if len(reqs) == 0 && !t.blacklisted.IsEmpty() {
@@ -470,7 +460,7 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 	t.cfg.debug().Printf("c(%p) seed(%t) avail(%d) filling buffer with requests low(%d) - max(%d) outstanding(%d) -> allowed(%d) actual %d", t.connection, t.t.seeding(), available.GetCardinality(), t.lowrequestwatermark, t.PeerMaxRequests, len(t.requests), max, len(reqs))
 
 	for max, req = range reqs {
-		if filledBuffer = !t.request(req, msg); filledBuffer {
+		if filledBuffer := !t.request(req, msg); filledBuffer {
 			t.cfg.debug().Printf("c(%p) seed(%t) done filling after(%d)\n", t.connection, t.t.seeding(), max)
 			break
 		}
@@ -484,13 +474,6 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 		t.cfg.debug().Printf("c(%p) seed(%t) filled - cleaning up %d reqs(%d)\n", t.connection, t.t.seeding(), max, len(reqs))
 		// release any unused requests back to the queue.
 		t.t.chunks.Retry(reqs...)
-	}
-
-	// If we didn't completely top up the requests, we shouldn't mark
-	// the low water, since we'll want to top up the requests as soon
-	// as we have more write buffer space.
-	if !filledBuffer {
-		t.requestsLowWater = len(t.requests) / 2
 	}
 }
 

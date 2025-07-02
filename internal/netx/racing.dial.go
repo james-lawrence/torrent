@@ -14,7 +14,6 @@ import (
 
 // Creates a pool of go routines for dialing addresses allowing for dialing over
 // a set of different networks and picking the fastest one.
-// note: any tcp connections get set linger(0)
 func NewRacing(n uint16) *RacingDialer {
 	return &RacingDialer{
 		arena: asynccompute.New(func(ctx context.Context, w racingdialworkload) error {

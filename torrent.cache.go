@@ -124,10 +124,6 @@ func (t *memoryseeding) Load(cl *Client, id int160.T) (_ *torrent, cached bool, 
 		return x, true, nil
 	}
 
-	if x, ok := t.torrents[id]; ok {
-		return x, true, nil
-	}
-
 	md, err := t.MetadataStore.Read(id)
 	if err != nil {
 		return nil, false, err
