@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/anacrolix/stm"
-	"github.com/bradfitz/iter"
 	"github.com/james-lawrence/torrent/internal/stmutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -27,7 +26,7 @@ func TestWaitingForSameEntry(t *testing.T) {
 	}
 	e1h1 := i.WaitDefault(context.Background(), entry(1))
 	gotE2s := make(chan struct{})
-	for range iter.N(2) {
+	for range 2 {
 		go func() {
 			i.WaitDefault(context.Background(), entry(2))
 			gotE2s <- struct{}{}
@@ -187,7 +186,7 @@ func testPriority(t testing.TB, n int) {
 	default:
 	}
 	i.SetMaxEntries(1)
-	for j := range iter.N(n) {
+	for j := range n {
 		eh := <-ehs
 		assert.EqualValues(t, entry(n-j-1), eh.e)
 		//log.Print(eh.priority)
@@ -196,7 +195,7 @@ func testPriority(t testing.TB, n int) {
 }
 
 func benchmarkPriority(b *testing.B, n int) {
-	for range iter.N(b.N) {
+	for range b.N {
 		testPriority(b, n)
 	}
 }

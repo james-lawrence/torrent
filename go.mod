@@ -20,7 +20,6 @@ require (
 	github.com/anacrolix/utp v0.2.0
 	github.com/benbjohnson/immutable v0.4.3
 	github.com/bits-and-blooms/bloom/v3 v3.7.0
-	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/frankban/quicktest v1.14.6
@@ -35,6 +34,7 @@ require (
 
 require (
 	github.com/alecthomas/assert/v2 v2.11.0 // indirect
+	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	golang.org/x/sync v0.15.0 // indirect

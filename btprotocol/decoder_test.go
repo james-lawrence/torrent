@@ -6,7 +6,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/bradfitz/iter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,7 +45,7 @@ func BenchmarkDecodePieces(t *testing.B) {
 			},
 		},
 	}
-	for range iter.N(t.N) {
+	for range t.N {
 		var msg Message
 		require.NoError(t, d.Decode(&msg))
 		// WWJD

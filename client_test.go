@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bradfitz/iter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
@@ -103,7 +102,7 @@ func TestAddDropManyTorrents(t *testing.T) {
 	cl, err := autobind.NewLoopback().Bind(torrent.NewClient(torrent.TestingConfig(t, t.TempDir())))
 	require.NoError(t, err)
 	defer cl.Close()
-	for i := range iter.N(1000) {
+	for i := range 1000 {
 		var spec torrent.Metadata
 		binary.PutVarint((&spec).ID[:], int64(i))
 		_, added, err := cl.Start(spec)
@@ -584,7 +583,7 @@ func BenchmarkAddLargeTorrent(b *testing.B) {
 	require.NoError(b, err)
 	defer cl.Close()
 	b.ReportAllocs()
-	for range iter.N(b.N) {
+	for range b.N {
 		t, err := torrent.NewFromMetaInfoFile("testdata/bootstrap.dat.torrent")
 		if err != nil {
 			b.Fatal(err)

@@ -9,7 +9,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/bradfitz/iter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -101,7 +100,7 @@ func TestHandshakeSelectPlaintext(t *testing.T) {
 }
 
 func BenchmarkHandshakeDefault(b *testing.B) {
-	for range iter.N(b.N) {
+	for range b.N {
 		allHandshakeTests(b, AllSupportedCrypto, DefaultCryptoSelector)
 	}
 }
@@ -158,7 +157,7 @@ func benchmarkStream(t *testing.B, crypto CryptoMethod) {
 	t.StopTimer()
 	t.SetBytes(int64(len(ia) + len(a) + len(b)))
 	t.ResetTimer()
-	for range iter.N(t.N) {
+	for range t.N {
 		ac, bc := net.Pipe()
 		ar := make([]byte, len(b))
 		br := make([]byte, len(ia)+len(a))
@@ -226,7 +225,7 @@ func BenchmarkPipeRC4(t *testing.B) {
 	b := make([]byte, len(a))
 	t.SetBytes(int64(len(a)))
 	t.ResetTimer()
-	for range iter.N(t.N) {
+	for range t.N {
 		n, _ = w.Write(a)
 		if n != len(a) {
 			t.FailNow()

@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/bradfitz/iter"
 	"github.com/james-lawrence/torrent/dht/krpc"
 	"github.com/stretchr/testify/require"
 
@@ -43,7 +42,7 @@ func BenchmarkMarshalThenUnmarshalKrpcMsg(tb *testing.B) {
 	}
 	tb.ReportAllocs()
 	tb.ResetTimer()
-	for range iter.N(tb.N) {
+	for range tb.N {
 		marshalAndUnmarshal(tb, orig)
 	}
 }

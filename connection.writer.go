@@ -47,8 +47,6 @@ func RunHandshookConn(c *connection, t *torrent) error {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 
-	c.cfg.debug().Printf("%p exchanging extensions\n", c)
-
 	if err := ConnExtensions(ctx, c); err != nil {
 		err = errorsx.LogErr(errorsx.Wrap(err, "error sending configuring connection"))
 		cancel(err)

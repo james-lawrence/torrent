@@ -25,8 +25,6 @@ import (
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/metainfo"
-
-	biter "github.com/bradfitz/iter"
 )
 
 func StaticSecrets(skeys ...[]byte) SecretKey {
@@ -342,7 +340,7 @@ func xor(dst, src []byte) (ret []byte) {
 	}
 	ret = make([]byte, 0, max)
 
-	for i := range biter.N(max) {
+	for i := range max {
 		ret = append(ret, dst[i]^src[i])
 	}
 	return

@@ -4,8 +4,6 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"time"
-
-	"github.com/bradfitz/iter"
 )
 
 // Manages creation and validation of tokens issued to querying nodes.
@@ -40,7 +38,7 @@ func (me tokenServer) createToken(addr Addr, t time.Time) string {
 
 func (me *tokenServer) ValidToken(token string, addr Addr) bool {
 	t := me.getTimeNow()
-	for range iter.N(me.maxIntervalDelta + 1) {
+	for range me.maxIntervalDelta + 1 {
 		if me.createToken(addr, t) == token {
 			return true
 		}

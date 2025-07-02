@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/anacrolix/utp"
-	"github.com/bradfitz/iter"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
 
@@ -535,7 +534,7 @@ func BenchmarkConnectionMainReadLoop(b *testing.B) {
 	go func() {
 		defer w.Close()
 		ts.writeSem.Lock()
-		for range iter.N(b.N) {
+		for range b.N {
 			cl.lock()
 			// The chunk must be written to storage everytime, to ensure the
 			// writeSem is unlocked.
