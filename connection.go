@@ -492,7 +492,7 @@ func (cn *connection) PostBitfield() (n int, err error) {
 }
 
 func (cn *connection) updateRequests() {
-	if cn.needsresponse.Swap(true) {
+	if !cn.needsresponse.Swap(true) {
 		cn.respond.Broadcast()
 	}
 }
