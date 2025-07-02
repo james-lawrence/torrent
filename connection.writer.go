@@ -683,13 +683,13 @@ func (t _connwriterCommitBitmap) Update(ctx context.Context, _ *cstate.Shared) c
 	return t.next
 }
 func connwriteridle(ws *writerstate) cstate.T {
-	now := time.Now()
 
-	responseneeded := ws.needsresponse.CompareAndSwap(true, false)
-	keepalive := now.Add(ws.keepAliveTimeout / 2)
-	if responseneeded {
-		keepalive = now
+	if ws.needsresponse.CompareAndSwap(true, false) {
+		return connwriteractive(ws)
 	}
+
+	now := time.Now()
+	keepalive := now.Add(ws.keepAliveTimeout / 2)
 
 	delays := slicesx.MapTransform(
 		func(ts time.Time) time.Duration {

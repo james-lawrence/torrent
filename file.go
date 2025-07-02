@@ -57,7 +57,7 @@ func (f *File) bytesLeft() (left int64) {
 	firstPieceIndex := f.firstPieceIndex()
 	endPieceIndex := f.endPieceIndex() - 1
 
-	dup := f.t.chunks.completed.Clone()
+	dup := f.t.chunks.Clone(f.t.chunks.completed)
 	dup.Flip(firstPieceIndex+1, endPieceIndex)
 	dup.Iterate(func(piece uint32) bool {
 		if uint64(piece) >= endPieceIndex {
