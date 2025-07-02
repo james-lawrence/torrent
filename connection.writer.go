@@ -399,6 +399,8 @@ func (t _connwriterRequests) determineInterest(msg func(pp.Message) bool) *roari
 		return t.requestable
 	}
 
+	t.cfg.debug().Printf("c(%p) seed(%t) refreshing availability\n", t.connection, t.seed)
+
 	t._mu.RLock()
 	fastset := t.fastset.Clone()
 	claimed := roaring.New()

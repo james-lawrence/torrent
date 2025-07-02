@@ -1003,7 +1003,6 @@ func (t *torrent) openNewConns() {
 		p  Peer
 	)
 
-	defer t.updateWantPeersEvent()
 	for {
 		if !t.wantConns() {
 			t.cln.config.debug().Println("openNewConns: connections not wanted")
