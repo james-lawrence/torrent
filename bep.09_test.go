@@ -60,7 +60,7 @@ func TestMetadataExtension(t *testing.T) {
 	// we limit ourselves to tcp ipv4 here because of racing dialer.
 	// basically the receiving end will see multiple connections but only one
 	// will work. and the delay causes this test to take longer than it should.
-	leecher, err := autobind.NewLoopback(autobind.DisableIPv6, autobind.DisableUTP).Bind(c, err)
+	leecher, err := autobind.NewLoopback(autobind.DisableIPv6).Bind(c, err)
 	require.NoError(t, err)
 	defer leecher.Close()
 

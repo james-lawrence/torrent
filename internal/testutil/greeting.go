@@ -55,9 +55,7 @@ func GreetingTestTorrent(dir string) (metaInfo *metainfo.MetaInfo) {
 
 // RandomDataTorrent generates a torrent from random data.
 func RandomDataTorrent(dir string, n int64, options ...metainfo.Option) (info *metainfo.Info, digested hash.Hash, err error) {
-	digested = md5.New()
-
-	src, err := IOTorrent(dir, io.TeeReader(rand.Reader, digested), n)
+	src, digested, err := IOTorrent(dir, rand.Reader, n)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -85,9 +83,9 @@ func RandomDataTorrent(dir string, n int64, options ...metainfo.Option) (info *m
 }
 
 // RandomDataTorrent generates a torrent from the provided io.Reader
-func IOTorrent(dir string, src io.Reader, n int64) (d *os.File, err error) {
+func IOTorrent(dir string, src io.Reader, n int64) (d *os.File, _ hash.Hash, err error) {
 	if d, err = os.CreateTemp(dir, "random.torrent.*.bin"); err != nil {
-		return d, err
+		return d, nil, err
 	}
 	defer func() {
 		if err != nil {
@@ -95,13 +93,14 @@ func IOTorrent(dir string, src io.Reader, n int64) (d *os.File, err error) {
 		}
 	}()
 
-	if _, err = io.CopyN(d, src, n); err != nil {
-		return d, err
+	digest := md5.New()
+	if _, err = io.CopyN(d, io.TeeReader(src, digest), n); err != nil {
+		return d, nil, err
 	}
 
 	if _, err = d.Seek(0, io.SeekStart); err != nil {
-		return d, err
+		return d, nil, err
 	}
 
-	return d, nil
+	return d, digest, nil
 }

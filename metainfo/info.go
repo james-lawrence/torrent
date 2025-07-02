@@ -235,7 +235,8 @@ func (info *Info) OffsetToIndex(offset int64) int64 {
 		return 0
 	}
 
-	return offset / info.PieceLength
+	return min(offset/info.PieceLength, int64(info.NumPieces()-1))
+	// return offset / info.PieceLength
 }
 
 func (info *Info) OffsetToLength(offset int64) (length int64) {
@@ -243,7 +244,7 @@ func (info *Info) OffsetToLength(offset int64) (length int64) {
 		return 0
 	}
 
-	index := offset / info.PieceLength
+	index := min(offset/info.PieceLength, int64(info.NumPieces()))
 	if index == int64(info.NumPieces()) {
 		return info.TotalLength() % info.PieceLength
 	}

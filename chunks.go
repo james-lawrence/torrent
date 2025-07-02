@@ -1,7 +1,6 @@
 package torrent
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -476,23 +475,11 @@ func (t *chunks) Pop(n int, available *roaring.Bitmap) (reqs []request, err erro
 	reqs = make([]request, 0, n)
 	for i := 0; i < n; i++ {
 		var (
-			cidx     int
-			req      request
-			emptyerr empty
+			cidx int
+			req  request
 		)
 
-		if cidx, req, err = t.peek(available); errors.As(err, &emptyerr) {
-			if emptyerr.Missing == 0 && emptyerr.Outstanding > 0 && i == 0 {
-				for _, req := range t.outstanding {
-					if available.Contains(uint32(t.requestCID(req))) {
-						return []request{newRequest(req.Index, req.Begin, req.Length)}, nil
-					}
-				}
-			}
-
-			return reqs, emptyerr
-		} else if err != nil {
-			// log.Println("Popped empty", i, "<", n, ",", err)
+		if cidx, req, err = t.peek(available); err != nil {
 			return reqs, err
 		}
 

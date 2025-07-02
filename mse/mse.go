@@ -417,7 +417,6 @@ func (h *handshake) newEncrypt(initer bool) *rc4.Cipher {
 }
 
 func (h *handshake) initerSteps() (ret io.ReadWriter, selected CryptoMethod, err error) {
-	// log.Println("TRANSMITTING", hex.EncodeToString(h.skey))
 	h.postWrite(hash(req1, h.s[:]))
 	h.postWrite(xor(hash(req2, h.skey), hash(req3, h.s[:])))
 	buf := &bytes.Buffer{}

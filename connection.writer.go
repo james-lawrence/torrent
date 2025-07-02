@@ -212,10 +212,11 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		keepAliveTimeout:    to,
 		chokeduntil:         ts.Add(-1 * time.Minute),
 		nextbitmap:          ts.Add(time.Minute),
-		refreshavailable:    atomicx.Pointer(ts),
 		uploadavailable:     atomicx.Pointer(ts),
 		keepaliverequired:   atomicx.Pointer(ts.Add(to)),
 		lowrequestwatermark: max(1, cn.PeerMaxRequests/4),
+		requestable:         roaring.New(),
+		seed:                cn.t.seeding(),
 	}
 
 	defer cn.checkFailures()
@@ -230,10 +231,10 @@ type writerstate struct {
 	keepAliveTimeout    time.Duration
 	nextbitmap          time.Time
 	chokeduntil         time.Time
+	seed                bool
 	keepaliverequired   *atomic.Pointer[time.Time]
-	refreshavailable    *atomic.Pointer[time.Time]
 	uploadavailable     *atomic.Pointer[time.Time]
-	cachedavailable     *roaring.Bitmap
+	requestable         *roaring.Bitmap // represents the chunks we're currently allow to request.
 	lowrequestwatermark int
 }
 
@@ -373,55 +374,79 @@ type _connwriterRequests struct {
 	*writerstate
 }
 
-func (t _connwriterRequests) determineInterest(msg func(pp.Message) bool) (available *roaring.Bitmap) {
-	defer t.cfg.debug().Printf("c(%p) seed(%t) interest completed\n", t.connection, t.t.seeding())
+func (t _connwriterRequests) determineInterest(msg func(pp.Message) bool) *roaring.Bitmap {
+	defer t.cfg.debug().Printf("c(%p) seed(%t) interest completed requestable(%d)\n", t.connection, t.seed, t.requestable.GetCardinality())
 
-	if t.t.seeding() || t.chokeduntil.After(time.Now()) {
+	if t.seed || t.chokeduntil.After(time.Now()) {
 		if t.Unchoke(msg) {
-			t.cfg.debug().Printf("c(%p) seed(%t) allowing peer to make requests\n", t.connection, t.t.seeding())
+			t.cfg.debug().Printf("c(%p) seed(%t) allowing peer to make requests\n", t.connection, t.seed)
 		}
 	} else {
 		if t.Choke(msg) {
-			t.cfg.debug().Printf("c(%p) seed(%t) disallowing peer to make requests\n", t.connection, t.t.seeding())
+			t.cfg.debug().Printf("c(%p) seed(%t) disallowing peer to make requests\n", t.connection, t.seed)
 		}
 	}
 
-	if !t.SetInterested(t.peerHasWantedPieces(), msg) {
-		t.cfg.debug().Printf("c(%p) seed(%t) nothing available to request\n", t.connection, t.t.seeding())
+	if ts := langx.Autoderef(t.refreshrequestable.Load()); ts.After(time.Now()) {
+		t.cfg.debug().Printf("c(%p) seed(%t) allowing cached %d - %s\n", t.connection, t.seed, t.requestable.GetCardinality(), time.Until(ts))
+		return t.requestable
 	}
 
-	if ts := langx.Autoderef(t.refreshavailable.Load()); ts.After(time.Now()) {
-		t.cfg.debug().Printf("c(%p) seed(%t) allowing cached %d - %s\n", t.connection, t.t.seeding(), t.cachedavailable.GetCardinality(), time.Until(ts))
-		return t.cachedavailable
-	}
-
-	if !t.PeerChoked {
-		t.cfg.debug().Printf("c(%p) seed(%t) allowing claimed: %d\n", t.connection, t.t.seeding(), t.claimed.GetCardinality())
-		available = t.claimed
-	} else {
-		t.cfg.debug().Printf("c(%p) seed(%t) allowing fastset %d\n", t.connection, t.t.seeding(), t.fastset.GetCardinality())
-		available = t.fastset
+	if m := t.t.chunks.Cardinality(t.t.chunks.completed); uint64(m) == t.t.chunks.pieces {
+		t.cfg.debug().Printf("c(%p) seed(%t) disabling requestable - have all data m(%d) o(%d) c(%d) p(%d)\n", t.connection, t.seed, m, len(t.t.chunks.outstanding), t.t.chunks.Cardinality(t.t.chunks.completed), t.t.chunks.pieces)
+		t.refreshrequestable.Store(langx.Autoptr(timex.Inf()))
+		t.requestable = roaring.New()
+		return t.requestable
 	}
 
 	t._mu.RLock()
-	defer t._mu.RUnlock()
+	fastset := t.fastset.Clone()
+	claimed := roaring.New()
+	if !t.PeerChoked {
+		t.cfg.debug().Printf("c(%p) seed(%t) allowing claimed: %d\n", t.connection, t.seed, t.claimed.GetCardinality())
+		claimed = t.claimed.Clone()
+	}
+	t._mu.RUnlock()
 
-	t.cachedavailable = bitmapx.AndNot(available, t.blacklisted)
-	return t.cachedavailable
+	t.requestable = bitmapx.Fill(t.t.chunks.cmaximum)
+	t.requestable.AndAny(fastset, claimed)
+	t.refreshrequestable.Store(langx.Autoptr(timex.Inf()))
+
+	if !t.SetInterested(!t.requestable.IsEmpty(), msg) {
+		t.cfg.debug().Printf("c(%p) seed(%t) nothing available to request\n", t.connection, t.seed)
+	}
+
+	return t.requestable
+}
+
+// Proxies the messageWriter's response.
+func (t _connwriterRequests) request(r request, mw messageWriter) bool {
+	t.cmu().Lock()
+	t.requests[r.Digest] = r
+	t.cmu().Unlock()
+	t.updateExpectingChunks()
+
+	return mw(pp.Message{
+		Type:   pp.Request,
+		Index:  r.Index,
+		Begin:  r.Begin,
+		Length: r.Length,
+	})
 }
 
 func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.Message) bool) {
 	var (
-		err  error
-		reqs []request
-		req  request
+		err         error
+		reqs        []request
+		req         request
+		unavailable empty
 	)
 
-	t.cfg.debug().Printf("c(%p) seed(%t) make requests initated\n", t.connection, t.t.seeding())
-	defer t.cfg.debug().Printf("c(%p) seed(%t) make requests completed\n", t.connection, t.t.seeding())
+	t.cfg.debug().Printf("c(%p) seed(%t) make requests initated avail(%d) (%v)\n", t.connection, t.seed, t.requestable.GetCardinality(), t.requestable.ToArray())
+	defer t.cfg.debug().Printf("c(%p) seed(%t) make requests completed avail(%d) (%v)\n", t.connection, t.seed, t.requestable.GetCardinality(), t.requestable.ToArray())
 
-	if available.IsEmpty() || len(t.requests) > t.lowrequestwatermark {
-		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - avail(%d) || req(current(%d) > low watermark(%d))", t.connection, t.t.seeding(), available.GetCardinality(), len(t.requests), t.lowrequestwatermark)
+	if unmodified := !t.refreshrequestable.Load().Before(time.Now()); (available.IsEmpty() && unmodified) || len(t.requests) >= t.lowrequestwatermark {
+		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - (avail(%d) && unmodified(%t)) || req(current(%d) >= low watermark(%d))", t.connection, t.seed, available.GetCardinality(), unmodified, len(t.requests), t.lowrequestwatermark)
 		return
 	}
 
@@ -430,26 +455,16 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 	t.lowrequestwatermark += int(t.chunksReceived.Swap(0)*4 - t.chunksRejected.Swap(0))
 	t.lowrequestwatermark = max(1, min(t.lowrequestwatermark, t.PeerMaxRequests-(t.PeerMaxRequests/4)))
 
-	if m := t.t.chunks.Cardinality(t.t.chunks.completed); uint64(m) == t.t.chunks.pieces {
-		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - have all data m(%d) o(%d) c(%d) p(%d)\n", t.connection, t.t.seeding(), m, len(t.t.chunks.outstanding), t.t.chunks.Cardinality(t.t.chunks.completed), t.t.chunks.pieces)
-		return
-	}
-
-	if m := t.t.chunks.Cardinality(t.t.chunks.missing); m == 0 {
-		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - nothing to request m(%d) o(%d) c(%d) p(%d)\n", t.connection, t.t.seeding(), m, len(t.t.chunks.outstanding), t.t.chunks.Cardinality(t.t.chunks.completed), t.t.chunks.pieces)
-		return
-	}
-
 	max := max(0, min(t.lowrequestwatermark, t.PeerMaxRequests)-len(t.requests))
-	if reqs, err = t.t.chunks.Pop(max, available); errors.As(err, &empty{}) {
-		if len(reqs) == 0 && !t.blacklisted.IsEmpty() {
-			// clear the blacklist when we run out of work to do.
-			t.cmu().Lock()
-			t.blacklisted.Clear()
-			t.cmu().Unlock()
+	if reqs, err = t.t.chunks.Pop(max, available); errors.As(err, &unavailable) {
+		if len(reqs) == 0 && t.requestable.IsEmpty() && (unavailable.Missing > 0 || unavailable.Outstanding > 0) {
+			// when we run out of work mark us for refreshing the set based on the
+			// latest information from the connection.
+			t.refreshrequestable.Store(langx.Autoptr(time.Now()))
+
 			t.t.chunks.MergeInto(t.t.chunks.missing, t.t.chunks.failed)
 			t.t.chunks.FailuresReset()
-			t.cfg.debug().Printf("c(%p) seed(%t) available(%t) no work available", t.connection, t.t.seeding(), !available.IsEmpty())
+			t.cfg.debug().Printf("c(%p) seed(%t) available(%t) no work available - scheduled requestable update", t.connection, t.seed, !available.IsEmpty())
 			return
 		}
 	} else if err != nil {
@@ -457,21 +472,26 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 		return
 	}
 
-	t.cfg.debug().Printf("c(%p) seed(%t) avail(%d) filling buffer with requests low(%d) - max(%d) outstanding(%d) -> allowed(%d) actual %d", t.connection, t.t.seeding(), available.GetCardinality(), t.lowrequestwatermark, t.PeerMaxRequests, len(t.requests), max, len(reqs))
+	t.cfg.debug().Printf("c(%p) seed(%t) avail(%d) filling buffer with requests low(%d) - max(%d) outstanding(%d) -> allowed(%d) actual %d", t.connection, t.seed, available.GetCardinality(), t.lowrequestwatermark, t.PeerMaxRequests, len(t.requests), max, len(reqs))
 
 	for max, req = range reqs {
 		if filledBuffer := !t.request(req, msg); filledBuffer {
-			t.cfg.debug().Printf("c(%p) seed(%t) done filling after(%d)\n", t.connection, t.t.seeding(), max)
+			t.cfg.debug().Printf("c(%p) seed(%t) done filling after(%d)\n", t.connection, t.seed, max)
 			break
 		}
 
-		// cn.cfg.debug().Printf("c(%p) seed(%t) choked(%t) requested(%d, %d, %d)\n", cn, cn.t.seeding(), cn.PeerChoked, req.Index, req.Begin, req.Length)
+		// remove requests that have been requested to prevent them from
+		// being requested from this connection until requestable is recalculated.
+		// which happens whenever we run out of chunks to request.
+		t.requestable.Remove(uint32(t.t.chunks.requestCID(req)))
+
+		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) requested(%d, %d, %d) remaining(%d)\n", t.connection, t.seed, t.PeerChoked, req.Index, req.Begin, req.Length, t.requestable.GetCardinality())
 	}
 
 	// advance to just the unused chunks.
 	if max += 1; len(reqs) > max {
 		reqs = reqs[max:]
-		t.cfg.debug().Printf("c(%p) seed(%t) filled - cleaning up %d reqs(%d)\n", t.connection, t.t.seeding(), max, len(reqs))
+		t.cfg.debug().Printf("c(%p) seed(%t) filled - cleaning up %d reqs(%d)\n", t.connection, t.seed, max, len(reqs))
 		// release any unused requests back to the queue.
 		t.t.chunks.Retry(reqs...)
 	}
@@ -481,7 +501,7 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 func (t _connwriterRequests) upload(msg func(pp.Message) bool) (time.Duration, error) {
 	// TODO: we should reject requests
 	if t.Choked || t.peerSentHaveAll {
-		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) req(%d) upload restricted - disallowed\n", t.connection, t.t.seeding(), t.Choked, t.peerSentHaveAll, len(t.PeerRequests))
+		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) req(%d) upload restricted - disallowed\n", t.connection, t.seed, t.Choked, t.peerSentHaveAll, len(t.PeerRequests))
 		return time.Minute, nil
 	}
 
@@ -489,8 +509,8 @@ func (t _connwriterRequests) upload(msg func(pp.Message) bool) (time.Duration, e
 		return time.Until(ts), nil
 	}
 
-	t.cfg.debug().Printf("c(%p) seed(%t) req(%d) uploading - allowed\n", t.connection, t.t.seeding(), len(t.PeerRequests))
-	defer t.cfg.debug().Printf("c(%p) seed(%t) req(%d) uploading - competed\n", t.connection, t.t.seeding(), len(t.PeerRequests))
+	t.cfg.debug().Printf("c(%p) seed(%t) req(%d) uploading - allowed\n", t.connection, t.seed, len(t.PeerRequests))
+	defer t.cfg.debug().Printf("c(%p) seed(%t) req(%d) uploading - competed\n", t.connection, t.seed, len(t.PeerRequests))
 	uploaded := 0
 	for r := range t.requestseq() {
 		res := t.cfg.UploadRateLimiter.ReserveN(time.Now(), int(r.Length))
@@ -500,7 +520,7 @@ func (t _connwriterRequests) upload(msg func(pp.Message) bool) (time.Duration, e
 		}
 
 		if delay := res.Delay(); delay > 0 {
-			t.cfg.errors().Printf("c(%p) seed(%t) maximum upload rate exceed n(%d) - delay(%v) - bytes(%d)\n", t.connection, t.t.seeding(), uploaded, delay, r.Length)
+			t.cfg.errors().Printf("c(%p) seed(%t) maximum upload rate exceed n(%d) - delay(%v) - bytes(%d)\n", t.connection, t.seed, uploaded, delay, r.Length)
 			res.Cancel()
 			return delay, nil
 		}
@@ -523,12 +543,12 @@ func (t _connwriterRequests) upload(msg func(pp.Message) bool) (time.Duration, e
 		t.cmu().Unlock()
 
 		if !more {
-			t.cfg.debug().Printf("(%d) c(%p) seed(%t) upload - %d\n", os.Getpid(), t.connection, t.t.seeding(), uploaded)
+			t.cfg.debug().Printf("(%d) c(%p) seed(%t) upload - %d\n", os.Getpid(), t.connection, t.seed, uploaded)
 			return 0, nil
 		}
 	}
 
-	t.cfg.debug().Printf("(%d) c(%p) seed(%t) upload - %d\n", os.Getpid(), t.connection, t.t.seeding(), uploaded)
+	t.cfg.debug().Printf("(%d) c(%p) seed(%t) upload - %d\n", os.Getpid(), t.connection, t.seed, uploaded)
 
 	return 0, nil
 }
@@ -682,7 +702,7 @@ func connwriteridle(ws *writerstate) cstate.T {
 		ws.nextbitmap,
 		ws.chokeduntil,
 		langx.Autoderef(ws.keepaliverequired.Load()),
-		langx.Autoderef(ws.refreshavailable.Load()),
+		langx.Autoderef(ws.refreshrequestable.Load()),
 		langx.Autoderef(ws.uploadavailable.Load()),
 	)
 

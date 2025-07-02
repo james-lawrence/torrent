@@ -539,7 +539,7 @@ func (cl *Client) initiateHandshakes(c *connection, t *torrent) (err error) {
 		return errorsx.Wrap(err, "bittorrent protocol handshake failure")
 	}
 
-	// cl.config.debug().Println("initiated outgoing connection", int160.FromByteArray(cl.config.localID), "->", int160.FromByteArray(info.PeerID))
+	cl.config.debug().Println("initiated outgoing connection", cl.PeerID, "->", int160.FromByteArray(info.PeerID))
 
 	c.PeerExtensionBytes = ebits
 	c.PeerID = int160.FromByteArray(info.PeerID)

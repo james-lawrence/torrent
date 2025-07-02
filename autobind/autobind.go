@@ -291,8 +291,7 @@ func listenUtp(network, addr string) (s sockets.Socket, err error) {
 		return
 	}
 
-	dialer := &net.Dialer{}
-	return sockets.New(us, dialer), nil
+	return sockets.New(us, us), nil
 }
 
 func proxyContextDialer(d proxy.Dialer) proxy.ContextDialer {

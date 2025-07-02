@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sync"
@@ -941,7 +941,8 @@ func TestObfuscatedHeaderFallbackSeederRequiresLeecherPrefersNot(t *testing.T) {
 
 func TestRandomSizedTorrents(t *testing.T) {
 	dir := t.TempDir()
-	n := rand.Int63n(128 * bytesx.KiB)
+	// this should be larger than a single piece length
+	n := rand.Int64N(3 * bytesx.MiB)
 	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, dir)))
 	require.NoError(t, err)
 	defer seeder.Close()
@@ -966,11 +967,39 @@ func Test128KBTorrent(t *testing.T) {
 	testTransferRandomData(t, dir, 128*bytesx.KiB, seeder, leecher)
 }
 
+func Test3MBPlus1Torrent(t *testing.T) {
+	dir := t.TempDir()
+	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, dir)))
+	require.NoError(t, err)
+	defer seeder.Close()
+
+	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
+	require.NoError(t, err)
+	defer leecher.Close()
+
+	testTransferRandomData(t, dir, 3*bytesx.MiB+1, seeder, leecher)
+}
+
+func TestTorrentPieceLengthMultipleOfTotalLength(t *testing.T) {
+	// this test is important! it checks the case where a torrent total length is a multiple of the piece length exactly.
+	// rare but possible. requires we set the amount of data equal to n * PieceLength.
+	dir := t.TempDir()
+	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, dir)))
+	require.NoError(t, err)
+	defer seeder.Close()
+
+	leecher, err := autobind.NewLoopback(autobind.DisableUTP).Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
+	require.NoError(t, err)
+	defer leecher.Close()
+
+	testTransferRandomData(t, dir, 1*bytesx.MiB, seeder, leecher)
+}
+
 func testTransferRandomData(t *testing.T, datadir string, n int64, from, to *torrent.Client) {
 	ctx, done := testx.Context(t)
 	defer done()
 
-	data, err := testutil.IOTorrent(datadir, cryptox.NewChaCha8(""), n)
+	data, expected, err := testutil.IOTorrent(datadir, cryptox.NewChaCha8(t.Name()), n)
 	require.NoError(t, err)
 	defer os.Remove(data.Name())
 
@@ -984,10 +1013,7 @@ func testTransferRandomData(t *testing.T, datadir string, n int64, from, to *tor
 	dl, added, err := from.Start(metadata, torrent.TuneVerifyFull)
 	require.NoError(t, err)
 	require.True(t, added)
-
-	digestseed := md5.New()
-	_, err = torrent.DownloadInto(ctx, digestseed, dl)
-	require.NoError(t, err)
+	_ = dl
 
 	metadata, err = torrent.NewFromFile(data.Name(), torrent.OptionStorage(storage.NewFile(t.TempDir())))
 	require.NoError(t, err)
@@ -1001,7 +1027,7 @@ func testTransferRandomData(t *testing.T, datadir string, n int64, from, to *tor
 	require.NoError(t, err)
 
 	require.Equal(t, n, dln)
-	require.Equal(t, digestseed.Sum(nil), digestdl.Sum(nil), "digest mismatch: generated torrent length", n)
+	require.Equal(t, expected.Sum(nil), digestdl.Sum(nil), "digest mismatch: generated torrent length", n)
 }
 
 func TestClientAddressInUse(t *testing.T) {
