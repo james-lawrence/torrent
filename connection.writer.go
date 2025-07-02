@@ -708,11 +708,11 @@ func connwriteridle(ws *writerstate) cstate.T {
 
 	mind := timex.DurationMin(delays...)
 	if mind <= 0 {
-		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle uploads(%t) downloads(%t) response needed(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.Choked, !ws.PeerChoked, responseneeded, ws.t.chunks, mind, delays)
+		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle uploads(%t) downloads(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.Choked, !ws.PeerChoked, ws.t.chunks, mind, delays)
 		return connwriteractive(ws)
 	}
 
-	ws.cfg.debug().Printf("c(%p) seed(%t) idling uploads(%t) downloads(%t) response needed(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.Choked, !ws.PeerChoked, responseneeded, ws.t.chunks, mind, delays)
+	ws.cfg.debug().Printf("c(%p) seed(%t) idling uploads(%t) downloads(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.Choked, !ws.PeerChoked, ws.t.chunks, mind, delays)
 	return connwriterBitmap(cstate.Idle(connwriteractive(ws), mind, ws.connection.respond, ws.connection.t.chunks.cond), ws)
 }
 
