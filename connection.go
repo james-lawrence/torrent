@@ -130,10 +130,6 @@ type connection struct {
 	lastBecameInterested time.Time
 	priorInterest        time.Duration
 
-	lastStartedExpectingToReceiveChunks time.Time
-	cumulativeExpectedToReceiveChunks   time.Duration
-	chunksReceivedWhileExpecting        int64
-
 	Choked           bool // we have preventing the peer from making requests
 	requests         map[uint64]request
 	requestsLowWater int
@@ -205,19 +201,6 @@ func (cn *connection) requestseq() iter.Seq[request] {
 			if !yield(req) {
 				return
 			}
-		}
-	}
-}
-
-func (cn *connection) updateExpectingChunks() {
-	if cn.expectingChunks() {
-		if cn.lastStartedExpectingToReceiveChunks.IsZero() {
-			cn.lastStartedExpectingToReceiveChunks = time.Now()
-		}
-	} else {
-		if !cn.lastStartedExpectingToReceiveChunks.IsZero() {
-			cn.cumulativeExpectedToReceiveChunks += time.Since(cn.lastStartedExpectingToReceiveChunks)
-			cn.lastStartedExpectingToReceiveChunks = time.Time{}
 		}
 	}
 }
@@ -446,8 +429,6 @@ func (cn *connection) SetInterested(interested bool, msg func(pp.Message) bool) 
 		cn.priorInterest += time.Since(cn.lastBecameInterested)
 	}
 
-	defer cn.updateExpectingChunks()
-
 	return msg(pp.NewInterested(interested))
 }
 
@@ -543,9 +524,7 @@ func (cn *connection) peerSentHave(piece uint64) error {
 	cn.raisePeerMinPieces(piece + 1)
 
 	cn.cmu().Lock()
-	for _, cidx := range cn.t.chunks.chunks(piece) {
-		cn.claimed.AddInt(cidx)
-	}
+	cn.claimed.AddRange(cn.t.chunks.Range(piece))
 	cn.cmu().Unlock()
 
 	return nil
@@ -822,21 +801,18 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 	case pp.Choke:
 		cn.PeerChoked = true
 		cn.deleteAllRequests()
-		cn.updateExpectingChunks()
 		// We can then reset our interest.
 		return msg, nil
 	case pp.Unchoke:
 		cn.PeerChoked = false
-		cn.updateExpectingChunks()
+		cn.refreshrequestable.Swap(langx.Autoptr(time.Now().Add(30 * time.Millisecond)))
 		cn.updateRequests()
 		return msg, nil
 	case pp.Interested:
 		cn.PeerInterested = true
-		cn.updateRequests()
 		return msg, nil
 	case pp.NotInterested:
 		cn.PeerInterested = false
-		cn.updateRequests()
 		// We don't clear their requests since it isn't clear in the spec.
 		// We'll probably choke them for this, which will clear them if
 		// appropriate, and is clearly specified.
@@ -846,10 +822,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 			return msg, err
 		}
 
-		now := time.Now()
-		if ts := cn.refreshrequestable.Swap(langx.Autoptr(now.Add(30 * time.Millisecond))); ts.After(now) {
-			cn.updateRequests()
-		}
+		cn.updateRequests()
 
 		return msg, nil
 	case pp.Bitfield:
@@ -858,10 +831,8 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 			return msg, err
 		}
 
-		now := time.Now()
-		if ts := cn.refreshrequestable.Swap(langx.Autoptr(now.Add(30 * time.Millisecond))); ts.After(now) {
-			cn.updateRequests()
-		}
+		cn.refreshrequestable.Swap(langx.Autoptr(time.Now().Add(30 * time.Millisecond)))
+		cn.updateRequests()
 
 		return msg, nil
 	case pp.Request:
@@ -871,15 +842,12 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		cn.updateRequests()
 		return msg, nil
 	case pp.Piece:
-		if !cn.needsresponse.Load() {
-			defer cn.updateRequests()
-		}
-
 		if err = errorsx.Wrap(cn.receiveChunk(&msg), "failed to received chunk"); err != nil {
 			return msg, err
 		}
 
 		cn.t.chunks.pool.Put(&msg.Piece)
+		cn.updateRequests()
 
 		return msg, nil
 	case pp.Cancel:
@@ -906,6 +874,8 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		if err = cn.onPeerSentHaveAll(); err != nil {
 			return msg, err
 		}
+
+		cn.refreshrequestable.Swap(langx.Autoptr(time.Now().Add(30 * time.Millisecond)))
 		cn.updateRequests()
 		return msg, nil
 	case pp.HaveNone:
@@ -913,7 +883,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		if err = cn.peerSentHaveNone(); err != nil {
 			return msg, err
 		}
-		cn.updateRequests()
+
 		return msg, nil
 	case pp.Reject:
 		if !cn.supported(pp.ExtensionBitFast) {
@@ -929,10 +899,8 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		cn.fastset.AddRange(cn.t.chunks.Range(uint64(msg.Index)))
 		cn._mu.Unlock()
 
-		now := time.Now()
-		if ts := cn.refreshrequestable.Swap(langx.Autoptr(now.Add(30 * time.Millisecond))); ts.After(now) {
-			cn.updateRequests()
-		}
+		cn.refreshrequestable.Swap(langx.Autoptr(time.Now().Add(30 * time.Millisecond)))
+		cn.updateRequests()
 
 		return msg, nil
 	case pp.Extended:
@@ -1109,9 +1077,6 @@ func (cn *connection) clearRequests(reqs ...request) (ok bool) {
 		ok = ok || clearone(r)
 	}
 
-	cn.updateExpectingChunks()
-	cn.updateRequests()
-
 	return ok
 }
 
@@ -1126,9 +1091,6 @@ func (cn *connection) releaseRequest(r request) (ok bool) {
 	// cn.cfg.debug().Printf("c(%p) - releasing request d(%020d) r(%d,%d,%d)\n", cn, r.Digest, r.Index, r.Begin, r.Length)
 	delete(cn.requests, r.Digest)
 	cn.t.chunks.Retry(r)
-
-	cn.updateExpectingChunks()
-	cn.updateRequests()
 
 	return true
 }

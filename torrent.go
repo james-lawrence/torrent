@@ -982,7 +982,7 @@ func (t *torrent) dropHalfOpen(addr string) {
 	_, ok := t.halfOpen[addr]
 	t._halfOpenmu.RUnlock()
 	if !ok {
-		log.Println("warning: attempted to drop a half open connection that doesn't exist")
+		t.cln.config.debug().Println("warning: attempted to drop a half open connection that doesn't exist")
 		return
 	}
 
@@ -1382,11 +1382,11 @@ func (t *torrent) SetMaxEstablishedConns(max int) (oldMax int) {
 	cset := t.conns.list()
 	wcs := slices.HeapInterface(cset, worseConn)
 	for drop := len(cset) - t.maxEstablishedConns; drop > -1 && wcs.Len() > 0; drop-- {
-		log.Println("dropping connection", drop, wcs.Len())
+		t.cln.config.debug().Println("dropping connection", drop, wcs.Len())
 		t.dropConnection(wcs.Pop().(*connection))
-		log.Println("dropped connection", drop, wcs.Len())
+		t.cln.config.debug().Println("dropped connection", drop, wcs.Len())
 	}
-	log.Println("done dropping connection")
+
 	t.openNewConns()
 	return oldMax
 }
@@ -1415,13 +1415,13 @@ func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
 
 			// outgoing connection has a dial rate limit
 			if err := t.cln.outgoingConnection(ctx, t, addr, peer.Source, peer.Trusted); err == nil {
-				log.Printf("outgoing connection completed\n")
+				t.cln.config.debug().Printf("outgoing connection completed\n")
 				return
 			} else if errors.As(err, &timedout) {
-				log.Printf("timeout detected, placing back in peerset %T - %v - %s - %t\n", err, err, timedout.Timedout(), peer.Trusted)
+				t.cln.config.debug().Printf("timeout detected, placing back in peerset %T - %v - %s - %t\n", err, err, timedout.Timedout(), peer.Trusted)
 				continue
 			} else if errorsx.Ignore(err, context.DeadlineExceeded, context.Canceled) != nil {
-				log.Printf("outgoing connection failed %T - %v\n", errorsx.Compact(errorsx.Unwrap(err), err), err)
+				t.cln.config.debug().Printf("outgoing connection failed %T - %v\n", errorsx.Compact(errorsx.Unwrap(err), err), err)
 				return
 			}
 		}
@@ -1537,7 +1537,7 @@ func (t *torrent) ping(addr net.UDPAddr) {
 		go func() {
 			ret := dht.Ping3S(context.Background(), s, dht.NewAddr(&addr), s.ID())
 			if errorsx.Ignore(ret.Err, context.DeadlineExceeded) != nil {
-				log.Println("failed to ping address", ret.Err)
+				t.cln.config.debug().Println("failed to ping address", ret.Err)
 			}
 		}()
 	})
