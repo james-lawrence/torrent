@@ -442,8 +442,8 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg func(pp.
 		unavailable empty
 	)
 
-	t.cfg.debug().Printf("c(%p) seed(%t) make requests initated avail(%d) (%v)\n", t.connection, t.seed, t.requestable.GetCardinality(), t.requestable.ToArray())
-	defer t.cfg.debug().Printf("c(%p) seed(%t) make requests completed avail(%d) (%v)\n", t.connection, t.seed, t.requestable.GetCardinality(), t.requestable.ToArray())
+	t.cfg.debug().Printf("c(%p) seed(%t) make requests initated avail(%d)\n", t.connection, t.seed, t.requestable.GetCardinality())
+	defer t.cfg.debug().Printf("c(%p) seed(%t) make requests completed avail(%d)\n", t.connection, t.seed, t.requestable.GetCardinality())
 
 	if unmodified := !t.refreshrequestable.Load().Before(time.Now()); (available.IsEmpty() && unmodified) || len(t.requests) >= t.lowrequestwatermark {
 		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - (avail(%d) && unmodified(%t)) || req(current(%d) >= low watermark(%d))", t.connection, t.seed, available.GetCardinality(), unmodified, len(t.requests), t.lowrequestwatermark)
