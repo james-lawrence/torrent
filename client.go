@@ -356,6 +356,12 @@ func (cl *Client) acceptConnections(l net.Listener) {
 			continue
 		}
 
+		if !cl.config.acceptRateLimiter.Allow() {
+			cl.config.debug().Println("rejecting connection due to rate limits")
+			conn.Close()
+			continue
+		}
+
 		go cl.incomingConnection(conn)
 	}
 }
