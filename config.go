@@ -416,6 +416,20 @@ func ClientConfigPeerLimits[T constraints.Integer](low, high T) ClientConfigOpti
 	}
 }
 
+// specify the global capacity for uploading pieces to peers.
+func ClientConfigUploadLimit(l *rate.Limiter) ClientConfigOption {
+	return func(cc *ClientConfig) {
+		cc.UploadRateLimiter = l
+	}
+}
+
+// specify the global capacity for downloading pieces from peers.
+func ClientConfigDownloadLimit(l *rate.Limiter) ClientConfigOption {
+	return func(cc *ClientConfig) {
+		cc.DownloadRateLimiter = l
+	}
+}
+
 // NewDefaultClientConfig default client configuration.
 func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, options ...ClientConfigOption) *ClientConfig {
 	cc := &ClientConfig{
