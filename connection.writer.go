@@ -18,7 +18,6 @@ import (
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/atomicx"
 	"github.com/james-lawrence/torrent/internal/backoffx"
-	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/slicesx"
@@ -209,7 +208,7 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 
 	ts := time.Now()
 	ws := &writerstate{
-		bufferLimit:         256 * bytesx.KiB,
+		bufferLimit:         writebufferscapacity,
 		connection:          cn,
 		keepAliveTimeout:    to,
 		chokeduntil:         ts.Add(-1 * time.Minute),
@@ -363,7 +362,7 @@ func (t _connWriterSyncComplete) Update(ctx context.Context, _ *cstate.Shared) (
 		}
 
 		ws.wroteMsg(&msg)
-		return ws.writeBuffer.Len() < ws.bufferLimit
+		return ws.currentbuffer.Len() < ws.bufferLimit
 	}
 
 	ws.SetInterested(false, writer)
@@ -577,7 +576,7 @@ func (t _connwriterRequests) Update(ctx context.Context, _ *cstate.Shared) (r cs
 		}
 
 		ws.wroteMsg(&msg)
-		return ws.writeBuffer.Len() < ws.bufferLimit
+		return ws.currentbuffer.Len() < ws.bufferLimit
 	}
 
 	if err := ws.checkFailures(); err != nil {
@@ -596,7 +595,7 @@ func (t _connwriterRequests) Update(ctx context.Context, _ *cstate.Shared) (r cs
 	// needresponse is tracking read that come in while we're in the critical section of this function
 	// to prevent the state machine from going idle just because we didnt write anything this cycle.
 	// needresponse tracks that a message can in that requires a message be sent.
-	if ws.writeBuffer.Len() > 0 {
+	if ws.currentbuffer.Len() > 0 {
 		return connwriterFlush(
 			connwriteractive(ws),
 			ws,

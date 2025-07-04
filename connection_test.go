@@ -179,7 +179,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		torrenttest.RequireMessageType(t, pp.Bitfield, msg.Type)
 
 		require.NoError(t, ConnExtensions(ctx, sconn))
-		require.Equal(t, 0, sconn.writeBuffer.Len())
+		require.Equal(t, 0, sconn.currentbuffer.Len())
 
 		msg, err = sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
@@ -297,7 +297,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 
 		d := pp.NewDecoder(sconn.conn, sconn.t.chunks.pool)
 		deliver := func(dst *connection, msg ...encoding.BinaryMarshaler) (int, error) {
-			pending := dst.writeBuffer.Len()
+			pending := dst.currentbuffer.Len()
 			n1, err := pp.Write(dst, msg...)
 
 			if err != nil {
@@ -322,7 +322,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		// --------------------------------------- allow fast extension ----------------------------------------------
 
 		require.NoError(t, ConnExtensions(ctx, sconn))
-		require.Equal(t, 0, sconn.writeBuffer.Len())
+		require.Equal(t, 0, sconn.currentbuffer.Len())
 
 		require.Equal(t, []uint32{0}, sconn.peerfastset.ToArray())
 		n, err = deliver(sconn, pp.NewInterested(false), pp.NewAllowedFast(0))
@@ -396,7 +396,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 
 		d := pp.NewDecoder(sconn.conn, sconn.t.chunks.pool)
 		deliver := func(dst *connection, msg ...encoding.BinaryMarshaler) (int, error) {
-			pending := dst.writeBuffer.Len()
+			pending := dst.currentbuffer.Len()
 			n1, err := pp.Write(dst, msg...)
 
 			if err != nil {
@@ -427,7 +427,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		// --------------------------------------- allow dht extension ----------------------------------------------
 
 		require.NoError(t, ConnExtensions(ctx, sconn))
-		require.Equal(t, 0, sconn.writeBuffer.Len())
+		require.Equal(t, 0, sconn.currentbuffer.Len())
 
 		require.Equal(t, []uint32{0}, sconn.peerfastset.ToArray())
 		n, err = deliver(sconn, pp.NewInterested(false), pp.NewAllowedFast(0))

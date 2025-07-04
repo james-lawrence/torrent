@@ -29,6 +29,7 @@ import (
 	"github.com/james-lawrence/torrent/bencode"
 	pp "github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/internal/atomicx"
+	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/x/bitmapx"
@@ -43,6 +44,7 @@ const (
 	peerSourceDhtGetPeers     = "Hg" // Peers we found by searching a DHT.
 	peerSourceDhtAnnouncePeer = "Ha" // Peers that were announced to us by a DHT.
 	peerSourcePex             = "X"
+	writebufferscapacity      = 256 * bytesx.KiB
 )
 
 func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.AddrPort, extensions *pp.ExtensionBits, localport uint16, dynamicaddr *atomic.Pointer[netip.AddrPort]) (c *connection) {
@@ -58,7 +60,7 @@ func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.A
 		PeerChoked:              true,
 		PeerMaxRequests:         cfg.maximumOutstandingRequests,
 		PendingMaxRequests:      cfg.maximumOutstandingRequests,
-		writeBuffer:             new(bytes.Buffer),
+		currentbuffer:           new(bytes.Buffer),
 		remoteAddr:              remote,
 		localport:               localport,
 		dynamicaddr:             dynamicaddr,
@@ -175,7 +177,7 @@ type connection struct {
 	PeerExtensionIDs   map[pp.ExtensionName]pp.ExtensionNumber
 	PeerClientName     string
 
-	writeBuffer   *bytes.Buffer
+	currentbuffer *bytes.Buffer
 	respond       *sync.Cond
 	needsresponse atomic.Bool // used to track when responses need to be sent that might be missed by the respond condition.
 }
@@ -325,7 +327,7 @@ func (cn *connection) Post(msg pp.Message) (n int, err error) {
 func (cn *connection) Write(encoded []byte) (n int, err error) {
 	cn.cmu().Lock()
 	defer cn.cmu().Unlock()
-	return cn.writeBuffer.Write(encoded)
+	return cn.currentbuffer.Write(encoded)
 }
 
 // Writes a message into the write buffer.
@@ -761,18 +763,19 @@ func (cn *connection) Flush() (int, error) {
 	// }()
 
 	cn.cmu().Lock()
-	buf := cn.writeBuffer.Bytes()
-	cn.writeBuffer.Reset()
+	buf := cn.currentbuffer.Bytes()
+	cn.currentbuffer.Reset()
 	cn.cmu().Unlock()
 
 	n, err := cn.w.Write(buf)
+	blen := len(buf)
 
 	if err != nil {
 		return n, errorsx.Wrap(err, "failed to flush buffer")
 	}
 
-	if n != len(buf) {
-		return n, errorsx.Errorf("write failed written != len(buf) (%d != %d)", n, len(buf))
+	if n != blen {
+		return n, errorsx.Errorf("write failed written != len(buf) (%d != %d)", n, blen)
 	}
 
 	return n, nil
