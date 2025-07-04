@@ -6,7 +6,11 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/james-lawrence/torrent/internal/atomicx"
+	"github.com/james-lawrence/torrent/internal/langx"
 )
 
 type logger interface {
@@ -23,38 +27,42 @@ type T interface {
 	Update(context.Context, *Shared) T
 }
 
-func Idle(next T, t time.Duration, cond *sync.Cond, signals ...*sync.Cond) idle {
-	return idle{
-		timeout: t,
-		next:    next,
-		cond:    cond,
+func Idle(ctx context.Context, cond *sync.Cond, signals ...*sync.Cond) *Idler {
+	tt := time.NewTimer(time.Hour)
+	tt.Stop()
+
+	return (&Idler{
+		timeout: tt,
+		target:  cond,
 		signals: signals,
-	}
+		done:    make(chan struct{}),
+		running: langx.Autoderef(atomicx.Bool(false)),
+	}).monitor(ctx)
 }
 
-type idle struct {
-	timeout time.Duration
-	next    T
-	cond    *sync.Cond
+type Idler struct {
+	timeout *time.Timer
+	target  *sync.Cond
 	signals []*sync.Cond
+	done    chan struct{}
+	running atomic.Bool
 }
 
-func (t idle) monitor(ctx context.Context, target *sync.Cond, signals ...*sync.Cond) {
-	ctx, done := context.WithCancel(ctx)
-	defer func() {
-		for _, s := range signals {
-			s.Broadcast()
-		}
-	}()
-	defer done()
+func (t *Idler) Idle(next T, d time.Duration) idle {
+	if d > 0 {
+		t.timeout.Reset(d)
+	}
+	return idle{Idler: t, next: next}
+}
 
-	for _, s := range signals {
+func (t *Idler) monitor(ctx context.Context) *Idler {
+	for _, s := range t.signals {
 		go func() {
 			for {
 				s.L.Lock()
 				s.Wait()
 				s.L.Unlock()
-				target.Broadcast()
+				t.target.Broadcast()
 				select {
 				case <-ctx.Done():
 					return
@@ -64,23 +72,41 @@ func (t idle) monitor(ctx context.Context, target *sync.Cond, signals ...*sync.C
 		}()
 	}
 
-	if t.timeout > 0 {
-		go func() {
-			select {
-			case <-time.After(t.timeout):
-				t.cond.Broadcast()
-			case <-ctx.Done():
-			}
-		}()
-	}
+	go func() {
+		for {
+			t.target.L.Lock()
+			t.target.Wait()
+			t.target.L.Unlock()
 
-	target.L.Lock()
-	target.Wait()
-	target.L.Unlock()
+			if !t.running.Load() {
+				continue
+			}
+
+			select {
+			case t.done <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return t
+}
+
+type idle struct {
+	*Idler
+	next T
 }
 
 func (t idle) Update(ctx context.Context, c *Shared) T {
-	t.monitor(ctx, t.cond, t.signals...)
+	defer t.Idler.running.Store(false)
+	defer t.Idler.timeout.Stop()
+	t.Idler.running.Store(true)
+	select {
+	case <-t.done:
+	case <-t.Idler.timeout.C:
+	case <-ctx.Done():
+	}
 	return t.next
 }
 
@@ -123,6 +149,16 @@ func (t warning) String() string {
 	return fmt.Sprintf("%T - %T", t, t.cause)
 }
 
+func Halt() halt {
+	return halt{}
+}
+
+type halt struct{}
+
+func (t halt) Update(ctx context.Context, c *Shared) T {
+	c.done(nil)
+	return nil
+}
 func Fn(fn fn) fn {
 	return fn
 }

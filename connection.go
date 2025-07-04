@@ -439,14 +439,14 @@ type messageWriter func(pp.Message) bool
 // connections check their own failures, this amortizes the cost of failures to
 // the connections themselves instead of bottlenecking at the torrent.
 func (cn *connection) checkFailures() error {
+	if cn.t.chunks.failed.IsEmpty() || cn.touched.IsEmpty() {
+		return nil
+	}
+
 	cn.cmu().Lock()
 	defer cn.cmu().Unlock()
 
 	failed := cn.t.chunks.Failed(cn.touched.Clone())
-
-	if failed.IsEmpty() {
-		return nil
-	}
 
 	for iter, prev, pid := failed.ReverseIterator(), -1, 0; iter.HasNext(); prev = pid {
 		pid = cn.t.chunks.pindex(int(iter.Next()))

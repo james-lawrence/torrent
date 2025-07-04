@@ -204,6 +204,8 @@ func connexdht(cn *connection, n cstate.T) cstate.T {
 func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err error) {
 	cn.cfg.debug().Printf("c(%p) writer initiated\n", cn)
 	defer cn.cfg.debug().Printf("c(%p) writer completed\n", cn)
+	ctx, done := context.WithCancel(ctx)
+	defer done()
 
 	ts := time.Now()
 	ws := &writerstate{
@@ -217,6 +219,7 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		lowrequestwatermark: max(1, cn.PeerMaxRequests/4),
 		requestable:         roaring.New(),
 		seed:                cn.t.seeding(),
+		Idler:               cstate.Idle(ctx, cn.respond, cn.t.chunks.cond),
 	}
 
 	defer cn.checkFailures()
@@ -236,6 +239,7 @@ type writerstate struct {
 	uploadavailable     *atomic.Pointer[time.Time]
 	requestable         *roaring.Bitmap // represents the chunks we're currently allow to request.
 	lowrequestwatermark int
+	*cstate.Idler
 }
 
 func (t *writerstate) String() string {
@@ -714,7 +718,8 @@ func connwriteridle(ws *writerstate) cstate.T {
 	}
 
 	ws.cfg.debug().Printf("c(%p) seed(%t) idling uploads(%t) downloads(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.Choked, !ws.PeerChoked, ws.t.chunks, mind, delays)
-	return connwriterBitmap(cstate.Idle(connwriteractive(ws), mind, ws.connection.respond, ws.connection.t.chunks.cond), ws)
+
+	return connwriterBitmap(ws.Idler.Idle(connwriteractive(ws), mind), ws)
 }
 
 func connwriteractive(ws *writerstate) cstate.T {
