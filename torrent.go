@@ -228,6 +228,7 @@ func TuneVerifyFull(t *torrent) {
 	t.digests.Wait()
 
 	t.chunks.MergeInto(t.chunks.missing, t.chunks.failed)
+	t.chunks.unverified.AndNot(t.chunks.missing)
 	t.chunks.FailuresReset()
 }
 
@@ -239,6 +240,7 @@ func TuneVerifyAsync(t *torrent) {
 		t.digests.Wait()
 
 		t.chunks.MergeInto(t.chunks.missing, t.chunks.failed)
+		t.chunks.unverified.AndNot(t.chunks.missing)
 		t.chunks.FailuresReset()
 	}()
 }

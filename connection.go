@@ -44,7 +44,7 @@ const (
 	peerSourceDhtGetPeers     = "Hg" // Peers we found by searching a DHT.
 	peerSourceDhtAnnouncePeer = "Ha" // Peers that were announced to us by a DHT.
 	peerSourcePex             = "X"
-	writebufferscapacity      = 256 * bytesx.KiB
+	writebufferscapacity      = 512 * bytesx.KiB
 )
 
 func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.AddrPort, extensions *pp.ExtensionBits, localport uint16, dynamicaddr *atomic.Pointer[netip.AddrPort]) (c *connection) {
@@ -389,13 +389,15 @@ func (cn *connection) onPeerSentCancel(r request) {
 	delete(cn.PeerRequests, r)
 }
 
-func (cn *connection) Choke(msg messageWriter) (more bool) {
+func (cn *connection) Choke(msg messageWriter) error {
 	if cn.Choked {
-		return true
+		return nil
 	}
 
 	cn.Choked = true
-	more = msg(pp.NewChoked())
+	if err := msg(pp.NewChoked()); err != nil {
+		return err
+	}
 
 	if cn.supported(pp.ExtensionBitFast) {
 		for r := range cn.PeerRequests {
@@ -405,7 +407,7 @@ func (cn *connection) Choke(msg messageWriter) (more bool) {
 		cn.PeerRequests = nil
 	}
 
-	return more
+	return nil
 }
 
 func (cn *connection) Unchoke(msg func(pp.Message) bool) bool {
@@ -436,7 +438,13 @@ func (cn *connection) SetInterested(interested bool, msg func(pp.Message) bool) 
 
 // The function takes a message to be sent, and returns true if more messages
 // are okay.
-type messageWriter func(pp.Message) bool
+type messageWriter func(pp.Message) error
+
+func (t messageWriter) Deprecated() func(pp.Message) bool {
+	return func(m pp.Message) bool {
+		return t(m) == nil
+	}
+}
 
 // connections check their own failures, this amortizes the cost of failures to
 // the connections themselves instead of bottlenecking at the torrent.
@@ -462,7 +470,7 @@ func (cn *connection) checkFailures() error {
 		}
 	}
 
-	if cn.stats.PiecesDirtiedBad.Int64() > 10 {
+	if !cn.trusted && cn.stats.PiecesDirtiedBad.Int64() > 10 {
 		return connections.NewBanned(cn.conn, errorsx.New("too many bad pieces"))
 	}
 
