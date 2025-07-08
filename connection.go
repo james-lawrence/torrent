@@ -250,7 +250,6 @@ func (cn *connection) resetclaimed() error {
 		cn.cmu().Unlock()
 	} else {
 		cn.cmu().Lock()
-		log.Println("ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ", cn.claimed.GetCardinality())
 		cn.claimed.Clear()
 		cn.cmu().Unlock()
 	}
