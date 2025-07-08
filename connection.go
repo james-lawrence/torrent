@@ -32,6 +32,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
+	"github.com/james-lawrence/torrent/internal/timex"
 	"github.com/james-lawrence/torrent/internal/x/bitmapx"
 	"github.com/james-lawrence/torrent/mse"
 )
@@ -73,7 +74,7 @@ func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.A
 		requests:                make(map[uint64]request, cfg.maximumOutstandingRequests),
 		PeerRequests:            make(map[request]struct{}, cfg.maximumOutstandingRequests),
 		PeerExtensionIDs:        make(map[pp.ExtensionName]pp.ExtensionNumber),
-		refreshrequestable:      atomicx.Pointer(ts),
+		refreshrequestable:      atomicx.Pointer(timex.Inf()),
 		lastMessageReceived:     atomicx.Pointer(ts),
 		lastRejectReceived:      atomicx.Pointer(ts),
 		lastUsefulChunkReceived: ts,
@@ -134,9 +135,8 @@ type connection struct {
 	lastBecameInterested time.Time
 	priorInterest        time.Duration
 
-	Choked           bool // we have prevented the peer from making requests
-	requests         map[uint64]request
-	requestsLowWater int
+	Choked   bool // we have prevented the peer from making requests
+	requests map[uint64]request
 
 	// Indexed by metadata piece, set to true if posted and pending a
 	// response.
@@ -250,7 +250,8 @@ func (cn *connection) resetclaimed() error {
 		cn.cmu().Unlock()
 	} else {
 		cn.cmu().Lock()
-		cn.t.chunks.fill(cn.claimed).Clear()
+		log.Println("ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ", cn.claimed.GetCardinality())
+		cn.claimed.Clear()
 		cn.cmu().Unlock()
 	}
 
@@ -800,6 +801,9 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 	cn.lastMessageReceived.Store(langx.Autoptr(time.Now()))
 
 	if msg.Keepalive {
+		// TODO not sure if these are necessary confirm and cleanup later.
+		cn.request.Broadcast()
+		cn.respond.Broadcast()
 		cn.cfg.debug().Printf("(%d) c(%p) seed(%t) - RECEIVED KEEPALIVE - missing(%d) - failed(%d) - outstanding(%d) - unverified(%d) - completed(%d)\n", os.Getpid(), cn, cn.cfg.Seed, cn.t.chunks.Cardinality(cn.t.chunks.missing), cn.t.chunks.Cardinality(cn.t.chunks.failed), len(cn.t.chunks.outstanding), cn.t.chunks.Cardinality(cn.t.chunks.unverified), cn.t.chunks.Cardinality(cn.t.chunks.completed))
 		return
 	}
@@ -818,7 +822,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		return msg, nil
 	case pp.Unchoke:
 		cn.PeerChoked = false
-		cn.refreshrequestable.Swap(langx.Autoptr(time.Now().Add(30 * time.Millisecond)))
+		cn.refreshrequestable.Swap(langx.Autoptr(time.Now()))
 		cn.request.Broadcast()
 		return msg, nil
 	case pp.Interested:
@@ -843,9 +847,6 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		if err = cn.peerSentBitfield(msg.Bitfield); err != nil {
 			return msg, err
 		}
-
-		cn.refreshrequestable.Swap(langx.Autoptr(time.Now().Add(30 * time.Millisecond)))
-		cn.request.Broadcast()
 
 		return msg, nil
 	case pp.Request:
@@ -888,8 +889,6 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 			return msg, err
 		}
 
-		cn.refreshrequestable.Swap(langx.Autoptr(time.Now().Add(30 * time.Millisecond)))
-		cn.request.Broadcast()
 		return msg, nil
 	case pp.HaveNone:
 		// cn.cfg.debug().Println("peer claims it has nothing")
@@ -911,9 +910,6 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		cn._mu.Lock()
 		cn.fastset.AddRange(cn.t.chunks.Range(uint64(msg.Index)))
 		cn._mu.Unlock()
-
-		cn.refreshrequestable.Swap(langx.Autoptr(time.Now().Add(30 * time.Millisecond)))
-		cn.request.Broadcast()
 
 		return msg, nil
 	case pp.Extended:
@@ -1037,8 +1033,6 @@ func (cn *connection) receiveChunk(msg *pp.Message) error {
 		cn.cfg.debug().Printf("c(%p) - wasted chunk d(%020d) r(%d,%d,%d)\n", cn, req.Digest, req.Index, req.Begin, req.Length)
 		cn.allStats(add(1, func(cs *ConnStats) *count { return &cs.ChunksReadWasted }))
 		return nil
-	} else {
-		cn.cfg.debug().Printf("c(%p) - debug chunk d(%020d) r(%d,%d,%d)\n", cn, req.Digest, req.Index, req.Begin, req.Length)
 	}
 
 	cn.allStats(add(1, func(cs *ConnStats) *count { return &cs.ChunksReadUseful }))

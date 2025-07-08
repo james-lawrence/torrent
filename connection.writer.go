@@ -347,12 +347,12 @@ func (t _connwriterRequests) determineInterest(msg messageWriter) *roaring.Bitma
 	}
 
 	if ts := langx.Autoderef(t.refreshrequestable.Load()); ts.After(time.Now()) {
-		// t.cfg.debug().Printf("c(%p) seed(%t) allowing cached %d - %s\n", t.connection, t.seed, t.requestable.GetCardinality(), time.Until(ts))
+		t.cfg.debug().Printf("c(%p) seed(%t) allowing cached %d - %s\n", t.connection, t.seed, t.requestable.GetCardinality(), time.Until(ts))
 		return t.requestable
 	}
 
 	if m := t.t.chunks.Cardinality(t.t.chunks.completed); uint64(m) == t.t.chunks.pieces {
-		// t.cfg.debug().Printf("c(%p) seed(%t) disabling requestable - have all data m(%d) o(%d) c(%d) p(%d)\n", t.connection, t.seed, m, len(t.t.chunks.outstanding), t.t.chunks.Cardinality(t.t.chunks.completed), t.t.chunks.pieces)
+		t.cfg.debug().Printf("c(%p) seed(%t) disabling requestable - have all data m(%d) o(%d) c(%d) p(%d)\n", t.connection, t.seed, m, len(t.t.chunks.outstanding), t.t.chunks.Cardinality(t.t.chunks.completed), t.t.chunks.pieces)
 		t.refreshrequestable.Store(langx.Autoptr(timex.Inf()))
 		t.requestable = roaring.New()
 		return t.requestable
@@ -375,6 +375,11 @@ func (t _connwriterRequests) determineInterest(msg messageWriter) *roaring.Bitma
 
 	if !t.SetInterested(!t.requestable.IsEmpty(), msg.Deprecated()) {
 		t.cfg.debug().Printf("c(%p) seed(%t) nothing available to request\n", t.connection, t.seed)
+		return t.requestable
+	}
+
+	if t.connection.t.chunks.missing.GetCardinality() == 0 && t.connection.t.chunks.unverified.GetCardinality() > 0 {
+		t.connection.t.digests.EnqueueBitmap(bitmapx.Fill(t.connection.t.chunks.pieces))
 	}
 
 	return t.requestable
@@ -405,21 +410,27 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg messageW
 	// t.cfg.debug().Printf("c(%p) seed(%t) make requests initated avail(%d)\n", t.connection, t.seed, t.requestable.GetCardinality())
 	// defer t.cfg.debug().Printf("c(%p) seed(%t) make requests completed avail(%d)\n", t.connection, t.seed, t.requestable.GetCardinality())
 
-	if unmodified := !t.refreshrequestable.Load().Before(time.Now()); (available.IsEmpty() && unmodified) || len(t.requests) >= t.lowrequestwatermark {
-		// t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - (avail(%d) && unmodified(%t)) || req(current(%d) >= low watermark(%d))", t.connection, t.seed, available.GetCardinality(), unmodified, len(t.requests), t.lowrequestwatermark)
+	if len(t.requests) > t.lowrequestwatermark/2 {
+		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - req(current(%d) >= low watermark(%d) / 2)", t.connection, t.seed, len(t.requests), t.lowrequestwatermark)
+		return
+	}
+
+	if unmodified := !t.refreshrequestable.Load().Before(time.Now()); available.IsEmpty() && unmodified {
+		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - (avail(%d) && unmodified(%t))", t.connection, t.seed, available.GetCardinality(), unmodified)
 		return
 	}
 
 	// once we fall below the low watermark dynamic adjust it based on what we saw.
 	// never allowing it to go above the original low watermark and with a floor of a single request.
-	t.lowrequestwatermark += int(t.chunksReceived.Swap(0)*4 - t.chunksRejected.Swap(0))
-	t.lowrequestwatermark = max(1, min(t.lowrequestwatermark, t.PeerMaxRequests-(t.PeerMaxRequests/4)))
+	t.lowrequestwatermark += min(1, int(t.chunksReceived.Swap(0)*4-t.chunksRejected.Swap(0)))
+	t.lowrequestwatermark = min(t.lowrequestwatermark, t.PeerMaxRequests-(t.PeerMaxRequests/4))
 
-	max := max(0, min(t.lowrequestwatermark, t.PeerMaxRequests)-len(t.requests))
+	max := max(0, t.lowrequestwatermark-len(t.requests))
 	if reqs, err = t.t.chunks.Pop(max, available); errors.As(err, &unavailable) {
 		if len(reqs) == 0 && t.requestable.IsEmpty() && (unavailable.Missing > 0 || unavailable.Outstanding > 0) {
-			// when we run out of work mark us for refreshing the set based on the
-			// latest information from the connection.
+			// mark out available set for refresh when we hit this state.
+			// this is because we remove chunks from our requestable set before we receive them.
+			// and when we run out of work and there is more things to request it means we missed some.
 			t.refreshrequestable.Store(langx.Autoptr(time.Now()))
 
 			t.t.chunks.MergeInto(t.t.chunks.missing, t.t.chunks.failed)
@@ -476,7 +487,7 @@ func (t _connwriterRequests) Update(ctx context.Context, _ *cstate.Shared) (r cs
 		)
 	}
 
-	return connwriterKeepalive(ws, connwriteridle(ws))
+	return connwriteridle(ws)
 }
 
 func connwriterKeepalive(ws *writerstate, n cstate.T) cstate.T {
@@ -496,12 +507,14 @@ func (t _connwriterKeepalive) Update(ctx context.Context, _ *cstate.Shared) csta
 	ws := t.writerstate
 
 	if langx.Autoderef(ws.keepaliverequired.Load()).After(time.Now()) {
-		return connwriterFlush(t.next, ws)
+		return t.next
 	}
 
 	if _, err = ws.Post(pp.NewKeepAlive()); err != nil {
 		return cstate.Failure(errorsx.Wrap(err, "keepalive encoding failed"))
 	}
+
+	ws.keepaliverequired.Store(langx.Autoptr(time.Now().Add(ws.keepAliveTimeout)))
 
 	return connwriterFlush(t.next, ws)
 }
@@ -528,7 +541,7 @@ func (t _connwriterFlush) Update(ctx context.Context, _ *cstate.Shared) cstate.T
 	}
 
 	if n != 0 {
-		ws.keepaliverequired.Store(langx.Autoptr(time.Now().Add(ws.keepAliveTimeout)))
+		ws.keepaliverequired.Store(langx.Autoptr(time.Now().Add(ws.keepAliveTimeout / 2)))
 	}
 
 	return t.next
@@ -582,9 +595,9 @@ func connwriteridle(ws *writerstate) cstate.T {
 
 	ws.cfg.debug().Printf("c(%p) seed(%t) idling downloads(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.t.chunks, mind, delays)
 
-	return connwriterKeepalive(ws, connwriterBitmap(ws.Idler.Idle(connwriteractive(ws), mind), ws))
+	return ws.Idler.Idle(connwriteractive(ws), mind)
 }
 
 func connwriteractive(ws *writerstate) cstate.T {
-	return connwriterclosed(ws, connWriterInterested(ws))
+	return connwriterKeepalive(ws, connwriterBitmap(connWriterInterested(ws), ws))
 }

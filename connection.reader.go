@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -194,7 +193,7 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 	// t.cfg.debug().Printf("c(%p) seed(%t) req(%d) uploading - allowed\n", t.connection, t.seed, len(t.PeerRequests))
 	// defer t.cfg.debug().Printf("c(%p) seed(%t) req(%d) uploading - completed\n", t.connection, t.seed, len(t.PeerRequests))
 
-	oreqs := len(t.PeerRequests)
+	// oreqs := len(t.PeerRequests)
 	uploaded := 0
 	for r := range t.requestseq() {
 		res := t.cfg.UploadRateLimiter.ReserveN(time.Now(), int(r.Length))
@@ -221,8 +220,6 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 			return 0, nil
 		}
 
-		t.cfg.debug().Printf("(%d) c(%p) seed(%t) upload debug - %s\n", os.Getpid(), t.connection, t.seed, r)
-
 		uploaded++
 		t.cmu().Lock()
 		delete(t.PeerRequests, r)
@@ -232,7 +229,7 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 			continue
 		}
 
-		t.cfg.debug().Printf("c(%p) seed(%t) upload completed - uploaded(%d)/req(%d) - remaining(%d)\n", t.connection, t.seed, uploaded, oreqs, len(t.PeerRequests))
+		// t.cfg.debug().Printf("c(%p) seed(%t) upload completed - uploaded(%d)/req(%d) - remaining(%d)\n", t.connection, t.seed, uploaded, oreqs, len(t.PeerRequests))
 		return 0, nil
 	}
 
@@ -246,11 +243,7 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 }
 
 func (t _connreaderUpload) resetuploadavailability(delay time.Duration) {
-	if delay == 0 {
-		return
-	}
-
-	t.cfg.debug().Printf("c(%p) seed(%t) setting next upload - %s\n", t.connection, t.seed, delay)
+	// t.cfg.debug().Printf("c(%p) seed(%t) setting next upload - %s\n", t.connection, t.seed, delay)
 	next := time.Now().Add(delay)
 	t.uploadavailable.Store(langx.Autoptr(next))
 }
