@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/bep0006"
 	pp "github.com/james-lawrence/torrent/btprotocol"
-	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/cstate"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/atomicx"
@@ -54,6 +52,13 @@ func RunHandshookConn(c *connection, t *torrent) error {
 
 	go func() {
 		err := connwriterinit(ctx, c, 10*time.Second)
+		err = errorsx.StdlibTimeout(err, retrydelay, syscall.ECONNRESET)
+		cancel(err)
+		c.Close()
+	}()
+
+	go func() {
+		err := connreaderinit(ctx, c, 10*time.Second)
 		err = errorsx.StdlibTimeout(err, retrydelay, syscall.ECONNRESET)
 		cancel(err)
 		c.Close()
@@ -213,18 +218,17 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		keepAliveTimeout:    to,
 		chokeduntil:         ts.Add(-1 * time.Minute),
 		nextbitmap:          ts.Add(time.Minute),
-		uploadavailable:     atomicx.Pointer(ts),
 		keepaliverequired:   atomicx.Pointer(ts.Add(to)),
 		lowrequestwatermark: max(1, cn.PeerMaxRequests/4),
 		requestable:         roaring.New(),
 		seed:                cn.t.seeding(),
-		Idler:               cstate.Idle(ctx, cn.respond, cn.t.chunks.cond),
+		Idler:               cstate.Idle(ctx, cn.request, cn.t.chunks.cond),
 	}
 
 	defer cn.checkFailures()
 	defer cn.deleteAllRequests()
 
-	return cstate.Run(ctx, connWriterSyncChunks(ws), cn.cfg.debug())
+	return cstate.Run(ctx, connWriterInterested(ws), cn.cfg.debug())
 }
 
 type writerstate struct {
@@ -235,7 +239,6 @@ type writerstate struct {
 	chokeduntil         time.Time
 	seed                bool
 	keepaliverequired   *atomic.Pointer[time.Time]
-	uploadavailable     *atomic.Pointer[time.Time]
 	requestable         *roaring.Bitmap // represents the chunks we're currently allow to request.
 	lowrequestwatermark int
 	*cstate.Idler
@@ -280,18 +283,9 @@ func (t _connWriterClosed) Update(ctx context.Context, _ *cstate.Shared) (r csta
 		return nil
 	}
 
-	if ts := *ws.lastMessageReceived.Load(); time.Since(ts) > 2*ws.keepAliveTimeout {
-		return cstate.Failure(
-			errorsx.Timedout(
-				fmt.Errorf("connection timed out %s %v %v", ws.remoteAddr.String(), time.Since(ts), ts),
-				10*time.Second,
-			),
-		)
-	}
-
 	// if we're choked and not allowed to fast track any chunks then there is nothing
 	// to do.
-	if ws.PeerChoked && ws.peerfastset.IsEmpty() {
+	if ws.PeerChoked && ws.fastset.IsEmpty() {
 		return connwriterFlush(connwriteridle(ws), ws)
 	}
 
@@ -312,56 +306,15 @@ func (t _connWriterClosed) Update(ctx context.Context, _ *cstate.Shared) (r csta
 	return t.next
 }
 
-func connWriterSyncChunks(ws *writerstate) cstate.T {
-	return _connWriterSyncChunks{writerstate: ws}
+func connWriterInterested(ws *writerstate) cstate.T {
+	return _connWriterInterested{writerstate: ws}
 }
 
-type _connWriterSyncChunks struct {
+type _connWriterInterested struct {
 	*writerstate
 }
 
-func (t _connWriterSyncChunks) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {
-	ws := t.writerstate
-	next := connWriterSyncComplete(ws)
-
-	if ws.keepaliverequired.Load().After(time.Now()) {
-		return next
-	}
-
-	dup := ws.t.chunks.completed.Clone()
-	dup.AndNot(ws.sentHaves)
-
-	for i := dup.Iterator(); i.HasNext(); {
-		piece := i.Next()
-		ws.cmu().Lock()
-		added := ws.sentHaves.CheckedAdd(piece)
-		ws.cmu().Unlock()
-		if !added {
-			continue
-		}
-
-		_, err := ws.Post(pp.NewHavePiece(uint64(piece)))
-		if err != nil {
-			return cstate.Failure(err)
-		}
-	}
-
-	if !dup.IsEmpty() {
-		ws.t.readabledataavailable.Store(true)
-	}
-
-	return next
-}
-
-func connWriterSyncComplete(ws *writerstate) cstate.T {
-	return _connWriterSyncComplete{writerstate: ws}
-}
-
-type _connWriterSyncComplete struct {
-	*writerstate
-}
-
-func (t _connWriterSyncComplete) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {
+func (t _connWriterInterested) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {
 	ws := t.writerstate
 	next := connwriterRequests(ws)
 
@@ -369,17 +322,7 @@ func (t _connWriterSyncComplete) Update(ctx context.Context, _ *cstate.Shared) (
 		return next
 	}
 
-	writer := func(msg pp.Message) bool {
-		if _, err := ws.Write(msg.MustMarshalBinary()); err != nil {
-			ws.cfg.errors().Println(err)
-			return false
-		}
-
-		ws.wroteMsg(&msg)
-		return ws.currentbuffer.Len() < ws.bufferLimit
-	}
-
-	ws.SetInterested(false, writer)
+	ws.SetInterested(false, messageWriter(ws.bufmsg).Deprecated())
 	return next
 }
 
@@ -415,7 +358,7 @@ func (t _connwriterRequests) determineInterest(msg messageWriter) *roaring.Bitma
 		return t.requestable
 	}
 
-	// t.cfg.debug().Printf("c(%p) seed(%t) refreshing availability\n", t.connection, t.seed)
+	t.cfg.debug().Printf("c(%p) seed(%t) refreshing availability\n", t.connection, t.seed)
 
 	t._mu.RLock()
 	fastset := t.fastset.Clone()
@@ -514,71 +457,6 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg messageW
 	}
 }
 
-// Also handles choking and unchoking of the remote peer.
-func (t _connwriterRequests) upload(msg messageWriter) (time.Duration, error) {
-	if t.Choked || t.peerSentHaveAll {
-		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) req(%d) upload restricted - disallowed\n", t.connection, t.seed, t.Choked, t.peerSentHaveAll, len(t.PeerRequests))
-		return time.Minute, nil
-	}
-
-	if ts, n := langx.Autoderef(t.uploadavailable.Load()), time.Now(); ts.After(n) {
-		return time.Until(ts), nil
-	}
-
-	t.cfg.debug().Printf("c(%p) seed(%t) req(%d) uploading - allowed\n", t.connection, t.seed, len(t.PeerRequests))
-	defer t.cfg.debug().Printf("c(%p) seed(%t) req(%d) uploading - competed\n", t.connection, t.seed, len(t.PeerRequests))
-
-	uploaded := 0
-	for r := range t.requestseq() {
-		res := t.cfg.UploadRateLimiter.ReserveN(time.Now(), int(r.Length))
-		if !res.OK() {
-			t.cfg.debug().Printf("upload rate limiter burst size < %d\n", r.Length)
-			return 0, connections.NewBanned(t.conn, errorsx.Errorf("upload length is larger than rate limit: %d", r.Length))
-		}
-
-		if delay := res.Delay(); delay > 0 {
-			t.cfg.errors().Printf("c(%p) seed(%t) maximum upload rate exceed n(%d) - delay(%v) - bytes(%d)\n", t.connection, t.seed, uploaded, delay, r.Length)
-			res.Cancel()
-			return delay, nil
-		}
-
-		more, err := t.sendChunk(r, msg.Deprecated())
-		if err != nil {
-			t.cfg.errors().Println("error sending chunk to peer, choking peer", err)
-			// If we failed to send a chunk, choke the peer to ensure they
-			// flush all their requests. We've probably dropped a piece,
-			// but there's no way to communicate this to the peer. If they
-			// ask for it again, we'll kick them to allow us to send them
-			// an updated bitfield.
-			t.Choke(msg)
-			return 0, nil
-		}
-
-		uploaded++
-		t.cmu().Lock()
-		delete(t.PeerRequests, r)
-		t.cmu().Unlock()
-
-		if !more {
-			t.cfg.debug().Printf("(%d) c(%p) seed(%t) upload - %d\n", os.Getpid(), t.connection, t.seed, uploaded)
-			return 0, nil
-		}
-	}
-
-	// t.cfg.debug().Printf("(%d) c(%p) seed(%t) upload - %d\n", os.Getpid(), t.connection, t.seed, uploaded)
-
-	return 0, nil
-}
-
-func (t _connwriterRequests) resetuploadavailability(delay time.Duration) {
-	if delay == 0 {
-		return
-	}
-
-	next := time.Now().Add(delay)
-	t.uploadavailable.Store(langx.Autoptr(next))
-}
-
 func (t _connwriterRequests) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {
 	ws := t.writerstate
 
@@ -586,14 +464,7 @@ func (t _connwriterRequests) Update(ctx context.Context, _ *cstate.Shared) (r cs
 		return cstate.Failure(err)
 	}
 
-	available := t.determineInterest(ws.bufmsg)
-	if d, err := t.upload(ws.bufmsg); err != nil {
-		return cstate.Failure(err)
-	} else {
-		t.resetuploadavailability(d)
-	}
-
-	t.genrequests(available, ws.bufmsg)
+	t.genrequests(t.determineInterest(ws.bufmsg), ws.bufmsg)
 
 	// needresponse is tracking read that come in while we're in the critical section of this function
 	// to prevent the state machine from going idle just because we didnt write anything this cycle.
@@ -624,7 +495,7 @@ func (t _connwriterKeepalive) Update(ctx context.Context, _ *cstate.Shared) csta
 
 	ws := t.writerstate
 
-	if time.Since(langx.Autoderef(ws.keepaliverequired.Load())) < ws.keepAliveTimeout {
+	if langx.Autoderef(ws.keepaliverequired.Load()).After(time.Now()) {
 		return connwriterFlush(t.next, ws)
 	}
 
@@ -650,7 +521,7 @@ func (t _connwriterFlush) Update(ctx context.Context, _ *cstate.Shared) cstate.T
 	)
 
 	ws := t.writerstate
-	n, err := ws.Flush()
+	n, err := t.Flush()
 
 	if err != nil {
 		return cstate.Failure(errorsx.Wrap(err, "failed to send requests"))
@@ -689,41 +560,31 @@ func (t _connwriterCommitBitmap) Update(ctx context.Context, _ *cstate.Shared) c
 
 	return t.next
 }
+
 func connwriteridle(ws *writerstate) cstate.T {
-
-	if ws.needsresponse.CompareAndSwap(true, false) {
-		return connwriteractive(ws)
-	}
-
 	now := time.Now()
 	keepalive := now.Add(ws.keepAliveTimeout / 2)
 
 	delays := slicesx.MapTransform(
-		func(ts time.Time) time.Duration {
-			if ts.Before(now) {
-				return ws.keepAliveTimeout / 2
-			}
-			return time.Until(ts)
-		},
+		time.Until,
 		keepalive,
 		ws.nextbitmap,
-		ws.chokeduntil,
+		timex.Max(ws.chokeduntil, keepalive),
 		langx.Autoderef(ws.keepaliverequired.Load()),
 		langx.Autoderef(ws.refreshrequestable.Load()),
-		langx.Autoderef(ws.uploadavailable.Load()),
 	)
 
 	mind := timex.DurationMin(delays...)
 	if mind <= 0 {
-		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle uploads(%t) downloads(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.Choked, !ws.PeerChoked, ws.t.chunks, mind, delays)
+		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle downloads(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.t.chunks, mind, delays)
 		return connwriteractive(ws)
 	}
 
-	ws.cfg.debug().Printf("c(%p) seed(%t) idling uploads(%t) downloads(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.Choked, !ws.PeerChoked, ws.t.chunks, mind, delays)
+	ws.cfg.debug().Printf("c(%p) seed(%t) idling downloads(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.t.chunks, mind, delays)
 
-	return connwriterBitmap(ws.Idler.Idle(connwriteractive(ws), mind), ws)
+	return connwriterKeepalive(ws, connwriterBitmap(ws.Idler.Idle(connwriteractive(ws), mind), ws))
 }
 
 func connwriteractive(ws *writerstate) cstate.T {
-	return connwriterclosed(ws, connWriterSyncChunks(ws))
+	return connwriterclosed(ws, connWriterInterested(ws))
 }

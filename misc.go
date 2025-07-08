@@ -3,6 +3,7 @@ package torrent
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"net"
 	"time"
@@ -21,6 +22,10 @@ type request struct {
 	Index    pp.Integer
 	Reserved time.Time
 	chunkSpec
+}
+
+func (r request) String() string {
+	return fmt.Sprintf("r(%d,%d,%d)", r.Index, r.Begin, r.Length)
 }
 
 func (r request) rDigest(i, b, l uint32) uint64 {

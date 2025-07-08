@@ -235,6 +235,7 @@ func (t *chunks) request(cidx int64) (r request, err error) {
 	pidx := pindex(cidx, t.meta.PieceLength, t.clength)
 	start := chunkOffset(cidx, t.meta.PieceLength, t.clength)
 	length := chunkLength(t.meta.TotalLength(), cidx, t.meta.PieceLength, t.clength, cidx == t.cmaximum-1)
+
 	return newRequest(pp.Integer(pidx), pp.Integer(start), pp.Integer(length)), nil
 }
 
