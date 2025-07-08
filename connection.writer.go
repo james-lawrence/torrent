@@ -541,7 +541,7 @@ func (t _connwriterFlush) Update(ctx context.Context, _ *cstate.Shared) cstate.T
 	}
 
 	if n != 0 {
-		ws.keepaliverequired.Store(langx.Autoptr(time.Now().Add(ws.keepAliveTimeout / 2)))
+		ws.keepaliverequired.Store(langx.Autoptr(time.Now().Add(ws.keepAliveTimeout)))
 	}
 
 	return t.next
