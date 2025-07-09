@@ -236,7 +236,6 @@ func (info *Info) OffsetToIndex(offset int64) int64 {
 	}
 
 	return min(offset/info.PieceLength, int64(info.NumPieces()-1))
-	// return offset / info.PieceLength
 }
 
 func (info *Info) OffsetToLength(offset int64) (length int64) {

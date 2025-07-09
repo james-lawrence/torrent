@@ -21,9 +21,14 @@ func tinyTorrentInfo() *metainfo.Info {
 }
 
 func torrentInfoN(n int64, pn int64) *metainfo.Info {
+	b := []byte(nil)
+	if pn > 0 {
+		b = make([]byte, 20*(n/pn))
+	}
 	return &metainfo.Info{
 		Length:      n,
 		PieceLength: pn,
+		Pieces:      b,
 	}
 }
 
@@ -466,5 +471,97 @@ func TestChunksInitFromMissing(t *testing.T) {
 		require.Equal(t, []uint32{}, p.unverified.ToArray())
 		require.Equal(t, uint64(p.cmaximum), p.missing.GetCardinality())
 		require.Equal(t, uint64(0), p.unverified.GetCardinality())
+	})
+}
+
+func TestDataAvailableForOffset(t *testing.T) {
+	t.Run("piece length is zero", func(t *testing.T) {
+		info := torrentInfoN(100, 0) // Length 100, PieceLength 0
+		c := newChunks(1, info)
+		require.Equal(t, int64(0), c.DataAvailableForOffset(0))
+		require.Equal(t, int64(0), c.DataAvailableForOffset(100))
+	})
+
+	t.Run("offsets within a fully completed bitmap", func(t *testing.T) {
+		info := tinyTorrentInfo() // 16KiB total, 1KiB pieceLength
+		c := newChunks(1, info)
+		c.completed.AddRange(0, c.pieces)
+
+		require.Equal(t, uint64(16), c.completed.GetCardinality())
+		require.Equal(t, int64(16*bytesx.KiB), c.DataAvailableForOffset(0))
+		require.Equal(t, int64(16*bytesx.KiB-500), c.DataAvailableForOffset(500))                     // Middle of piece 0
+		require.Equal(t, int64(16*bytesx.KiB-(bytesx.KiB-1)), c.DataAvailableForOffset(bytesx.KiB-1)) // End of piece 0
+		require.Equal(t, int64(16*bytesx.KiB-bytesx.KiB), c.DataAvailableForOffset(bytesx.KiB))       // Start of piece 2
+
+		require.Equal(t, int64(11*bytesx.KiB), c.DataAvailableForOffset(5*bytesx.KiB))
+		require.Equal(t, int64(16*bytesx.KiB-(6*bytesx.KiB-1)), c.DataAvailableForOffset(6*bytesx.KiB-1))
+		require.Equal(t, int64(10*bytesx.KiB), c.DataAvailableForOffset(6*bytesx.KiB)) // Start of piece 7
+	})
+
+	t.Run("offset in a completed piece", func(t *testing.T) {
+		info := tinyTorrentInfo() // 16KiB total, 1KiB pieceLength
+		c := newChunks(1, info)
+		c.completed.Add(0) // Mark piece 0 as completed
+		require.Equal(t, int64(bytesx.KiB), c.DataAvailableForOffset(0))
+		require.Equal(t, int64(524), c.DataAvailableForOffset(500))        // Middle of piece 0
+		require.Equal(t, int64(1), c.DataAvailableForOffset(bytesx.KiB-1)) // End of piece 0
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(bytesx.KiB))  // Start of piece 2
+
+		c.completed.Add(5) // Mark piece 5 as completed
+		require.Equal(t, int64(bytesx.KiB), c.DataAvailableForOffset(5*bytesx.KiB))
+		require.Equal(t, int64(1), c.DataAvailableForOffset(6*bytesx.KiB-1))
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(6*bytesx.KiB)) // Start of piece 7
+	})
+
+	t.Run("offset in a missing piece", func(t *testing.T) {
+		info := tinyTorrentInfo() // 16KiB total, 1KiB pieceLength (16 pieces: 0-15)
+		c := newChunks(1, info)   // Ensure all pieces are missing
+
+		// Offset at the start of a missing piece
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(0))
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(1*bytesx.KiB))
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(15*bytesx.KiB))
+
+		// Offset in the middle of a missing piece
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(512))               // Middle of piece 0
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(1*bytesx.KiB+200))  // Middle of piece 1
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(15*bytesx.KiB+500)) // Middle of piece 15
+	})
+
+	t.Run("offset exactly at or beyond total length", func(t *testing.T) {
+		info := tinyTorrentInfo() // Length 16KiB, 1KiB pieceLength
+		c := newChunks(1, info)   // All pieces missing
+
+		// Offset exactly at the total length (end of file)
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(16*bytesx.KiB))
+
+		// Offset beyond the total length
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(17*bytesx.KiB))
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(100*bytesx.KiB))
+	})
+
+	t.Run("offset in a missing piece, with some completed pieces elsewhere", func(t *testing.T) {
+		info := tinyTorrentInfo() // 16KiB total, 1KiB pieceLength
+		c := newChunks(1, info)
+		// Pieces 2, 4, 6 are completed
+		c.completed.Add(2)
+		c.completed.Add(4)
+		c.completed.Add(6)
+
+		// Offset in piece 0 (missing)
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(0))
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(500))
+
+		// Offset in piece 1 (missing)
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(1*bytesx.KiB))
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(2*bytesx.KiB-1))
+
+		// Offset in piece 3 (missing)
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(3*bytesx.KiB))
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(4*bytesx.KiB-1))
+
+		// Offset in piece 7 (missing) - last piece
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(7*bytesx.KiB))
+		require.Equal(t, int64(-1), c.DataAvailableForOffset(7*bytesx.KiB+300))
 	})
 }
