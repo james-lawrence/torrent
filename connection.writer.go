@@ -224,7 +224,7 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		lowrequestwatermark: max(1, cn.PeerMaxRequests/4),
 		requestable:         roaring.New(),
 		seed:                cn.t.seeding(),
-		Idler:               cstate.Idle(ctx, cn.request, cn.t.chunks.cond),
+		Idler:               cstate.Idle(ctx, cn.request),
 	}
 
 	defer cn.checkFailures()
@@ -358,14 +358,13 @@ type _connWriterInterested struct {
 
 func (t _connWriterInterested) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {
 	ws := t.writerstate
-	next := connwriterRequests(ws)
 
 	if ws.t.chunks.Incomplete() {
-		return next
+		return t.next
 	}
 
 	ws.SetInterested(false, messageWriter(ws.bufmsg).Deprecated())
-	return next
+	return t.next
 }
 
 func connwriterRequests(ws *writerstate) cstate.T {
@@ -634,7 +633,7 @@ func connwriteridle(ws *writerstate) cstate.T {
 	keepalive := now.Add(ws.keepAliveTimeout / 2)
 
 	if ws.needsresponse.CompareAndSwap(true, false) {
-		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle downloads(%t) %s - needs rsponse\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.t.chunks)
+		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle downloads(%t) %s - needs response\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.t.chunks)
 		return connwriteractive(ws)
 	}
 
@@ -648,12 +647,11 @@ func connwriteridle(ws *writerstate) cstate.T {
 	mind := time.Until(timex.Min(ts...))
 
 	if mind <= 0 {
-		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle downloads(%t) avail(%d) %s - %s\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.requestable.GetCardinality(), ws.t.chunks, mind)
+		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle downloads(%t) %s - %s\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.t.chunks, mind)
 		return connwriteractive(ws)
 	}
 
-	ws.cfg.debug().Printf("c(%p) seed(%t) idling downloads(%t) avail(%d) %s - %s\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.requestable.GetCardinality(), ws.t.chunks, mind)
-
+	ws.cfg.debug().Printf("c(%p) seed(%t) idling downloads(%t) %s - %s\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.t.chunks, mind)
 	return connWriterSyncBitfield(ws, connWriterInterested(ws, ws.Idler.Idle(connwriteractive(ws), mind)))
 }
 

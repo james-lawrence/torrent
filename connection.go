@@ -183,6 +183,7 @@ type connection struct {
 	upload        *sync.Cond  // used to wake up the connection.reader
 	request       *sync.Cond  // used to wake up the connection.writer
 	needsresponse atomic.Bool // used to track when responses need to be sent that might be missed by the respond condition.
+	chunkwakefreq atomic.Uint32
 }
 
 func (cn *connection) requestseq() iter.Seq[request] {
@@ -500,10 +501,10 @@ func (cn *connection) peerPiecesChanged() {
 		return
 	}
 
-	// cn.t.event.Broadcast()
 	cn.refreshrequestable.Store(langx.Autoptr(time.Now()))
-	cn.needsresponse.Store(true)
-	cn.request.Broadcast()
+	if cn.needsresponse.CompareAndSwap(false, true) {
+		cn.request.Broadcast()
+	}
 }
 
 func (cn *connection) raisePeerMinPieces(newMin uint64) {
@@ -786,9 +787,6 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 	cn.lastMessageReceived.Store(langx.Autoptr(time.Now()))
 
 	if msg.Keepalive {
-		// TODO not sure if these are necessary confirm and cleanup later.
-		cn.request.Broadcast()
-		cn.upload.Broadcast()
 		cn.cfg.debug().Printf("(%d) c(%p) seed(%t) - RECEIVED KEEPALIVE - missing(%d) - failed(%d) - outstanding(%d) - unverified(%d) - completed(%d)\n", os.Getpid(), cn, cn.cfg.Seed, cn.t.chunks.Cardinality(cn.t.chunks.missing), cn.t.chunks.Cardinality(cn.t.chunks.failed), len(cn.t.chunks.outstanding), cn.t.chunks.Cardinality(cn.t.chunks.unverified), cn.t.chunks.Cardinality(cn.t.chunks.completed))
 		return
 	}
@@ -845,8 +843,10 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		}
 
 		cn.t.chunks.pool.Put(&msg.Piece)
-		cn.request.Broadcast()
 
+		if cn.chunkwakefreq.Add(1)%uint32(cn.PeerMaxRequests/4) == 0 {
+			cn.request.Broadcast()
+		}
 		return msg, nil
 	case pp.Cancel:
 		req := newRequestFromMessage(&msg)

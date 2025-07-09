@@ -16,7 +16,6 @@ import (
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
-	"github.com/james-lawrence/torrent/internal/slicesx"
 	"github.com/james-lawrence/torrent/internal/timex"
 )
 
@@ -34,7 +33,7 @@ func connreaderinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		chokeduntil:      ts.Add(-1 * time.Minute),
 		uploadavailable:  atomicx.Pointer(ts),
 		seed:             cn.t.seeding(),
-		Idler:            cstate.Idle(ctx, cn.upload, cn.t.chunks.cond),
+		Idler:            cstate.Idle(ctx, cn.upload),
 		requestbuffer:    new(bytes.Buffer),
 		pool: &sync.Pool{
 			New: func() interface{} {
@@ -296,19 +295,17 @@ func connreaderidle(ws *readerstate) cstate.T {
 	now := time.Now()
 	keepalive := now.Add(ws.keepAliveTimeout / 2)
 
-	delays := slicesx.MapTransform(
-		time.Until,
+	mind := time.Until(timex.Min(
 		keepalive,
 		langx.Autoderef(ws.uploadavailable.Load()),
-	)
+	))
 
-	mind := timex.DurationMin(delays...)
 	if mind <= 0 {
-		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle uploads(%t) pending(%d) - %s - %v\n", ws.connection, ws.t.seeding(), !ws.Choked, len(ws.PeerRequests), mind, delays)
+		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle uploads(%t) pending(%d) - %s\n", ws.connection, ws.t.seeding(), !ws.Choked, len(ws.PeerRequests), mind)
 		return connreaderactive(ws)
 	}
 
-	ws.cfg.debug().Printf("c(%p) seed(%t) idling uploads(%t) pending(%d) - %s - %v\n", ws.connection, ws.t.seeding(), !ws.Choked, len(ws.PeerRequests), mind, delays)
+	ws.cfg.debug().Printf("c(%p) seed(%t) idling uploads(%t) pending(%d) - %s\n", ws.connection, ws.t.seeding(), !ws.Choked, len(ws.PeerRequests), mind)
 
 	return ws.Idler.Idle(connreaderactive(ws), mind)
 }

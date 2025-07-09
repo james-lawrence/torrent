@@ -352,12 +352,12 @@ func (t *chunks) DataAvailableForOffset(offset int64) (allowed int64) {
 		return -1
 	}
 
-	pid2 := t.completed.NextAbsentValue(uint32(pid0))
-	if pid2 < 0 {
-		pid2 = int64(t.pieces)
+	pid := t.completed.NextAbsentValue(uint32(pid0))
+	if pid < 0 {
+		pid = int64(t.pieces)
 	}
 
-	endoffset := (int64(pid2-1) * t.meta.PieceLength) + t.meta.PieceLength
+	endoffset := (int64(pid-1) * t.meta.PieceLength) + t.meta.PieceLength
 
 	return endoffset - offset
 }
