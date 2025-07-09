@@ -564,13 +564,7 @@ func (t *chunks) CompletedBitmap() *roaring.Bitmap {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	bm := bitmapx.Lazy(nil)
-	t.completed.Iterate(func(x uint32) bool {
-		bm.Add(x)
-		return true
-	})
-
-	return bm
+	return t.completed.Clone()
 }
 
 // returns true if any chunks are in incomplete states (missing, oustanding, unverified)

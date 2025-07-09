@@ -55,8 +55,10 @@ func TestSendBitfieldThenHave(t *testing.T) {
 	go connwriterinit(t.Context(), c, time.Minute)
 
 	c.t.chunks.completed.Add(1)
-	c.PostBitfield( /*[]bool{false, true, false}*/ )
-	c.Have(2)
+	c.PostBitfield(c.t.chunks.completed.Clone())
+	c.Post(pp.NewHavePiece(2))
+	c.sentHaves.Add(2)
+
 	b := make([]byte, 15)
 	n, err := io.ReadFull(r, b)
 	// This will cause connection.writer to terminate.

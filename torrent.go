@@ -760,7 +760,6 @@ func (t *torrent) setInfo(info *metainfo.Info) (err error) {
 }
 
 func (t *torrent) onSetInfo() {
-	// log.Println("set info initiated")
 	for _, conn := range t.conns.list() {
 		if err := conn.resetclaimed(); err != nil {
 			t.cln.config.info().Println(errorsx.Wrap(err, "closing connection"))
@@ -1066,12 +1065,6 @@ func (t *torrent) bytesCompleted() int64 {
 		return 0
 	}
 	return t.info.TotalLength() - t.bytesLeft()
-}
-
-func (t *torrent) SetInfoBytes(b []byte) (err error) {
-	t.lock()
-	defer t.unlock()
-	return t.setInfoBytes(b)
 }
 
 func (t *torrent) dropConnection(c *connection) {

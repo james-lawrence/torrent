@@ -11,7 +11,7 @@ import (
 	"github.com/RoaringBitmap/roaring/v2"
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/bep0006"
-	pp "github.com/james-lawrence/torrent/btprotocol"
+	"github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/cstate"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/atomicx"
@@ -96,7 +96,7 @@ func connflush(cn *connection, n cstate.T) cstate.T {
 
 func connexinit(cn *connection, n cstate.T) cstate.T {
 	return cstate.Fn(func(context.Context, *cstate.Shared) cstate.T {
-		if !cn.extensions.Supported(cn.PeerExtensionBytes, pp.ExtensionBitExtended) {
+		if !cn.extensions.Supported(cn.PeerExtensionBytes, btprotocol.ExtensionBitExtended) {
 			return n
 		}
 
@@ -105,15 +105,15 @@ func connexinit(cn *connection, n cstate.T) cstate.T {
 
 		// TODO: We can figured the port and address out specific to the socket
 		// used.
-		msg := pp.ExtendedHandshakeMessage{
+		msg := btprotocol.ExtendedHandshakeMessage{
 			M:            cn.cfg.extensions,
 			V:            cn.cfg.ExtendedHandshakeClientVersion,
 			Reqq:         cn.cfg.maximumOutstandingRequests,
-			YourIp:       pp.CompactIp(cn.remoteAddr.Addr().AsSlice()),
+			YourIp:       btprotocol.CompactIp(cn.remoteAddr.Addr().AsSlice()),
 			Encryption:   cn.cfg.HeaderObfuscationPolicy.Preferred || cn.cfg.HeaderObfuscationPolicy.RequirePreferred,
 			Port:         int(dynamicport),
 			MetadataSize: cn.t.metadatalen(),
-			Ipv4:         pp.CompactIp(cn.cfg.publicIP4.To4()),
+			Ipv4:         btprotocol.CompactIp(cn.cfg.publicIP4.To4()),
 			Ipv6:         cn.cfg.publicIP6.To16(),
 		}
 
@@ -124,7 +124,7 @@ func connexinit(cn *connection, n cstate.T) cstate.T {
 			return cstate.Failure(errorsx.Wrapf(err, "unable to encode message %T", msg))
 		}
 
-		_, err = cn.Post(pp.NewExtendedHandshake(encoded))
+		_, err = cn.Post(btprotocol.NewExtendedHandshake(encoded))
 
 		if err != nil {
 			return cstate.Failure(errorsx.Wrapf(err, "unable to encode message %T", msg))
@@ -137,8 +137,9 @@ func connexinit(cn *connection, n cstate.T) cstate.T {
 func connexfast(cn *connection, n cstate.T) cstate.T {
 	return cstate.Fn(func(context.Context, *cstate.Shared) cstate.T {
 		defer cn.cfg.debug().Printf("c(%p) seed(%t) fast extension completed\n", cn, cn.t.seeding())
-		if !cn.supported(pp.ExtensionBitFast) {
-			if _, err := cn.PostBitfield(); err != nil {
+		if !cn.supported(btprotocol.ExtensionBitFast) {
+			cn.sentHaves = cn.t.chunks.CompletedBitmap()
+			if _, err := cn.PostBitfield(cn.sentHaves); err != nil {
 				return cstate.Failure(err)
 			}
 			return n
@@ -151,21 +152,21 @@ func connexfast(cn *connection, n cstate.T) cstate.T {
 		switch readable := cn.t.chunks.Readable(); readable {
 		case 0:
 			cn.cfg.debug().Printf("c(%p) seed(%t) posting allow fast have none: %d/%d\n", cn, cn.t.seeding(), readable, cn.t.chunks.cmaximum)
-			if _, err := cn.Post(pp.NewHaveNone()); err != nil {
+			if _, err := cn.Post(btprotocol.NewHaveNone()); err != nil {
 				return cstate.Failure(err)
 			}
 			cn.sentHaves.Clear()
 			return n
 		case uint64(cn.t.chunks.cmaximum):
 			cn.cfg.debug().Printf("c(%p) seed(%t) posting allow fast have all: %d/%d\n", cn, cn.t.seeding(), readable, cn.t.chunks.cmaximum)
-			if _, err := cn.Post(pp.NewHaveAll()); err != nil {
+			if _, err := cn.Post(btprotocol.NewHaveAll()); err != nil {
 				return cstate.Failure(err)
 			}
 
 			cn.sentHaves.AddRange(0, cn.t.chunks.pieces)
 
 			for _, v := range cn.peerfastset.ToArray() {
-				if _, err := cn.Post(pp.NewAllowedFast(v)); err != nil {
+				if _, err := cn.Post(btprotocol.NewAllowedFast(v)); err != nil {
 					return cstate.Failure(err)
 				}
 			}
@@ -173,7 +174,8 @@ func connexfast(cn *connection, n cstate.T) cstate.T {
 			return n
 		default:
 			cn.cfg.debug().Printf("c(%p) seed(%t) posting bitfield: r(%d) u(%d) c(%d) cmax(%d)\n", cn, cn.t.seeding(), readable, cn.t.chunks.unverified.GetCardinality(), cn.t.chunks.completed.GetCardinality(), cn.t.chunks.cmaximum)
-			if _, err := cn.PostBitfield(); err != nil {
+			cn.sentHaves = cn.t.chunks.CompletedBitmap()
+			if _, err := cn.PostBitfield(cn.sentHaves); err != nil {
 				return cstate.Failure(err)
 			}
 		}
@@ -186,14 +188,14 @@ func connexdht(cn *connection, n cstate.T) cstate.T {
 	return cstate.Fn(func(context.Context, *cstate.Shared) cstate.T {
 		dynamicaddr := langx.Autoderef(cn.dynamicaddr.Load())
 		port := langx.DefaultIfZero(cn.t.cln.LocalPort16(), dynamicaddr.Port())
-		if !(cn.extensions.Supported(cn.PeerExtensionBytes, pp.ExtensionBitDHT) && port > 0) {
-			cn.cfg.debug().Printf("posting dht not supported extension supported(%t) - port(%d)\n", cn.extensions.Supported(cn.PeerExtensionBytes, pp.ExtensionBitDHT), port)
+		if !(cn.extensions.Supported(cn.PeerExtensionBytes, btprotocol.ExtensionBitDHT) && port > 0) {
+			cn.cfg.debug().Printf("posting dht not supported extension supported(%t) - port(%d)\n", cn.extensions.Supported(cn.PeerExtensionBytes, btprotocol.ExtensionBitDHT), port)
 			return n
 		}
 
 		defer cn.cfg.debug().Println("dht extension completed")
 
-		_, err := cn.Post(pp.NewPort(port))
+		_, err := cn.Post(btprotocol.NewPort(port))
 		if err != nil {
 			return cstate.Failure(err)
 		}
@@ -219,6 +221,7 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		chokeduntil:         ts.Add(-1 * time.Minute),
 		nextbitmap:          ts.Add(time.Minute),
 		keepaliverequired:   atomicx.Pointer(ts.Add(to)),
+		resyncbitfield:      atomicx.Pointer(ts.Add(time.Minute)),
 		lowrequestwatermark: max(1, cn.PeerMaxRequests/4),
 		requestable:         roaring.New(),
 		seed:                cn.t.seeding(),
@@ -239,12 +242,14 @@ type writerstate struct {
 	chokeduntil         time.Time
 	seed                bool
 	keepaliverequired   *atomic.Pointer[time.Time]
+	resyncbitfield      *atomic.Pointer[time.Time]
+	requestablecheck    uint64
 	requestable         *roaring.Bitmap // represents the chunks we're currently allow to request.
 	lowrequestwatermark int
 	*cstate.Idler
 }
 
-func (t *writerstate) bufmsg(msg pp.Message) error {
+func (t *writerstate) bufmsg(msg btprotocol.Message) error {
 	if _, err := t.Write(msg.MustMarshalBinary()); err != nil {
 		return err
 	}
@@ -260,6 +265,43 @@ func (t *writerstate) bufmsg(msg pp.Message) error {
 
 func (t *writerstate) String() string {
 	return fmt.Sprintf("c(%p) seed(%t)", t.connection, t.connection.t.seeding())
+}
+
+func connWriterSyncBitfield(ws *writerstate, next cstate.T) cstate.T {
+	return _connWriterSyncBitfield{writerstate: ws, next: next}
+}
+
+type _connWriterSyncBitfield struct {
+	*writerstate
+	next cstate.T
+}
+
+func (t _connWriterSyncBitfield) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {
+	ws := t.writerstate
+
+	if ts := ws.resyncbitfield.Load(); ts.After(time.Now()) {
+		return t.next
+	}
+
+	ws.resyncbitfield.Store(langx.Autoptr(time.Now().Add(time.Minute)))
+
+	dup := ws.t.chunks.Clone(ws.t.chunks.completed)
+	dup.AndNot(ws.sentHaves)
+
+	for i := dup.Iterator(); i.HasNext(); {
+		err := t.bufmsg(btprotocol.NewHavePiece(uint64(i.Next())))
+		if err != nil {
+			return cstate.Failure(err)
+		}
+	}
+
+	ws.sentHaves.Or(dup)
+
+	if !dup.IsEmpty() {
+		ws.t.readabledataavailable.Store(true)
+	}
+
+	return t.next
 }
 
 func connwriterclosed(ws *writerstate, next cstate.T) cstate.T {
@@ -286,7 +328,7 @@ func (t _connWriterClosed) Update(ctx context.Context, _ *cstate.Shared) (r csta
 	// if we're choked and not allowed to fast track any chunks then there is nothing
 	// to do.
 	if ws.PeerChoked && ws.fastset.IsEmpty() {
-		return connwriterFlush(connwriteridle(ws), ws)
+		return connwriterFlush(t.next, ws)
 	}
 
 	// detect effectively dead connections, choking them for at least 1 minute.
@@ -370,12 +412,25 @@ func (t _connwriterRequests) determineInterest(msg messageWriter) *roaring.Bitma
 	}
 	t._mu.RUnlock()
 
-	t.requestable = bitmapx.Fill(t.t.chunks.cmaximum)
-	t.requestable.AndAny(fastset, claimed)
 	t.refreshrequestable.Store(langx.Autoptr(timex.Inf()))
 
+	tmp := bitmapx.Fill(t.t.chunks.cmaximum)
+	tmp.AndAny(fastset, claimed)
+
+	// check if the bitmap changed from the previous refresh.
+	// we do this because refresh events an come in asynchronously
+	// which do not actually alter the computed bitmap resulting
+	// in duplicate requests when outstanding requests are repeated
+	// due to the reset of the requestable bitmap that occurrs here.
+	tsum := tmp.Checksum()
+	if tsum == t.requestablecheck {
+		return t.requestable
+	}
+	t.requestablecheck = tsum
+	t.requestable = tmp
+
 	if !t.SetInterested(!t.requestable.IsEmpty(), msg.Deprecated()) {
-		t.cfg.debug().Printf("c(%p) seed(%t) nothing available to request\n", t.connection, t.seed)
+		t.cfg.debug().Printf("c(%p) seed(%t) nothing available to request %d\n", t.connection, t.seed, t.requestable.GetCardinality())
 		return t.requestable
 	}
 
@@ -392,8 +447,8 @@ func (t _connwriterRequests) request(r request, mw messageWriter) bool {
 	t.requests[r.Digest] = r
 	t.cmu().Unlock()
 
-	return mw(pp.Message{
-		Type:   pp.Request,
+	return mw(btprotocol.Message{
+		Type:   btprotocol.Request,
 		Index:  r.Index,
 		Begin:  r.Begin,
 		Length: r.Length,
@@ -417,7 +472,7 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg messageW
 	}
 
 	if unmodified := !t.refreshrequestable.Load().Before(time.Now()); available.IsEmpty() && unmodified {
-		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - (avail(%d) && unmodified(%t))", t.connection, t.seed, available.GetCardinality(), unmodified)
+		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - avail(%d) && unmodified(%t)", t.connection, t.seed, available.GetCardinality(), unmodified)
 		return
 	}
 
@@ -511,7 +566,7 @@ func (t _connwriterKeepalive) Update(ctx context.Context, _ *cstate.Shared) csta
 		return t.next
 	}
 
-	if _, err = ws.Post(pp.NewKeepAlive()); err != nil {
+	if _, err = ws.Post(btprotocol.NewKeepAlive()); err != nil {
 		return cstate.Failure(errorsx.Wrap(err, "keepalive encoding failed"))
 	}
 
@@ -548,7 +603,7 @@ func (t _connwriterFlush) Update(ctx context.Context, _ *cstate.Shared) cstate.T
 	return t.next
 }
 
-func connwriterBitmap(n cstate.T, ws *writerstate) cstate.T {
+func connwriterBitmap(ws *writerstate, n cstate.T) cstate.T {
 	return _connwriterCommitBitmap{next: n, writerstate: ws}
 }
 
@@ -595,15 +650,15 @@ func connwriteridle(ws *writerstate) cstate.T {
 
 	mind := timex.DurationMin(delays...)
 	if mind <= 0 {
-		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle downloads(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.t.chunks, mind, delays)
+		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle downloads(%t) avail(%d) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.requestable.GetCardinality(), ws.t.chunks, mind, delays)
 		return connwriteractive(ws)
 	}
 
-	ws.cfg.debug().Printf("c(%p) seed(%t) idling downloads(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.t.chunks, mind, delays)
+	ws.cfg.debug().Printf("c(%p) seed(%t) idling downloads(%t) avail(%d) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.requestable.GetCardinality(), ws.t.chunks, mind, delays)
 
-	return connWriterInterested(ws, ws.Idler.Idle(connwriteractive(ws), mind))
+	return connWriterSyncBitfield(ws, connWriterInterested(ws, ws.Idler.Idle(connwriteractive(ws), mind)))
 }
 
 func connwriteractive(ws *writerstate) cstate.T {
-	return connwriterKeepalive(ws, connwriterclosed(ws, connwriterBitmap(connWriterInterested(ws, connwriterRequests(ws)), ws)))
+	return connwriterKeepalive(ws, connwriterclosed(ws, connwriterBitmap(ws, connWriterInterested(ws, connwriterRequests(ws)))))
 }

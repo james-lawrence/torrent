@@ -44,7 +44,7 @@ func connreaderinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		},
 	}
 
-	return cstate.Run(ctx, connReaderSyncBitfield(ws), cn.cfg.debug())
+	return cstate.Run(ctx, connReaderAllowRequests(ws), cn.cfg.debug())
 }
 
 type readerstate struct {
@@ -77,43 +77,6 @@ func (t *readerstate) bufmsg(msg btprotocol.Message) (int, error) {
 func (t *readerstate) bufmsgold(msg btprotocol.Message) error {
 	_, err := t.bufmsg(msg)
 	return err
-}
-
-func connReaderSyncBitfield(ws *readerstate) cstate.T {
-	return _connWriterSyncBitfield{readerstate: ws, next: connReaderAllowRequests(ws)}
-}
-
-type _connWriterSyncBitfield struct {
-	*readerstate
-	next cstate.T
-}
-
-func (t _connWriterSyncBitfield) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {
-	ws := t.readerstate
-
-	dup := ws.t.chunks.completed.Clone()
-	dup.AndNot(ws.sentHaves)
-
-	for i := dup.Iterator(); i.HasNext(); {
-		piece := i.Next()
-		ws.cmu().Lock()
-		added := ws.sentHaves.CheckedAdd(piece)
-		ws.cmu().Unlock()
-		if !added {
-			continue
-		}
-
-		_, err := t.bufmsg(btprotocol.NewHavePiece(uint64(piece)))
-		if err != nil {
-			return cstate.Failure(err)
-		}
-	}
-
-	if !dup.IsEmpty() {
-		ws.t.readabledataavailable.Store(true)
-	}
-
-	return t.next
 }
 
 func connReaderAllowRequests(ws *readerstate) cstate.T {
@@ -351,5 +314,5 @@ func connreaderidle(ws *readerstate) cstate.T {
 }
 
 func connreaderactive(ws *readerstate) cstate.T {
-	return connreaderclosed(ws, connReaderSyncBitfield(ws))
+	return connreaderclosed(ws, connReaderAllowRequests(ws))
 }

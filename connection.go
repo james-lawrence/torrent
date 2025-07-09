@@ -480,27 +480,12 @@ func (cn *connection) checkFailures() error {
 	return nil
 }
 
-func (cn *connection) Have(piece uint64) (n int, err error) {
-	cn.cmu().Lock()
-	added := cn.sentHaves.CheckedAdd(uint32(piece))
-	cn.cmu().Unlock()
-	if !added {
-		return 0, nil
-	}
-
-	return cn.Post(pp.NewHavePiece(piece))
-}
-
-func (cn *connection) PostBitfield() (n int, err error) {
-	dup := cn.t.chunks.CompletedBitmap()
-
+func (cn *connection) PostBitfield(dup *roaring.Bitmap) (n int, err error) {
 	cn.cfg.debug().Printf("c(%p) seed(%t) calculated bitfield: b(%d)/p(%d)\n", cn, cn.t.seeding(), dup.GetCardinality(), cn.t.chunks.pieces)
 	n, err = cn.Post(pp.NewBitField(cn.t.chunks.pieces, dup))
 	if err != nil {
 		return n, err
 	}
-
-	cn.sentHaves = bitmapx.Lazy(dup)
 	return n, nil
 }
 
@@ -515,7 +500,9 @@ func (cn *connection) peerPiecesChanged() {
 		return
 	}
 
-	cn.t.event.Broadcast()
+	// cn.t.event.Broadcast()
+	cn.refreshrequestable.Store(langx.Autoptr(time.Now()))
+	cn.needsresponse.Store(true)
 	cn.request.Broadcast()
 }
 
@@ -578,13 +565,12 @@ func (cn *connection) peerSentBitfield(bf []bool) error {
 	return nil
 }
 
-func (cn *connection) onPeerSentHaveAll() error {
+func (cn *connection) onPeerSentHaveAll() {
 	cn.cmu().Lock()
 	cn.peerSentHaveAll = true
 	cn.t.chunks.fill(cn.claimed)
 	cn.cmu().Unlock()
 	cn.peerPiecesChanged()
-	return nil
 }
 
 func (cn *connection) peerSentHaveNone() error {
@@ -821,9 +807,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		return msg, nil
 	case pp.Unchoke:
 		cn.PeerChoked = false
-		cn.needsresponse.Store(true)
-		cn.refreshrequestable.Swap(langx.Autoptr(time.Now()))
-		cn.request.Broadcast()
+		cn.peerPiecesChanged()
 		return msg, nil
 	case pp.Interested:
 		cn.PeerInterested = true
@@ -885,10 +869,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		return msg, nil
 	case pp.HaveAll:
 		// cn.cfg.debug().Println("peer claims it has everything")
-		if err = cn.onPeerSentHaveAll(); err != nil {
-			return msg, err
-		}
-
+		cn.onPeerSentHaveAll()
 		return msg, nil
 	case pp.HaveNone:
 		// cn.cfg.debug().Println("peer claims it has nothing")
@@ -910,9 +891,8 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		cn._mu.Lock()
 		cn.fastset.AddRange(cn.t.chunks.Range(uint64(msg.Index)))
 		cn._mu.Unlock()
-		cn.needsresponse.Store(true)
-		cn.refreshrequestable.Swap(langx.Autoptr(time.Now().Add(30 * time.Millisecond)))
-		cn.request.Broadcast()
+
+		cn.peerPiecesChanged()
 
 		return msg, nil
 	case pp.Extended:
