@@ -544,7 +544,7 @@ func (t *chunks) Readable() uint64 {
 	defer t.mu.RUnlock()
 
 	cpp := chunksPerPiece(t.meta.PieceLength, t.clength)
-	return t.unverified.GetCardinality() + min((uint64(cpp)*t.completed.GetCardinality()), t.pieces)
+	return t.unverified.GetCardinality() + min((uint64(cpp)*t.completed.GetCardinality()), uint64(t.cmaximum))
 }
 
 func (t *chunks) ReadableBitmap() *roaring.Bitmap {

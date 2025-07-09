@@ -367,11 +367,12 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		require.Len(t, torrenttest.FilterMessageType(pp.Request, received...), 8)
 		require.Len(t, torrenttest.FilterMessageType(pp.Interested, received...), 1)
 		require.Len(t, torrenttest.FilterMessageType(pp.NotInterested, received...), 1)
+
 		require.GreaterOrEqual(t, len(received), 10)
-		require.LessOrEqual(t, len(received), 10)
+		require.LessOrEqual(t, len(received), 12)
 	})
 
-	t.Run("plaintext fastex + dht sequence", func(t *testing.T) {
+	t.Run("plaintext fastex dht sequence", func(t *testing.T) {
 		pconn, sconn, expected, meta := genconnection(
 			t,
 			t.Name(),

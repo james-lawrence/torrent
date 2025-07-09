@@ -54,7 +54,7 @@ func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.A
 	ts := time.Now()
 	return &connection{
 		_mu:                     _mu,
-		respond:                 sync.NewCond(_mu),
+		upload:                  sync.NewCond(_mu),
 		request:                 sync.NewCond(_mu),
 		conn:                    nc,
 		outgoing:                outgoing,
@@ -180,7 +180,7 @@ type connection struct {
 	PeerClientName     string
 
 	currentbuffer *bytes.Buffer
-	respond       *sync.Cond  // used to wake up the connection.reader
+	upload        *sync.Cond  // used to wake up the connection.reader
 	request       *sync.Cond  // used to wake up the connection.writer
 	needsresponse atomic.Bool // used to track when responses need to be sent that might be missed by the respond condition.
 }
@@ -506,7 +506,7 @@ func (cn *connection) PostBitfield() (n int, err error) {
 
 func (cn *connection) updateRequests() {
 	if !cn.needsresponse.Swap(true) {
-		cn.respond.Broadcast()
+		cn.upload.Broadcast()
 	}
 }
 
@@ -802,7 +802,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 	if msg.Keepalive {
 		// TODO not sure if these are necessary confirm and cleanup later.
 		cn.request.Broadcast()
-		cn.respond.Broadcast()
+		cn.upload.Broadcast()
 		cn.cfg.debug().Printf("(%d) c(%p) seed(%t) - RECEIVED KEEPALIVE - missing(%d) - failed(%d) - outstanding(%d) - unverified(%d) - completed(%d)\n", os.Getpid(), cn, cn.cfg.Seed, cn.t.chunks.Cardinality(cn.t.chunks.missing), cn.t.chunks.Cardinality(cn.t.chunks.failed), len(cn.t.chunks.outstanding), cn.t.chunks.Cardinality(cn.t.chunks.unverified), cn.t.chunks.Cardinality(cn.t.chunks.completed))
 		return
 	}
@@ -821,6 +821,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		return msg, nil
 	case pp.Unchoke:
 		cn.PeerChoked = false
+		cn.needsresponse.Store(true)
 		cn.refreshrequestable.Swap(langx.Autoptr(time.Now()))
 		cn.request.Broadcast()
 		return msg, nil
@@ -909,11 +910,14 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		cn._mu.Lock()
 		cn.fastset.AddRange(cn.t.chunks.Range(uint64(msg.Index)))
 		cn._mu.Unlock()
+		cn.needsresponse.Store(true)
+		cn.refreshrequestable.Swap(langx.Autoptr(time.Now().Add(30 * time.Millisecond)))
+		cn.request.Broadcast()
 
 		return msg, nil
 	case pp.Extended:
 		defer cn.request.Broadcast()
-		defer cn.respond.Broadcast()
+		defer cn.upload.Broadcast()
 
 		if err = cn.onReadExtendedMsg(msg.ExtendedID, msg.ExtendedPayload); err != nil {
 			return msg, err

@@ -172,7 +172,7 @@ func connexfast(cn *connection, n cstate.T) cstate.T {
 
 			return n
 		default:
-			cn.cfg.debug().Printf("c(%p) seed(%t) posting bitfield: %d/%d\n", cn, cn.t.seeding(), readable, cn.t.chunks.cmaximum)
+			cn.cfg.debug().Printf("c(%p) seed(%t) posting bitfield: r(%d) u(%d) c(%d) cmax(%d)\n", cn, cn.t.seeding(), readable, cn.t.chunks.unverified.GetCardinality(), cn.t.chunks.completed.GetCardinality(), cn.t.chunks.cmaximum)
 			if _, err := cn.PostBitfield(); err != nil {
 				return cstate.Failure(err)
 			}
@@ -228,7 +228,7 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 	defer cn.checkFailures()
 	defer cn.deleteAllRequests()
 
-	return cstate.Run(ctx, connWriterInterested(ws), cn.cfg.debug())
+	return cstate.Run(ctx, connWriterInterested(ws, connwriterRequests(ws)), cn.cfg.debug())
 }
 
 type writerstate struct {
@@ -306,12 +306,13 @@ func (t _connWriterClosed) Update(ctx context.Context, _ *cstate.Shared) (r csta
 	return t.next
 }
 
-func connWriterInterested(ws *writerstate) cstate.T {
-	return _connWriterInterested{writerstate: ws}
+func connWriterInterested(ws *writerstate, next cstate.T) cstate.T {
+	return _connWriterInterested{writerstate: ws, next: next}
 }
 
 type _connWriterInterested struct {
 	*writerstate
+	next cstate.T
 }
 
 func (t _connWriterInterested) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {
@@ -578,6 +579,11 @@ func connwriteridle(ws *writerstate) cstate.T {
 	now := time.Now()
 	keepalive := now.Add(ws.keepAliveTimeout / 2)
 
+	if ws.needsresponse.CompareAndSwap(true, false) {
+		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle downloads(%t) %s - needs rsponse\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.t.chunks)
+		return connwriteractive(ws)
+	}
+
 	delays := slicesx.MapTransform(
 		time.Until,
 		keepalive,
@@ -595,9 +601,9 @@ func connwriteridle(ws *writerstate) cstate.T {
 
 	ws.cfg.debug().Printf("c(%p) seed(%t) idling downloads(%t) %s - %s - %v\n", ws.connection, ws.t.seeding(), !ws.PeerChoked, ws.t.chunks, mind, delays)
 
-	return ws.Idler.Idle(connwriteractive(ws), mind)
+	return connWriterInterested(ws, ws.Idler.Idle(connwriteractive(ws), mind))
 }
 
 func connwriteractive(ws *writerstate) cstate.T {
-	return connwriterKeepalive(ws, connwriterBitmap(connWriterInterested(ws), ws))
+	return connwriterKeepalive(ws, connwriterclosed(ws, connwriterBitmap(connWriterInterested(ws, connwriterRequests(ws)), ws)))
 }

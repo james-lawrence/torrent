@@ -34,7 +34,7 @@ func connreaderinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		chokeduntil:      ts.Add(-1 * time.Minute),
 		uploadavailable:  atomicx.Pointer(ts),
 		seed:             cn.t.seeding(),
-		Idler:            cstate.Idle(ctx, cn.respond, cn.t.chunks.cond),
+		Idler:            cstate.Idle(ctx, cn.upload, cn.t.chunks.cond),
 		requestbuffer:    new(bytes.Buffer),
 		pool: &sync.Pool{
 			New: func() interface{} {
@@ -263,7 +263,7 @@ func (t _connreaderUpload) Update(ctx context.Context, _ *cstate.Shared) (r csta
 	if ws.requestbuffer.Len() > 0 {
 		return connreaderFlush(
 			ws,
-			connreaderidle(ws),
+			connReaderUpload(ws),
 		)
 	}
 
