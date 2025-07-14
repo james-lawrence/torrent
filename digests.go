@@ -11,6 +11,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/v2"
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/metainfo"
 )
@@ -139,10 +140,13 @@ func (t *digests) check(idx int) {
 }
 
 func (t *digests) compute(p *metainfo.Piece) (ret metainfo.Hash, err error) {
+	var (
+		buf [32 * bytesx.KiB]byte
+	)
 	c := sha1.New()
 	plen := p.Length()
 
-	n, err := io.Copy(c, io.NewSectionReader(t.ReaderAt, p.Offset(), plen))
+	n, err := io.CopyBuffer(c, io.NewSectionReader(t.ReaderAt, p.Offset(), plen), buf[:])
 	if err != nil {
 		return ret, errorsx.Wrapf(err, "piece %d digest failed", p.Offset())
 	}

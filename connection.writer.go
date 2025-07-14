@@ -477,7 +477,7 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg messageW
 	// once we fall below the low watermark dynamic adjust it based on what we saw.
 	// never allowing it to go above the original low watermark and with a floor of a single request.
 	t.lowrequestwatermark += min(1, int(t.chunksReceived.Swap(0)*4-t.chunksRejected.Swap(0)))
-	t.lowrequestwatermark = min(t.lowrequestwatermark, t.PeerMaxRequests-(t.PeerMaxRequests/4))
+	t.lowrequestwatermark = min(t.lowrequestwatermark, t.PeerMaxRequests)
 
 	max := max(0, t.lowrequestwatermark-len(t.requests))
 	if reqs, err = t.t.chunks.Pop(max, available); errors.As(err, &unavailable) {

@@ -1413,7 +1413,8 @@ func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
 				t.cln.config.debug().Printf("outgoing connection completed\n")
 				return
 			} else if errors.As(err, &timedout) {
-				t.cln.config.debug().Printf("timeout detected, placing back in peerset %T - %v - %s - %t\n", err, err, timedout.Timedout(), peer.Trusted)
+				t.cln.config.debug().Printf("timeout detected, retrying %T - %v - %s - %t\n", err, err, timedout.Timedout(), peer.Trusted)
+				time.Sleep(timedout.Timedout())
 				continue
 			} else if errorsx.Ignore(err, context.DeadlineExceeded, context.Canceled) != nil {
 				t.cln.config.debug().Printf("outgoing connection failed %T - %v\n", errorsx.Compact(errorsx.Unwrap(err), err), err)

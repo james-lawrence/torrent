@@ -281,7 +281,7 @@ func (t _connreaderClosed) Update(ctx context.Context, _ *cstate.Shared) (r csta
 	// if we've choked them and not allowed to fast track any chunks then there is nothing
 	// to do.
 	if ws.Choked && ws.peerfastset.IsEmpty() {
-		return connreaderFlush(ws, connreaderidle(ws))
+		return connreaderFlush(ws, connReaderUpload(ws))
 	}
 
 	return t.next
@@ -307,9 +307,9 @@ func connreaderidle(ws *readerstate) cstate.T {
 
 	ws.cfg.debug().Printf("c(%p) seed(%t) idling uploads(%t) pending(%d) - %s\n", ws.connection, ws.t.seeding(), !ws.Choked, len(ws.PeerRequests), mind)
 
-	return ws.Idler.Idle(connreaderactive(ws), mind)
+	return ws.Idler.Idle(connreaderclosed(ws, connreaderactive(ws)), mind)
 }
 
 func connreaderactive(ws *readerstate) cstate.T {
-	return connreaderclosed(ws, connReaderAllowRequests(ws))
+	return connReaderAllowRequests(ws)
 }
