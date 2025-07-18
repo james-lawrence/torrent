@@ -9,6 +9,7 @@ import (
 	pp "github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/testutil"
+	"github.com/james-lawrence/torrent/torrenttest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -158,8 +159,17 @@ func TestTorrentMetainfoIncompleteMetadata(t *testing.T) {
 			}.MustMarshalBinary())
 			require.NoError(t, err)
 		}()
-		tt.(*torrent).metadataChanged.Wait()
+
+		c := tt.(*torrent).conns.list()[0]
+		d := pp.NewDecoder(c.r, c.t.chunks.pool)
+
+		// receive the metadata payload.
+		msg, err := c.ReadOne(t.Context(), d)
+		require.NoError(t, err)
+		torrenttest.RequireMessageType(t, pp.Extended, msg.Type)
+		require.Equal(t, 23, len(msg.ExtendedPayload))
 	}()
+
 	assert.Equal(t, make([]byte, len(mi.InfoBytes)), tt.(*torrent).metadataBytes)
 	assert.False(t, tt.(*torrent).haveAllMetadataPieces())
 	assert.Nil(t, tt.(*torrent).Metadata().InfoBytes)

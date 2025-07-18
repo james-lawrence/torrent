@@ -224,7 +224,7 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		lowrequestwatermark: max(1, cn.PeerMaxRequests/4),
 		requestable:         roaring.New(),
 		seed:                cn.t.seeding(),
-		Idler:               cstate.Idle(ctx, cn.request),
+		Idler:               cstate.Idle(ctx, cn.request, cn.t.chunks.cond),
 	}
 
 	defer cn.checkFailures()

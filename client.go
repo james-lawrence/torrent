@@ -623,7 +623,7 @@ func (cl *Client) runReceivedConn(c *connection) {
 	}
 
 	if err := RunHandshookConn(c, t); err != nil {
-		log.Printf("received connection failed %T - %v\n", err, err)
+		cl.config.debug().Printf("received connection failed %T - %v\n", err, err)
 	}
 }
 

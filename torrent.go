@@ -246,12 +246,16 @@ func TuneVerifyAsync(t *torrent) {
 }
 
 // Verify a random selection of n pieces. will block until complete blocks.
-// if any of the sampled pieces failed it'll perform a full verify.
+// if any of the sampled pieces failed it'll perform a full verify. it always checks
+// the first and last piece regardless of the random set, as a result at most n+2 pieces
+// will be verified. this makes it easy to test certain behaviors live.
 // NOTE: torrents with a low completed rate will almost always performa full verify.
 // but since there will also be a smaller amount of data on disk this is a fair trade off.
 func TuneVerifySample(n uint64) Tuner {
 	return func(t *torrent) {
 		t.digests.EnqueueBitmap(bitmapx.Random(t.chunks.pieces, min(n, t.chunks.pieces)))
+		t.digests.Enqueue(0)
+		t.digests.Enqueue(min(t.chunks.pieces-1, t.chunks.pieces)) // min to handle 0 case which causes a uint wrap around.
 		t.digests.Wait()
 
 		if t.chunks.failed.IsEmpty() {
@@ -387,7 +391,6 @@ func newTorrent(cl *Client, src Metadata) *torrent {
 		wantPeersEvent:          make(chan struct{}, 1),
 		closed:                  make(chan struct{}),
 	}
-	t.metadataChanged = sync.Cond{L: tlocker{torrent: t}}
 	t.event = &sync.Cond{L: tlocker{torrent: t}}
 	*t.digests = newDigestsFromTorrent(t)
 	if err := t.setInfoBytes(src.InfoBytes); err != nil {
@@ -514,7 +517,6 @@ type torrent struct {
 	// Each element corresponds to the 16KiB metadata pieces. If true, we have
 	// received that piece.
 	metadataCompletedChunks []bool
-	metadataChanged         sync.Cond
 
 	// chunks management tracks the current status of the different chunks
 	chunks *chunks
@@ -548,10 +550,6 @@ func (t *torrent) Tune(tuning ...Tuner) error {
 	}
 
 	return nil
-}
-
-func (t *torrent) locker() sync.Locker {
-	return tlocker{torrent: t}
 }
 
 func (t *torrent) _lock(depth int) {
@@ -837,7 +835,6 @@ func (t *torrent) setMetadataSize(bytes int) (err error) {
 
 	t.metadataBytes = make([]byte, bytes)
 	t.metadataCompletedChunks = make([]bool, (bytes+(1<<14)-1)/(1<<14))
-	t.metadataChanged.Broadcast()
 
 	for _, c := range t.conns.list() {
 		c.requestPendingMetadata()
@@ -912,9 +909,6 @@ func (t *torrent) close() (err error) {
 }
 
 func (t *torrent) writeChunk(piece int, begin int64, data []byte) (err error) {
-	t.lock()
-	defer t.unlock()
-
 	if len(data) > int(t.info.PieceLength) {
 		return fmt.Errorf("long write")
 	}
@@ -923,7 +917,6 @@ func (t *torrent) writeChunk(piece int, begin int64, data []byte) (err error) {
 	offset := (t.info.PieceLength * int64(piece)) + begin
 
 	n, err := t.storage.WriteAt(data, offset)
-	// n, err := t.pieces[piece].Storage().WriteAt(data, begin)
 	if err == nil && n != len(data) {
 		return io.ErrShortWrite
 	}
@@ -1310,9 +1303,6 @@ func (t *torrent) addConnection(c *connection) (err error) {
 	default:
 	}
 
-	t.lock()
-	defer t.unlock()
-
 	for _, c0 := range t.conns.list() {
 		if c.PeerID != c0.PeerID {
 			continue
@@ -1341,8 +1331,8 @@ func (t *torrent) addConnection(c *connection) (err error) {
 	t.conns.insert(c)
 	t.pex.added(c)
 
-	t.unlock()
-	defer t.lock()
+	t.lock()
+	defer t.unlock()
 
 	for _, d := range dropping {
 		t.dropConnection(d)
@@ -1425,16 +1415,11 @@ func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
 }
 
 func (t *torrent) noLongerHalfOpen(addr string) {
-	t.lock()
 	t.dropHalfOpen(addr)
-	t.unlock()
-
 	t.openNewConns()
 }
 
 func (t *torrent) dialTimeout() time.Duration {
-	t.rLock()
-	defer t.rUnlock()
 	return reducedDialTimeout(t.cln.config.MinDialTimeout, t.cln.config.NominalDialTimeout, t.cln.config.HalfOpenConnsPerTorrent, t.peers.Len())
 }
 
@@ -1450,8 +1435,6 @@ func (t *torrent) piece(i int) *metainfo.Piece {
 // Returns a channel that is closed when the info (.Info()) for the torrent
 // has become available.
 func (t *torrent) GotInfo() <-chan struct{} {
-	t.rLock()
-	defer t.rUnlock()
 	m := make(chan struct{})
 	go func() {
 		t.event.L.Lock()

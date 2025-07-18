@@ -136,10 +136,6 @@ func TestClientTransferRateLimitedDownload(t *testing.T) {
 	})
 }
 
-func fileCachePieceResourceStorage() storage.ClientImpl {
-	return storage.NewFile(os.TempDir())
-}
-
 func TestClientTransferVarious(t *testing.T) {
 	// Leecher storage
 	for _, ls := range []StorageFactory{
@@ -743,25 +739,6 @@ func TestTorrentDroppedBeforeGotInfo(t *testing.T) {
 		t.FailNow()
 	default:
 	}
-}
-
-// func writeTorrentData(ts storage.TorrentImpl, info metainfo.Info, b []byte) {
-// 	for i := range iter.N(info.NumPieces()) {
-// 		p := info.Piece(i)
-// 		_ = errorsx.Must(ts.WriteAt(b[p.Offset():p.Offset()+p.Length()], 0))
-// 	}
-// }
-
-func testAddTorrentPriorPieceCompletion(t *testing.T, alreadyCompleted bool, csf func() storage.ClientImpl) {
-	t.SkipNow()
-}
-
-func TestAddTorrentPiecesAlreadyCompleted(t *testing.T) {
-	testAddTorrentPriorPieceCompletion(t, true, fileCachePieceResourceStorage)
-}
-
-func TestAddTorrentPiecesNotAlreadyCompleted(t *testing.T) {
-	testAddTorrentPriorPieceCompletion(t, false, fileCachePieceResourceStorage)
 }
 
 func TestTorrentDownloadAll(t *testing.T) {

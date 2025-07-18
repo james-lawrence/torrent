@@ -844,7 +844,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 
 		cn.t.chunks.pool.Put(&msg.Piece)
 
-		if cn.chunkwakefreq.Add(1)%uint32(cn.PeerMaxRequests/4) == 0 {
+		if n, mod := cn.chunkwakefreq.Add(1), max(uint32(cn.PeerMaxRequests/4), 1); n%mod == 0 {
 			cn.request.Broadcast()
 		}
 		return msg, nil
@@ -1022,6 +1022,8 @@ func (cn *connection) receiveChunk(msg *pp.Message) error {
 	cn.allStats(add(int64(len(msg.Piece)), func(cs *ConnStats) *count { return &cs.BytesReadUsefulData }))
 	cn.lastUsefulChunkReceived = time.Now()
 	cn.chunksReceived.Add(1)
+
+	// cn.cfg.debug().Printf("c(%p) - received chunk d(%020d) r(%d,%d,%d)\n", cn, req.Digest, req.Index, req.Begin, req.Length)
 
 	if err := cn.t.writeChunk(int(msg.Index), int64(msg.Begin), msg.Piece); err != nil {
 		return errorsx.Wrap(err, "failed to write chunk")
