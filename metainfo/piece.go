@@ -1,7 +1,5 @@
 package metainfo
 
-import "log"
-
 type Piece struct {
 	Info *Info
 	i    pieceIndex
@@ -25,7 +23,6 @@ func (p Piece) Hash() (ret Hash) {
 		return ret
 	}
 
-	log.Println("DERP DERP", p.i, p.i+1, len(p.Info.Pieces))
 	copy(ret[:], p.Info.Pieces[p.i*HashSize:(p.i+1)*HashSize])
 	return
 }
