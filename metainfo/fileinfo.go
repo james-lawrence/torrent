@@ -28,11 +28,12 @@ func (fi *FileInfo) DisplayPath(info *Info) string {
 
 // Offset ...
 func (fi FileInfo) Offset(info *Info) (ret int64) {
+	match := fi.DisplayPath(info)
 	for _, c := range info.UpvertedFiles() {
-		if fi.DisplayPath(info) == c.DisplayPath(info) {
+		if match == c.DisplayPath(info) {
 			return
 		}
-		ret += fi.Length
+		ret += c.Length
 	}
 	panic("not found")
 }
