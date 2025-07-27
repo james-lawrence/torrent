@@ -204,7 +204,7 @@ func TuneAutoDownload(t *torrent) {
 		return
 	}
 
-	t.chunks.fill(t.chunks.missing)
+	t.chunks.fill(t.chunks.missing, uint64(t.chunks.cmaximum))
 }
 
 // Announce to trackers looking for at least one successful request that returns peers.
@@ -1032,7 +1032,7 @@ func (t *torrent) maybeCompleteMetadata(c *connection) error {
 		return fmt.Errorf("error setting info bytes: %s", err)
 	}
 
-	t.chunks.fill(t.chunks.missing)
+	t.chunks.fill(t.chunks.missing, uint64(t.chunks.cmaximum))
 	t.cln.config.debug().Printf("seeding(%t) %s: received metadata from peers\n", t.seeding(), t)
 
 	return nil

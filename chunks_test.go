@@ -49,7 +49,7 @@ func fromFile(path string) (info metainfo.Info, err error) {
 }
 
 func quickpopulate(p *chunks) *chunks {
-	p.fill(p.missing)
+	p.fill(p.missing, uint64(p.cmaximum))
 	return p
 }
 
@@ -196,7 +196,7 @@ func TestChunkLength(t *testing.T) {
 
 func TestChunkFill(t *testing.T) {
 	c := newChunks(256, tinyTorrentInfo())
-	filled := c.fill(roaring.NewBitmap())
+	filled := c.fill(roaring.NewBitmap(), uint64(c.cmaximum))
 	require.Equal(t, uint64(c.cmaximum), filled.GetCardinality())
 	require.Equal(t, uint64(c.cmaximum)-1, uint64(filled.Maximum()))
 }

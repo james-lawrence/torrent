@@ -247,7 +247,7 @@ func (cn *connection) cmu() sync.Locker {
 func (cn *connection) resetclaimed() error {
 	if cn.peerSentHaveAll {
 		cn.cmu().Lock()
-		cn.t.chunks.fill(cn.claimed)
+		cn.t.chunks.fill(cn.claimed, uint64(cn.t.chunks.cmaximum))
 		cn.cmu().Unlock()
 	} else {
 		cn.cmu().Lock()
@@ -569,7 +569,7 @@ func (cn *connection) peerSentBitfield(bf []bool) error {
 func (cn *connection) onPeerSentHaveAll() {
 	cn.cmu().Lock()
 	cn.peerSentHaveAll = true
-	cn.t.chunks.fill(cn.claimed)
+	cn.t.chunks.fill(cn.claimed, uint64(cn.t.chunks.cmaximum))
 	cn.cmu().Unlock()
 	cn.peerPiecesChanged()
 }

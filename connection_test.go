@@ -114,7 +114,7 @@ func genconnection(t *testing.T, seed string, n uint64, pbits, sbits pp.Extensio
 	pconn.PeerID = int160.Random()
 	pconn.completedHandshake = time.Now()
 	pconn.t = newTorrent(pclient, meta)
-	pconn.t.chunks.fill(pconn.t.chunks.missing)
+	pconn.t.chunks.fill(pconn.t.chunks.missing, uint64(pconn.t.chunks.cmaximum))
 	require.EqualValues(t, pconn.t.chunks.pieces, 1)
 
 	sconn := newConnection(cfgs, c, false, *apnetip.Load(), &sbits, asnetip.Load().Port(), &asnetip)
@@ -122,7 +122,7 @@ func genconnection(t *testing.T, seed string, n uint64, pbits, sbits pp.Extensio
 	sconn.PeerID = int160.Random()
 	sconn.completedHandshake = time.Now()
 	sconn.t = newTorrent(sclient, meta)
-	sconn.t.chunks.fill(sconn.t.chunks.completed)
+	sconn.t.chunks.fill(sconn.t.chunks.completed, sconn.t.chunks.pieces)
 	require.EqualValues(t, sconn.t.chunks.pieces, 1)
 	require.True(t, sconn.t.seeding(), "seeding should be enabled")
 

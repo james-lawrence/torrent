@@ -247,10 +247,17 @@ func (t *chunks) pindex(cidx int) int {
 	return int(pindex(int64(cidx), t.meta.PieceLength, t.clength))
 }
 
-func (t *chunks) fill(b *roaring.Bitmap) *roaring.Bitmap {
+func (t *chunks) fill(b *roaring.Bitmap, max uint64) *roaring.Bitmap {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	b.AddRange(0, uint64(t.cmaximum))
+	b.AddRange(0, max)
+	return b
+}
+
+func (t *chunks) zero(b *roaring.Bitmap) *roaring.Bitmap {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	b.Clear()
 	return b
 }
 
