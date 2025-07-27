@@ -258,7 +258,11 @@ func TuneVerifySample(n uint64) Tuner {
 		t.digests.Enqueue(min(t.chunks.pieces-1, t.chunks.pieces)) // min to handle 0 case which causes a uint wrap around.
 		t.digests.Wait()
 
+		// if everything validated assume the torrent is good and mark it as fully complete.
 		if t.chunks.failed.IsEmpty() {
+			t.chunks.fill(t.chunks.completed, t.chunks.pieces)
+			t.chunks.zero(t.chunks.unverified)
+			t.chunks.zero(t.chunks.missing)
 			return
 		}
 
