@@ -275,6 +275,17 @@ func TuneSeeding(t *torrent) {
 	t.chunks.MergeInto(t.chunks.completed, bitmapx.Fill(t.chunks.pieces))
 }
 
+// used after info has been received to mark all chunks missing.
+// will only happen if missing and completed are zero.
+func TuneRecordMetadata(t *torrent) {
+	if t.Info() == nil {
+		panic("cannot persist torrent metadata when missing info")
+	}
+
+	t.md.InfoBytes = t.metadataBytes
+	errorsx.Log(errorsx.Wrap(t.cln.torrents.Write(t.Metadata()), "failed to perist torrent file"))
+}
+
 func tuneMerge(md Metadata) Tuner {
 	return func(t *torrent) {
 		t.md.DisplayName = langx.DefaultIfZero(t.md.DisplayName, md.DisplayName)
@@ -755,6 +766,7 @@ func (t *torrent) setInfo(info *metainfo.Info) (err error) {
 	t.nameMu.Lock()
 	t.info = info
 	t.setChunkSize(langx.DefaultIfZero(defaultChunkSize, t.md.ChunkSize))
+	t.md.InfoBytes = t.metadataBytes
 	t.nameMu.Unlock()
 
 	t.initFiles()
