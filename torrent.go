@@ -25,6 +25,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/netx"
+	"github.com/james-lawrence/torrent/internal/slicesx"
 	"github.com/james-lawrence/torrent/internal/x/bitmapx"
 	"github.com/james-lawrence/torrent/tracker"
 
@@ -1146,7 +1147,6 @@ func (t *torrent) seeding() bool {
 // Adds peers revealed in an announce until the announce ends, or we have
 // enough peers.
 func (t *torrent) consumeDhtAnnouncePeers(ctx context.Context, pvs <-chan dht.PeersValues) {
-	// l := rate.NewLimiter(rate.Every(time.Minute), 1)
 	for {
 		select {
 		case v, ok := <-pvs:
@@ -1155,19 +1155,16 @@ func (t *torrent) consumeDhtAnnouncePeers(ctx context.Context, pvs <-chan dht.Pe
 				return
 			}
 
-			for _, cp := range v.Peers {
-				if cp.Port() == 0 {
-					// Can't do anything with this.
-					continue
-				}
-
-				t.cln.config.debug().Println("adding peer", cp.AddrPort)
-				t.AddPeer(Peer{
+			peers := slicesx.MapTransform(func(cp dht.Peer) Peer {
+				return Peer{
 					IP:     cp.Addr().AsSlice(),
 					Port:   int(cp.Port()),
 					Source: peerSourceDhtGetPeers,
-				})
-			}
+				}
+			}, slicesx.Filter(func(v dht.Peer) bool { return v.Port() != 0 }, v.Peers...)...)
+
+			t.cln.config.debug().Println("adding peers", len(peers))
+			t.AddPeers(peers)
 		case <-ctx.Done():
 			return
 		}
@@ -1196,25 +1193,32 @@ func (t *torrent) announceToDht(impliedPort bool, s *dht.Server) error {
 }
 
 func (t *torrent) dhtAnnouncer(s *dht.Server) {
+	errdelay := time.Duration(0) // for the first run 0 delay to immediately find peers
 	for {
 		t.cln.config.debug().Println("dht ancouncer waiting for peers event", int160.FromByteArray(s.ID()))
 		select {
 		case <-t.closed:
 			return
+		case <-time.After(errdelay):
 		case <-t.wantPeersEvent:
-			t.cln.config.debug().Println("dht ancouncing peers wanted event", int160.FromByteArray(s.ID()))
+			log.Println("dht ancouncing peers wanted event", int160.FromByteArray(s.ID()))
 		}
 
 		t.stats.DHTAnnounce.Add(1)
 
-		if err := t.announceToDht(true, s); errors.Is(err, dht.ErrDHTNoInitialNodes) {
+		if err := t.announceToDht(true, s); err == nil {
+			errdelay = time.Hour // when we succeeded wait an hour unless a wantPeersEvent comes in.
+			t.cln.config.debug().Println("dht ancouncing completed", int160.FromByteArray(s.ID()))
+			continue
+		} else if errors.Is(err, dht.ErrDHTNoInitialNodes) {
 			t.cln.config.errors().Println(t, err)
-			time.Sleep(time.Minute)
-		} else if err != nil {
+			errdelay = time.Minute
+			continue
+		} else {
 			t.cln.config.errors().Println(t, errorsx.Wrap(err, "error announcing to DHT"))
-			time.Sleep(time.Second)
+			errdelay = time.Second
+			continue
 		}
-		t.cln.config.debug().Println("dht ancouncing completed", int160.FromByteArray(s.ID()))
 	}
 }
 
