@@ -132,9 +132,7 @@ func (a *Announce) announceClosest(ctx context.Context) {
 	a.traversal.Closest().Range(func(elem dhtutil.Elem) {
 		wg.Add(1)
 		go func() {
-			a.logger().Printf("announce_peer to %v: %v\n",
-				elem, a.announcePeer(ctx, elem),
-			)
+			a.logger().Printf("announce_peer to %s - %s: %v\n", elem.ID, elem.Addr.AddrPort, a.announcePeer(ctx, elem))
 			wg.Done()
 		}()
 	})
