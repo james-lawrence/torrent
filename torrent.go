@@ -319,12 +319,11 @@ func DownloadInto(ctx context.Context, dst io.Writer, m Torrent, options ...Tune
 
 	select {
 	case <-m.GotInfo():
-
 	case <-ctx.Done():
 		return 0, errorsx.Compact(context.Cause(ctx), ctx.Err())
 	}
 
-	if err = m.Tune(TuneAutoDownload, TuneNewConns, TuneAnnounceOnce(tracker.AnnounceOptionEventStarted)); err != nil {
+	if err = m.Tune(TuneRecordMetadata, TuneAutoDownload, TuneNewConns, TuneAnnounceOnce(tracker.AnnounceOptionEventStarted)); err != nil {
 		return 0, err
 	}
 
