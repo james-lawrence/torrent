@@ -292,6 +292,12 @@ func (t *chunks) MergeInto(d, m *roaring.Bitmap) {
 	d.Or(m)
 }
 
+func (t *chunks) Locked(fn func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	fn()
+}
+
 func (t *chunks) InitFromUnverified(m *roaring.Bitmap) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
