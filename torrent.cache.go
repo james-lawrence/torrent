@@ -1,6 +1,7 @@
 package torrent
 
 import (
+	"log"
 	"sync"
 
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -79,14 +80,14 @@ func (t *memoryseeding) Drop(id int160.T) error {
 	return c.close()
 }
 
-func (t *memoryseeding) Insert(cl *Client, md Metadata) (*torrent, error) {
+func (t *memoryseeding) Insert(cl *Client, md Metadata, options ...Tuner) (*torrent, error) {
 	id := int160.FromBytes(md.ID.Bytes())
 	t._mu.RLock()
 	x, ok := t.torrents[id]
 	t._mu.RUnlock()
 
 	if ok {
-		return x, nil
+		return x, x.Tune(options...)
 	}
 
 	// only record if the info is there.
@@ -102,7 +103,8 @@ func (t *memoryseeding) Insert(cl *Client, md Metadata) (*torrent, error) {
 		return nil, err
 	}
 
-	dlt := newTorrent(cl, md)
+	dlt := newTorrent(cl, md, options...)
+	log.Println("WAAAAT", len(md.InfoBytes), unverified.GetCardinality())
 	dlt.chunks.InitFromUnverified(unverified)
 	// lets randomly verify some of the data.
 	// will block until complete.
@@ -115,13 +117,13 @@ func (t *memoryseeding) Insert(cl *Client, md Metadata) (*torrent, error) {
 	return dlt, nil
 }
 
-func (t *memoryseeding) Load(cl *Client, id int160.T) (_ *torrent, cached bool, _ error) {
+func (t *memoryseeding) Load(cl *Client, id int160.T, options ...Tuner) (_ *torrent, cached bool, _ error) {
 	t._mu.RLock()
 	x, ok := t.torrents[id]
 	t._mu.RUnlock()
 
 	if ok {
-		return x, true, nil
+		return x, true, x.Tune(options...)
 	}
 
 	md, err := t.MetadataStore.Read(id)
@@ -134,7 +136,9 @@ func (t *memoryseeding) Load(cl *Client, id int160.T) (_ *torrent, cached bool, 
 		return nil, false, err
 	}
 
-	dlt := newTorrent(cl, md)
+	dlt := newTorrent(cl, md, options...)
+
+	log.Println("WAAAAT 1", len(md.InfoBytes), unverified.GetCardinality())
 	dlt.chunks.InitFromUnverified(unverified)
 	// lets randomly verify some of the data.
 	// will block until complete.
