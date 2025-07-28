@@ -201,7 +201,7 @@ func TuneNewConns(t *torrent) {
 // used after info has been received to mark all chunks missing.
 // will only happen if missing and completed are zero.
 func TuneAutoDownload(t *torrent) {
-	if t.chunks.completed.GetCardinality()+t.chunks.missing.GetCardinality() > 0 {
+	if t.chunks.Cardinality(t.chunks.completed)+t.chunks.Cardinality(t.chunks.missing) > 0 {
 		return
 	}
 

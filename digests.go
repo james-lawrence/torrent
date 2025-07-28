@@ -35,7 +35,7 @@ func newDigestsFromTorrent(t *torrent) digests {
 				}
 
 				id := int160.FromByteArray(t.md.ID)
-				if err := t.cln.torrents.bm.Write(id, t.chunks.ReadableBitmap()); err != nil {
+				if err := t.cln.torrents.Sync(id); err != nil {
 					t.cln.config.errors().Printf("failed to record missing chunks bitmap: %s - %v\n", id, err)
 				}
 			}

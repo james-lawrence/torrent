@@ -393,7 +393,7 @@ func (t _connwriterRequests) determineInterest(msg messageWriter) *roaring.Bitma
 	}
 
 	if m := t.t.chunks.Cardinality(t.t.chunks.completed); uint64(m) == t.t.chunks.pieces {
-		t.cfg.debug().Printf("c(%p) seed(%t) disabling requestable - have all data m(%d) o(%d) c(%d) p(%d)\n", t.connection, t.seed, m, len(t.t.chunks.outstanding), t.t.chunks.Cardinality(t.t.chunks.completed), t.t.chunks.pieces)
+		t.cfg.debug().Printf("c(%p) seed(%t) disabling requestable - have all data m(%d) o(%d) c(%d) p(%d)\n", t.connection, t.seed, m, len(t.t.chunks.outstanding), m, t.t.chunks.pieces)
 		t.refreshrequestable.Store(langx.Autoptr(timex.Inf()))
 		t.requestable = roaring.New()
 		return t.requestable
