@@ -172,7 +172,7 @@ func connexfast(cn *connection, n cstate.T) cstate.T {
 
 			return n
 		default:
-			cn.cfg.debug().Printf("c(%p) seed(%t) posting bitfield: r(%d) u(%d) c(%d) cmax(%d)\n", cn, cn.t.seeding(), readable, cn.t.chunks.unverified.GetCardinality(), cn.t.chunks.completed.GetCardinality(), cn.t.chunks.cmaximum)
+			cn.cfg.debug().Printf("c(%p) seed(%t) posting bitfield: r(%d) u(%d) c(%d) cmax(%d)\n", cn, cn.t.seeding(), readable, cn.t.chunks.Cardinality(cn.t.chunks.unverified), cn.t.chunks.Cardinality(cn.t.chunks.completed), cn.t.chunks.cmaximum)
 			cn.sentHaves = cn.t.chunks.CompletedBitmap()
 			if _, err := cn.PostBitfield(cn.sentHaves); err != nil {
 				return cstate.Failure(err)

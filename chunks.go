@@ -356,6 +356,9 @@ func (t *chunks) ChunksReadable(pid uint64) (b bool) {
 // returns the number of bytes allowed to read for the given offset.
 // 0 is acceptable. -1 means read is blocked.
 func (t *chunks) DataAvailableForOffset(offset int64) (allowed int64) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if t.meta.PieceLength == 0 {
 		return 0
 	}
