@@ -265,14 +265,12 @@ func TuneVerifySample(n uint64) Tuner {
 
 		// if everything validated assume the torrent is good and mark it as fully complete.
 		if t.chunks.failed.IsEmpty() {
-			log.Println("verify sample 0")
 			t.chunks.fill(t.chunks.completed, t.chunks.pieces)
 			t.chunks.zero(t.chunks.unverified)
 			t.chunks.zero(t.chunks.missing)
 			return
 		}
 
-		log.Println("verify sample 1")
 		TuneVerifyFull(t)
 	}
 }

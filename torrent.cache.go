@@ -1,7 +1,6 @@
 package torrent
 
 import (
-	"log"
 	"sync"
 
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -104,7 +103,6 @@ func (t *memoryseeding) Insert(cl *Client, md Metadata, options ...Tuner) (*torr
 	}
 
 	dlt := newTorrent(cl, md, options...)
-	log.Println("WAAAAT", len(md.InfoBytes), unverified.GetCardinality())
 	dlt.chunks.InitFromUnverified(unverified)
 	// lets randomly verify some of the data.
 	// will block until complete.
@@ -137,8 +135,6 @@ func (t *memoryseeding) Load(cl *Client, id int160.T, options ...Tuner) (_ *torr
 	}
 
 	dlt := newTorrent(cl, md, options...)
-
-	log.Println("WAAAAT 1", len(md.InfoBytes), unverified.GetCardinality())
 	dlt.chunks.InitFromUnverified(unverified)
 	// lets randomly verify some of the data.
 	// will block until complete.
