@@ -659,7 +659,7 @@ func (t *torrent) setChunkSize(size uint64) {
 	t.md.ChunkSize = size
 	// potential bug here us to be '*t.chunks = *newChunks(...)' change to straight assignment to deal with
 	// Unlock called on a non-locked mutex.
-	t.chunks = newChunks(size, langx.DefaultIfZero(metainfo.NewInfo(), t.info), chunkoptCond(t.chunks.cond), chunkoptCompleted(t.chunks.completed))
+	t.chunks = newChunks(size, langx.DefaultIfZero(metainfo.NewInfo(), t.info), chunkoptCond(t.chunks.cond), chunkoptCompleted(t.chunks.Clone(t.chunks.completed)))
 }
 
 // There's a connection to that address already.
