@@ -19,8 +19,8 @@ func newBlockingReader(imp storage.TorrentImpl, c *chunks, d *digests) *blocking
 
 type blockingreader struct {
 	storage.TorrentImpl
-	c *chunks
 	d *digests
+	c *chunks
 }
 
 func (t *blockingreader) ReadAt(p []byte, offset int64) (n int, err error) {
@@ -40,8 +40,8 @@ func (t *blockingreader) ReadAt(p []byte, offset int64) (n int, err error) {
 		t.c.cond.Wait()
 	}
 	t.c.cond.L.Unlock()
-	allowed = min(allowed, int64(len(p)))
 
+	allowed = min(allowed, int64(len(p)))
 	return t.TorrentImpl.ReadAt(p[:allowed], offset)
 }
 

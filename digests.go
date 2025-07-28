@@ -48,7 +48,6 @@ func newDigests(iora io.ReaderAt, retrieve func(int) *metainfo.Piece, complete f
 		panic("digests require a storage implementation")
 	}
 
-	// log.Printf("new digest %T\n", iora)
 	return digests{
 		ReaderAt: iora,
 		retrieve: retrieve,

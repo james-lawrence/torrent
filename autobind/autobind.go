@@ -93,10 +93,10 @@ var incr int32
 
 // NewLoopback autobind to the loopback device.
 func NewLoopback(options ...Option) Autobind {
-	id := atomic.AddInt32(&incr, 1) % 254
 	return New(func(a *Autobind) {
 		a.ListenHost = func(network string) string {
 			if strings.Contains(network, "4") {
+				id := atomic.AddInt32(&incr, 1) % 254
 				return fmt.Sprintf("127.0.0.%d", id)
 			}
 			return "::1"

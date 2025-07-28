@@ -5,7 +5,6 @@ import (
 
 	"github.com/james-lawrence/torrent"
 	"github.com/james-lawrence/torrent/internal/bytesx"
-	"github.com/james-lawrence/torrent/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +14,7 @@ func TestSocketsBindSockets(t *testing.T) {
 	require.NoError(t, err)
 	defer s.Close()
 
-	l, err := torrent.Autosocket(t).Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
+	l, err := torrent.Autosocket(t).Bind(torrent.NewClient(TestingLeechConfig(t, t.TempDir())))
 	require.NoError(t, err)
 	defer l.Close()
 

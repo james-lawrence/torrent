@@ -988,20 +988,21 @@ func testTransferRandomData(t *testing.T, datadir string, n int64, from, to *tor
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Join(datadir, metadata.ID.String()), 0700))
 
-	dl, added, err := from.Start(metadata, torrent.TuneVerifyFull)
+	dl0, added, err := from.Start(metadata, torrent.TuneVerifyFull)
 	require.NoError(t, err)
 	require.True(t, added)
-	_ = dl
+	defer from.Stop(dl0.Metadata())
 
 	metadata, err = torrent.NewFromFile(data.Name(), torrent.OptionStorage(storage.NewFile(t.TempDir())))
 	require.NoError(t, err)
 
 	digestdl := md5.New()
-	dl, added, err = to.Start(metadata, torrent.TuneClientPeer(from), torrent.TuneNewConns)
+	dl1, added, err := to.Start(metadata, torrent.TuneClientPeer(from), torrent.TuneNewConns)
 	require.NoError(t, err)
 	require.True(t, added)
+	defer to.Stop(dl1.Metadata())
 
-	dln, err := torrent.DownloadInto(ctx, digestdl, dl)
+	dln, err := torrent.DownloadInto(ctx, digestdl, dl1)
 	require.NoError(t, err)
 
 	require.Equal(t, n, dln)

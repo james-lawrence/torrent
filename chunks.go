@@ -80,6 +80,12 @@ func chunkoptCond(cond *sync.Cond) chunkopt {
 	}
 }
 
+func chunkoptMutex(mu *sync.RWMutex) chunkopt {
+	return func(c *chunks) {
+		c.mu = mu
+	}
+}
+
 func chunkoptCompleted(completed *roaring.Bitmap) chunkopt {
 	return func(c *chunks) {
 		c.completed = completed
@@ -705,6 +711,12 @@ func (t *chunks) Hashed(pid uint64, cause error) {
 }
 
 func (t *chunks) Complete(pid uint64) (changed bool) {
+	defer t.cond.Broadcast() // wake anything waiting on completions
+	// we lock the condition here so that readers currently in their critical
+	// section do not miss the defered broadcast above.
+	t.cond.L.Lock()
+	defer t.cond.L.Unlock()
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -717,7 +729,6 @@ func (t *chunks) Complete(pid uint64) (changed bool) {
 	}
 
 	t.completed.AddInt(int(pid))
-	t.cond.Broadcast() // wake anything waiting on completions
 	return changed
 }
 
