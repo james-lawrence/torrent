@@ -135,3 +135,35 @@ func TestExtensionBits(t *testing.T) {
 		require.False(t, peer1.Supported(peer2, ExtensionBitDHT, ExtensionBitFast))
 	})
 }
+
+func BenchmarkHandshakeRoundTrip(b *testing.B) {
+    var hash [20]byte = [20]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
+
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        c1, c2 := newConn()
+        p1 := Handshake{
+            PeerID: [20]byte{1},
+            Bits:   [8]byte{1},
+        }
+        p2 := Handshake{
+            PeerID: [20]byte{2},
+            Bits:   [8]byte{2},
+        }
+
+        done := make(chan struct{})
+        go func() {
+            defer close(done)
+            _, _, err := p2.Incoming(c2)
+            if err != nil {
+                b.Errorf("Incoming failed: %v", err)
+            }
+        }()
+
+        _, _, err := p1.Outgoing(c1, hash)
+        if err != nil {
+            b.Errorf("Outgoing failed: %v", err)
+        }
+        <-done
+    }
+}
