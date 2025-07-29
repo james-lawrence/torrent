@@ -48,37 +48,33 @@ type HandshakeMessage struct {
 
 // WriteTo write the header to the provided writer.
 func (t HandshakeMessage) WriteTo(dst io.Writer) (n int64, err error) {
-	var buf = make([]byte, 28) // protocol (20) + bits (8)
+    var buf = make([]byte, 28) // protocol (20) + bits (8)
 
-	written := copy(buf[:20], []byte(Protocol))
-	written += copy(buf[20:28], t.Extensions[:])
-	// log.Println("WRITING HANDSHAKE MESSAGE", debug(buf))
-	nw, err := dst.Write(buf)
-	return int64(nw), err
+    copy(buf[:20], []byte(Protocol))
+    copy(buf[20:28], t.Extensions[:])
+    // log.Println("WRITING HANDSHAKE MESSAGE", debug(buf))
+    nw, err := dst.Write(buf)
+    return int64(nw), err
 }
 
 // ReadFrom reads a Handshake from a reader
 func (t *HandshakeMessage) ReadFrom(src io.Reader) (n int64, err error) {
-	var (
-		buf  = make([]byte, 28) // protocol (20) + bits (8)
-		read int
-	)
+    var (
+        buf  = make([]byte, 28) // protocol (20) + bits (8)
+        read int
+    )
 
-	if read, err = io.ReadFull(src, buf); err != nil {
-		return int64(read), err
-	}
+    if read, err = io.ReadFull(src, buf); err != nil {
+        return int64(read), err
+    }
 
-	if read != len(buf) {
-		return int64(read), errorsx.New("invalid handshake invalid length")
-	}
+    if !bytes.HasPrefix(buf, []byte(Protocol)) {
+        return int64(read), errorsx.Errorf("unexpected protocol string %s: %x", Protocol, buf)
+    }
 
-	if !bytes.HasPrefix(buf, []byte(Protocol)) {
-		return int64(read), errorsx.Errorf("unexpected protocol string %s: %x", Protocol, buf)
-	}
+    copy(t.Extensions[:], buf[20:])
 
-	copy(t.Extensions[:], buf[20:])
-
-	return int64(read), nil
+    return int64(read), nil
 }
 
 // HandshakeInfoMessage sent after the HandshakeMessage containing the
@@ -90,34 +86,30 @@ type HandshakeInfoMessage struct {
 
 // WriteTo write the header to the provided writer.
 func (t HandshakeInfoMessage) WriteTo(dst io.Writer) (n int64, err error) {
-	var buf = make([]byte, 40) // info (20) + peer (20)
+    var buf = make([]byte, 40) // info (20) + peer (20)
 
-	written := copy(buf[:20], t.Hash[:])
-	written += copy(buf[20:], t.PeerID[:])
+    copy(buf[:20], t.Hash[:])
+    copy(buf[20:], t.PeerID[:])
 
-	nw, err := dst.Write(buf)
-	return int64(nw), err
+    nw, err := dst.Write(buf)
+    return int64(nw), err
 }
 
 // ReadFrom reads a Handshake from a reader
 func (t *HandshakeInfoMessage) ReadFrom(src io.Reader) (n int64, err error) {
-	var (
-		buf  = make([]byte, 40) // info (20) + peer (20)
-		read int
-	)
+    var (
+        buf  = make([]byte, 40) // info (20) + peer (20)
+        read int
+    )
 
-	if read, err = io.ReadFull(src, buf); err != nil {
-		return int64(read), err
-	}
+    if read, err = io.ReadFull(src, buf); err != nil {
+        return int64(read), err
+    }
 
-	if read != len(buf) {
-		return int64(read), errorsx.Errorf("invalid handshake invalid length")
-	}
+    copy(t.Hash[:], buf[:20])
+    copy(t.PeerID[:], buf[20:])
 
-	copy(t.Hash[:], buf[:20])
-	copy(t.PeerID[:], buf[20:])
-
-	return int64(read), nil
+    return int64(read), nil
 }
 
 // Extension bits for bittorrent protocol
@@ -125,6 +117,9 @@ const (
 	ExtensionBitDHT      uint = 0  // http://www.bittorrent.org/beps/bep_0005.html
 	ExtensionBitFast     uint = 2  // http://www.bittorrent.org/beps/bep_0006.html
 	ExtensionBitExtended uint = 20 // http://www.bittorrent.org/beps/bep_0010.html
+	handshakeSize       = 28
+    infoSize            = 40
+    totalSize           = handshakeSize + infoSize
 )
 
 // ExtensionBits used by the Handshake to determine capabilities of a peer.
@@ -186,72 +181,76 @@ type Handshake struct {
 
 // Outgoing handshake, used to establish a connection to a peer.
 func (t Handshake) Outgoing(sock io.ReadWriter, hash [20]byte) (resbits ExtensionBits, res HandshakeInfoMessage, err error) {
-	var (
-		msg = HandshakeMessage{
-			Extensions: t.Bits,
-		}
-		peering = HandshakeInfoMessage{
-			PeerID: t.PeerID,
-			Hash:   hash,
-		}
-	)
+    var buf = make([]byte, totalSize)
 
-	if _, err := msg.WriteTo(sock); err != nil {
-		return resbits, res, err
-	}
+    copy(buf[:20], []byte(Protocol))
+    copy(buf[20:handshakeSize], t.Bits[:])
+    copy(buf[handshakeSize:handshakeSize+20], hash[:])
+    copy(buf[handshakeSize+20:], t.PeerID[:])
 
-	if _, err := peering.WriteTo(sock); err != nil {
-		return resbits, res, err
-	}
+    var nw int
+    if nw, err = sock.Write(buf); err != nil {
+        return resbits, res, err
+    }
+    if nw != totalSize {
+        return resbits, res, io.ErrShortWrite
+    }
 
-	if _, err := msg.ReadFrom(sock); err != nil {
-		return resbits, res, err
-	}
+    if _, err = io.ReadFull(sock, buf); err != nil {
+        return resbits, res, err
+    }
 
-	if _, err := res.ReadFrom(sock); err != nil {
-		return resbits, res, err
-	}
+    if !bytes.HasPrefix(buf, []byte(Protocol)) {
+        return resbits, res, errorsx.Errorf("unexpected protocol string %s: %x", Protocol, buf)
+    }
 
-	if !bytes.Equal(res.Hash[:], hash[:]) {
-		return resbits, res, errorsx.New("invalid handshake - mismatched hash")
-	}
+    copy(resbits[:], buf[20:handshakeSize])
+    copy(res.Hash[:], buf[handshakeSize:handshakeSize+20])
+    copy(res.PeerID[:], buf[handshakeSize+20:])
 
-	return msg.Extensions, res, err
+    if !bytes.Equal(res.Hash[:], hash[:]) {
+        return resbits, res, errorsx.New("invalid handshake - mismatched hash")
+    }
+
+    return resbits, res, nil
 }
 
 // Incoming handshake, used to accept a connection from a peer.
 func (t Handshake) Incoming(sock io.ReadWriter) (pbits ExtensionBits, pinfo HandshakeInfoMessage, err error) {
-	var (
-		pmsg HandshakeMessage
-		msg  = HandshakeMessage{
-			Extensions: t.Bits,
-		}
-	)
+    var buf = make([]byte, totalSize)
 
-	if sock == nil {
-		panic("incoming socket should never be nil")
-	}
+    if sock == nil {
+        panic("incoming socket should never be nil")
+    }
 
-	if _, err := pmsg.ReadFrom(sock); err != nil {
-		return pbits, pinfo, err
-	}
+    var nr int
+    if nr, err = io.ReadFull(sock, buf); err != nil {
+        return pbits, pinfo, err
+    }
+    if nr != totalSize {
+        return pbits, pinfo, io.ErrUnexpectedEOF
+    }
 
-	if _, err := pinfo.ReadFrom(sock); err != nil {
-		return pbits, pinfo, err
-	}
+    if !bytes.HasPrefix(buf, []byte(Protocol)) {
+        return pbits, pinfo, errorsx.Errorf("unexpected protocol string %s: %x", Protocol, buf)
+    }
 
-	if _, err := msg.WriteTo(sock); err != nil {
-		return pbits, pinfo, err
-	}
+    copy(pbits[:], buf[20:handshakeSize])
+    copy(pinfo.Hash[:], buf[handshakeSize:handshakeSize+20])
+    copy(pinfo.PeerID[:], buf[handshakeSize+20:])
 
-	peering := HandshakeInfoMessage{
-		PeerID: t.PeerID,
-		Hash:   pinfo.Hash,
-	}
+    copy(buf[:20], []byte(Protocol))
+    copy(buf[20:handshakeSize], t.Bits[:])
+    copy(buf[handshakeSize:handshakeSize+20], pinfo.Hash[:])
+    copy(buf[handshakeSize+20:], t.PeerID[:])
 
-	if _, err := peering.WriteTo(sock); err != nil {
-		return pbits, pinfo, err
-	}
+    var nw int
+    if nw, err = sock.Write(buf); err != nil {
+        return pbits, pinfo, err
+    }
+    if nw != totalSize {
+        return pbits, pinfo, io.ErrShortWrite
+    }
 
-	return pmsg.Extensions, pinfo, nil
+    return pbits, pinfo, nil
 }
