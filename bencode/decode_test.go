@@ -290,3 +290,16 @@ func TestJsonDecoderBehaviour(t *testing.T) {
 	test("{}", 1, io.EOF)
 	test("{} {", 1, io.ErrUnexpectedEOF)
 }
+func BenchmarkGetStructFieldForKey(b *testing.B) {
+    type TestStruct struct {
+        Field1 string `bencode:"field1"`
+        Field2 int    `bencode:"field2"`
+    }
+    testType := reflect.TypeOf(TestStruct{})
+    b.ResetTimer()
+    b.RunParallel(func(pb *testing.PB) {
+        for pb.Next() {
+            getStructFieldForKey(testType, "field1")
+        }
+    })
+}

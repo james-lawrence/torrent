@@ -238,72 +238,67 @@ func (ef encodeFieldsSortType) Swap(i, j int)      { ef[i], ef[j] = ef[j], ef[i]
 func (ef encodeFieldsSortType) Less(i, j int) bool { return ef[i].tag < ef[j].tag }
 
 var (
-	typeCacheLock     sync.RWMutex
-	encodeFieldsCache = make(map[reflect.Type][]encodeField)
+	encodeFieldsCache sync.Map // map[reflect.Type][]encodeField
 )
 
 func getEncodeFields(t reflect.Type) []encodeField {
-	typeCacheLock.RLock()
-	fs, ok := encodeFieldsCache[t]
-	typeCacheLock.RUnlock()
-	if ok {
-		return fs
-	}
-	fs = makeEncodeFields(t)
-	typeCacheLock.Lock()
-	defer typeCacheLock.Unlock()
-	encodeFieldsCache[t] = fs
-	return fs
+    fsi, ok := encodeFieldsCache.Load(t)
+    if ok {
+        return fsi.([]encodeField)
+    }
+    fs := makeEncodeFields(t)
+    loaded, _ := encodeFieldsCache.LoadOrStore(t, fs)
+    return loaded.([]encodeField)
 }
 
 func makeEncodeFields(t reflect.Type) (fs []encodeField) {
-	for _i, n := 0, t.NumField(); _i < n; _i++ {
-		i := _i
-		f := t.Field(i)
-		if f.PkgPath != "" {
-			continue
-		}
-		if f.Anonymous {
-			t := f.Type
-			if t.Kind() == reflect.Ptr {
-				t = t.Elem()
-			}
-			anonEFs := makeEncodeFields(t)
-			for aefi := range anonEFs {
-				anonEF := anonEFs[aefi]
-				bottomField := anonEF
-				bottomField.i = func(v reflect.Value) reflect.Value {
-					v = v.Field(i)
-					if v.Kind() == reflect.Ptr {
-						if v.IsNil() {
-							// This will skip serializing this value.
-							return reflect.Value{}
-						}
-						v = v.Elem()
-					}
-					return anonEF.i(v)
-				}
-				fs = append(fs, bottomField)
-			}
-			continue
-		}
-		var ef encodeField
-		ef.i = func(v reflect.Value) reflect.Value {
-			return v.Field(i)
-		}
-		ef.tag = f.Name
+    for _i, n := 0, t.NumField(); _i < n; _i++ {
+        i := _i
+        f := t.Field(i)
+        if f.PkgPath != "" {
+            continue
+        }
+        if f.Anonymous {
+            t := f.Type
+            if t.Kind() == reflect.Ptr {
+                t = t.Elem()
+            }
+            anonEFs := makeEncodeFields(t)
+            for aefi := range anonEFs {
+                anonEF := anonEFs[aefi]
+                bottomField := anonEF
+                bottomField.i = func(v reflect.Value) reflect.Value {
+                    v = v.Field(i)
+                    if v.Kind() == reflect.Ptr {
+                        if v.IsNil() {
+                            // This will skip serializing this value.
+                            return reflect.Value{}
+                        }
+                        v = v.Elem()
+                    }
+                    return anonEF.i(v)
+                }
+                fs = append(fs, bottomField)
+            }
+            continue
+        }
+        var ef encodeField
+        ef.i = func(v reflect.Value) reflect.Value {
+            return v.Field(i)
+        }
+        ef.tag = f.Name
 
-		tv := getTag(f.Tag)
-		if tv.Ignore() {
-			continue
-		}
-		if tv.Key() != "" {
-			ef.tag = tv.Key()
-		}
-		ef.omitEmpty = tv.OmitEmpty()
-		fs = append(fs, ef)
-	}
-	fss := encodeFieldsSortType(fs)
-	sort.Sort(fss)
-	return fs
+        tv := getTag(f.Tag)
+        if tv.Ignore() {
+            continue
+        }
+        if tv.Key() != "" {
+            ef.tag = tv.Key()
+        }
+        ef.omitEmpty = tv.OmitEmpty()
+        fs = append(fs, ef)
+    }
+    fss := encodeFieldsSortType(fs)
+    sort.Sort(fss)
+    return fs
 }
