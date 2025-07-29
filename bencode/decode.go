@@ -336,72 +336,68 @@ func getDictField(dict reflect.Type, key reflect.Value) (_ dictField, err error)
 }
 
 var (
-	structFieldsMu sync.Mutex
-	structFields   = map[reflect.Type]map[string]dictField{}
+	structFields   sync.Map // map[reflect.Type]map[string]dictField
 )
 
 func parseStructFields(struct_ reflect.Type, each func(key string, df dictField)) {
-	for _i, n := 0, struct_.NumField(); _i < n; _i++ {
-		i := _i
-		f := struct_.Field(i)
-		if f.Anonymous {
-			t := f.Type
-			if t.Kind() == reflect.Ptr {
-				t = t.Elem()
-			}
-			parseStructFields(t, func(key string, df dictField) {
-				innerGet := df.Get
-				df.Get = func(value reflect.Value) func(reflect.Value) {
-					anonPtr := value.Field(i)
-					if anonPtr.Kind() == reflect.Ptr && anonPtr.IsNil() {
-						anonPtr.Set(reflect.New(f.Type.Elem()))
-						anonPtr = anonPtr.Elem()
-					}
-					return innerGet(anonPtr)
-				}
-				each(key, df)
-			})
-			continue
-		}
-		tagStr := f.Tag.Get("bencode")
-		if tagStr == "-" {
-			continue
-		}
-		tag := parseTag(tagStr)
-		key := tag.Key()
-		if key == "" {
-			key = f.Name
-		}
-		each(key, dictField{f.Type, func(value reflect.Value) func(reflect.Value) {
-			return value.Field(i).Set
-		}, tag})
-	}
-}
-
-func saveStructFields(struct_ reflect.Type) {
-	m := make(map[string]dictField)
-	parseStructFields(struct_, func(key string, sf dictField) {
-		m[key] = sf
-	})
-	structFields[struct_] = m
+    for _i, n := 0, struct_.NumField(); _i < n; _i++ {
+        i := _i
+        f := struct_.Field(i)
+        if f.Anonymous {
+            t := f.Type
+            if t.Kind() == reflect.Ptr {
+                t = t.Elem()
+            }
+            parseStructFields(t, func(key string, df dictField) {
+                innerGet := df.Get
+                df.Get = func(value reflect.Value) func(reflect.Value) {
+                    anonPtr := value.Field(i)
+                    if anonPtr.Kind() == reflect.Ptr && anonPtr.IsNil() {
+                        anonPtr.Set(reflect.New(f.Type.Elem()))
+                        anonPtr = anonPtr.Elem()
+                    }
+                    return innerGet(anonPtr)
+                }
+                each(key, df)
+            })
+            continue
+        }
+        tagStr := f.Tag.Get("bencode")
+        if tagStr == "-" {
+            continue
+        }
+        tag := parseTag(tagStr)
+        key := tag.Key()
+        if key == "" {
+            key = f.Name
+        }
+        each(key, dictField{f.Type, func(value reflect.Value) func(reflect.Value) {
+            return value.Field(i).Set
+        }, tag})
+    }
 }
 
 func getStructFieldForKey(struct_ reflect.Type, key string) (f dictField) {
-	structFieldsMu.Lock()
-	if _, ok := structFields[struct_]; !ok {
-		saveStructFields(struct_)
-	}
-	f, ok := structFields[struct_][key]
-	structFieldsMu.Unlock()
-	if !ok {
-		var discard interface{}
-		return dictField{
-			Type: reflect.TypeOf(discard),
-			Get:  func(reflect.Value) func(reflect.Value) { return func(reflect.Value) {} },
-			Tags: nil,
-		}
-	}
-	return
+    mi, ok := structFields.Load(struct_)
+    if !ok {
+        m := make(map[string]dictField)
+        parseStructFields(struct_, func(key string, df dictField) {
+            m[key] = df
+        })
+        loaded, _ := structFields.LoadOrStore(struct_, m)
+        mi = loaded
+    }
+    m := mi.(map[string]dictField)
+    f, ok = m[key]
+    if !ok {
+        var discard interface{}
+        return dictField{
+            Type: reflect.TypeOf(discard),
+            Get:  func(reflect.Value) func(reflect.Value) { return func(reflect.Value) {} },
+            Tags: nil,
+        }
+    }
+    return
 }
 
 var structKeyType = reflect.TypeFor[string]()
