@@ -575,7 +575,7 @@ func (t *chunks) ReadableBitmap() *roaring.Bitmap {
 	defer t.mu.RUnlock()
 
 	bm := t.unverified.Clone()
-	t.completed.Clone().Iterate(func(x uint32) bool {
+	t.completed.Iterate(func(x uint32) bool {
 		bm.AddRange(t.Range(uint64(x)))
 		return true
 	})
