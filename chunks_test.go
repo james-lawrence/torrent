@@ -565,3 +565,20 @@ func TestDataAvailableForOffset(t *testing.T) {
 		require.Equal(t, int64(-1), c.DataAvailableForOffset(7*bytesx.KiB+300))
 	})
 }
+
+func BenchmarkChunksPopBatch(b *testing.B) {
+    info, err := fromFile("testdata/bootstrap.dat.torrent")
+    require.NoError(b, err)
+    p := quickpopulate(newChunks(defaultChunkSize, &info))
+
+    available := bitmapx.Fill(uint64(p.cmaximum))
+
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        _, err := p.Pop(32, available)
+        if err != nil {
+            // Stop if queue empties; real benchmark runs will adjust N accordingly.
+            break
+        }
+    }
+}
