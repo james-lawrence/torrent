@@ -485,35 +485,43 @@ func (t *chunks) Peek(available *roaring.Bitmap) (req request, err error) {
 // but this complicates some of the logic, and I'm leaving it to do once refactoring
 // the locks and contention issues are resolved.
 func (t *chunks) Pop(n int, available *roaring.Bitmap) (reqs []request, err error) {
-	if n <= 0 { // sanity check.
-		return reqs, nil
-	}
+    if n <= 0 { // sanity check.
+        return reqs, nil
+    }
 
-	// trace(fmt.Sprintf("initiated: %p", t.mu.(*DebugLock).m))
-	// defer trace(fmt.Sprintf("completed: %p", t.mu.(*DebugLock).m))
-	t.mu.Lock()
-	defer t.mu.Unlock()
+    t.mu.Lock()
+    defer t.mu.Unlock()
 
-	t.recover()
+    t.recover()
 
-	reqs = make([]request, 0, n)
-	for i := 0; i < n; i++ {
-		var (
-			cidx int
-			req  request
-		)
+    union := available.Clone()
+    union.And(t.missing)
 
-		if cidx, req, err = t.peek(available); err != nil {
-			return reqs, err
-		}
+    if union.IsEmpty() {
+        return reqs, empty{Outstanding: len(t.outstanding), Missing: int(t.missing.GetCardinality())}
+    }
 
-		t.outstanding[req.Digest] = req
-		t.missing.Remove(uint32(cidx))
+    reqs = make([]request, 0, n)
+    for i := 0; i < n; i++ {
+        if union.IsEmpty() {
+            break
+        }
 
-		reqs = append(reqs, req)
-	}
+        cidx := int(union.Minimum())
+        var req request
+        req, err = t.request(int64(cidx))
+        if err != nil {
+            return reqs, errorsx.Wrap(err, "invalid request")
+        }
 
-	return reqs, nil
+        t.outstanding[req.Digest] = req
+        t.missing.Remove(uint32(cidx))
+        union.Remove(uint32(cidx))
+
+        reqs = append(reqs, req)
+    }
+
+    return reqs, nil
 }
 
 // Recover initiate a collection of outstanding requests.
