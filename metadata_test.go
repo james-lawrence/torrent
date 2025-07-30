@@ -1,9 +1,13 @@
 package torrent_test
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/james-lawrence/torrent"
+	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
@@ -49,4 +53,31 @@ func TestMetadata(t *testing.T) {
 		require.Len(t, md.DHTNodes, 0)
 		require.EqualValues(t, 16*bytesx.KiB, md.ChunkSize)
 	})
+}
+func BenchmarkNewFromInfoFile(b *testing.B) {
+    info := metainfo.Info{
+        Name:        "large",
+        PieceLength: 1 << 20,
+        Pieces:      make([]byte, 20*10000), // 10k pieces, 200KB.
+        Files:       make([]metainfo.FileInfo, 10000),
+    }
+    for i := range info.Files {
+        info.Files[i] = metainfo.FileInfo{Path: []string{fmt.Sprintf("file%d", i)}, Length: 1 << 20}
+    }
+    encoded, err := bencode.Marshal(info)
+    if err != nil {
+        b.Fatal(err)
+    }
+    path := filepath.Join(b.TempDir(), "info")
+    if err := os.WriteFile(path, encoded, 0600); err != nil {
+        b.Fatal(err)
+    }
+
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        _, err := torrent.NewFromInfoFile(path)
+        if err != nil {
+            b.Fatal(err)
+        }
+    }
 }
