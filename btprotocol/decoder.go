@@ -124,14 +124,14 @@ func readByte(r io.Reader) (b byte, err error) {
 }
 
 func unmarshalBitfield(b []byte) (bf []bool) {
-    length := len(b) * 8
-    bf = make([]bool, length)
-    idx := 0
-    for _, c := range b {
-        for i := 7; i >= 0; i-- {
-            bf[idx] = (c >> uint(i)) & 1 == 1
-            idx++
-        }
-    }
-    return
+	length := len(b) * 8
+	bf = make([]bool, length)
+	idx := 0
+	for _, c := range b {
+		for i := 7; i >= 0; i-- {
+			bf[idx] = (c >> uint(i)) & 1 == 1
+			idx++
+		}
+	}
+	return
 }
