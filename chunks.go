@@ -268,19 +268,46 @@ func (t *chunks) zero(b *roaring.Bitmap) *roaring.Bitmap {
 }
 
 func (t *chunks) peek(available *roaring.Bitmap) (cidx int, req request, err error) {
+	var buf [1]peeked
+
+	if err := t.peekn(available, buf[:]); err != nil {
+		return cidx, req, err
+	}
+
+	return int(buf[0].cidx), buf[0].request, nil
+}
+
+type peeked struct {
+	cidx int64
+	request
+}
+
+func (t *chunks) peekn(available *roaring.Bitmap, dst []peeked) (err error) {
 	union := available.Clone()
 	union.And(t.missing)
 
 	if union.IsEmpty() {
-		return cidx, req, empty{Outstanding: len(t.outstanding), Missing: int(t.missing.GetCardinality())}
+		return empty{Outstanding: len(t.outstanding), Missing: int(t.missing.GetCardinality())}
 	}
 
-	cidx = int(union.Minimum())
-	if req, err = t.request(int64(cidx)); err != nil {
-		return cidx, req, errorsx.Wrap(err, "invalid request")
+	for idx := range dst {
+		var (
+			req request
+		)
+
+		cidx := int64(union.Minimum())
+		if req, err = t.request(int64(cidx)); err != nil {
+			return errorsx.Wrap(err, "invalid request")
+		}
+		dst[idx] = peeked{cidx: cidx, request: req}
+		union.Remove(uint32(cidx))
+
+		if union.IsEmpty() {
+			return nil
+		}
 	}
 
-	return cidx, req, nil
+	return nil
 }
 
 // ChunksMissing checks if the given piece has any missing chunks.
@@ -497,18 +524,18 @@ func (t *chunks) Pop(n int, available *roaring.Bitmap) (reqs []request, err erro
 	t.recover()
 
 	reqs = make([]request, 0, n)
-	for i := 0; i < n; i++ {
+	local := make([]peeked, n)
+
+	if err = t.peekn(available, local); err != nil {
+		return reqs, err
+	}
+
+	for _, peeked := range local {
 		var (
-			cidx int
-			req  request
+			req = peeked.request
 		)
-
-		if cidx, req, err = t.peek(available); err != nil {
-			return reqs, err
-		}
-
-		t.outstanding[req.Digest] = req
-		t.missing.Remove(uint32(cidx))
+		t.outstanding[peeked.Digest] = req
+		t.missing.Remove(uint32(peeked.cidx))
 
 		reqs = append(reqs, req)
 	}
