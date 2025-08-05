@@ -179,45 +179,37 @@ func (c *udpAnnounce) write(h *RequestHeader, body interface{}, trailer []byte) 
 // args is the binary serializable request body. trailer is optional data
 // following it, such as for BEP 41.
 func (c *udpAnnounce) request(action Action, args interface{}, options []byte) (*bytes.Buffer, error) {
-	tid := newTransactionId()
-	if err := errorsx.Wrap(
+	var (
+		err error
+		n   int
+		tid = newTransactionId()
+	)
+	
+	if err = errorsx.Wrap(
 		c.write(
 			&RequestHeader{
 				ConnectionId:  c.connectionId,
 				Action:        action,
 				TransactionId: tid,
-			}, args, options),
-		"writing request",
-	); err != nil {
-		return nil, err
-	}
-	c.socket.SetReadDeadline(time.Now().Add(timeout(c.contiguousTimeouts)))
+				}, args, options),
+				"writing request",
+				); err != nil {
+					return nil, err
+				}
 	b := make([]byte, 0x800) // 2KiB
+	c.socket.SetReadDeadline(time.Now().Add(timeout(c.contiguousTimeouts)))
+	
 	for {
-		var (
-			n        int
-			readErr  error
-			readDone = make(chan struct{})
-		)
-		go func() {
-			defer close(readDone)
-			n, readErr = c.socket.Read(b)
-		}()
-		ctx := context.Background()
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-readDone:
-		}
-		if opE, ok := readErr.(*net.OpError); ok && opE.Timeout() {
+		n, err = c.socket.Read(b)
+		if opE, ok := err.(*net.OpError); ok && opE.Timeout() {
 			c.contiguousTimeouts++
 		}
-		if readErr != nil {
-			return nil, errorsx.Wrap(readErr, "reading from socket")
+		if err != nil {
+			return nil, errorsx.Wrap(err, "reading from socket")
 		}
 		buf := bytes.NewBuffer(b[:n])
 		var h ResponseHeader
-		err := binary.Read(buf, binary.BigEndian, &h)
+		err = binary.Read(buf, binary.BigEndian, &h)
 		switch err {
 		default:
 			panic(err)
