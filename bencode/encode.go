@@ -238,22 +238,17 @@ func (ef encodeFieldsSortType) Swap(i, j int)      { ef[i], ef[j] = ef[j], ef[i]
 func (ef encodeFieldsSortType) Less(i, j int) bool { return ef[i].tag < ef[j].tag }
 
 var (
-	typeCacheLock     sync.RWMutex
-	encodeFieldsCache = make(map[reflect.Type][]encodeField)
+	encodeFieldsCache sync.Map // map[reflect.Type][]encodeField
 )
 
 func getEncodeFields(t reflect.Type) []encodeField {
-	typeCacheLock.RLock()
-	fs, ok := encodeFieldsCache[t]
-	typeCacheLock.RUnlock()
+	fsi, ok := encodeFieldsCache.Load(t)
 	if ok {
-		return fs
+		return fsi.([]encodeField)
 	}
-	fs = makeEncodeFields(t)
-	typeCacheLock.Lock()
-	defer typeCacheLock.Unlock()
-	encodeFieldsCache[t] = fs
-	return fs
+	fs := makeEncodeFields(t)
+	loaded, _ := encodeFieldsCache.LoadOrStore(t, fs)
+	return loaded.([]encodeField)
 }
 
 func makeEncodeFields(t reflect.Type) (fs []encodeField) {

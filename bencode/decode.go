@@ -336,8 +336,7 @@ func getDictField(dict reflect.Type, key reflect.Value) (_ dictField, err error)
 }
 
 var (
-	structFieldsMu sync.Mutex
-	structFields   = map[reflect.Type]map[string]dictField{}
+	structFields   sync.Map // map[reflect.Type]map[string]dictField
 )
 
 func parseStructFields(struct_ reflect.Type, each func(key string, df dictField)) {
@@ -378,21 +377,18 @@ func parseStructFields(struct_ reflect.Type, each func(key string, df dictField)
 	}
 }
 
-func saveStructFields(struct_ reflect.Type) {
-	m := make(map[string]dictField)
-	parseStructFields(struct_, func(key string, sf dictField) {
-		m[key] = sf
-	})
-	structFields[struct_] = m
-}
-
 func getStructFieldForKey(struct_ reflect.Type, key string) (f dictField) {
-	structFieldsMu.Lock()
-	if _, ok := structFields[struct_]; !ok {
-		saveStructFields(struct_)
+	mi, ok := structFields.Load(struct_)
+	if !ok {
+		m := make(map[string]dictField)
+		parseStructFields(struct_, func(key string, df dictField) {
+			m[key] = df
+		})
+		loaded, _ := structFields.LoadOrStore(struct_, m)
+		mi = loaded
 	}
-	f, ok := structFields[struct_][key]
-	structFieldsMu.Unlock()
+	m := mi.(map[string]dictField)
+	f, ok = m[key]
 	if !ok {
 		var discard interface{}
 		return dictField{

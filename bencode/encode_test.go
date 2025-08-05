@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math/big"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -88,4 +89,17 @@ func TestRandomEncode(t *testing.T) {
 		assert.NoError(t, err, "%s", test)
 		assert.EqualValues(t, test.expected, string(data))
 	}
+}
+func BenchmarkGetEncodeFields(b *testing.B) {
+	type TestStruct struct {
+		Field1 string `bencode:"field1"`
+		Field2 int    `bencode:"field2"`
+	}
+	testType := reflect.TypeOf(TestStruct{})
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			getEncodeFields(testType)
+		}
+	})
 }
