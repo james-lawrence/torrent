@@ -2,6 +2,7 @@ package btprotocol
 
 import (
 	"bufio"
+	"encoding/binary"
 	"io"
 	"sync"
 	"testing"
@@ -89,4 +90,70 @@ func TestDecodeOverlongPiece(t *testing.T) {
 	}
 	var m Message
 	require.Error(t, d.Decode(&m))
+}
+func BenchmarkDecodeBitfield(b *testing.B) {
+	r, w := io.Pipe()
+	const bitfieldLen = 128 * 1024
+	bitfieldData := make([]byte, bitfieldLen)
+	msgLen := uint32(1 + bitfieldLen)
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], msgLen)
+	data := append(lenBuf[:], byte(Bitfield))
+	data = append(data, bitfieldData...)
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	defer r.Close()
+	go func() {
+		    defer w.Close()
+		    for {
+		        n, err := w.Write(data)
+		        if err == io.ErrClosedPipe {
+		            return
+		        }
+	        require.NoError(b, err)
+	        require.Equal(b, len(data), n)
+	    }
+	}()
+	d := Decoder{
+		R:         bufio.NewReader(r),
+		MaxLength: 1 << 18,
+	}
+	for i := 0; i < b.N; i++ {
+		var msg Message
+		require.NoError(b, d.Decode(&msg))
+	}
+}
+
+func BenchmarkDecodeExtended(b *testing.B) {
+	r, w := io.Pipe()
+	const payloadLen = 128 * 1024
+	payloadData := make([]byte, payloadLen)
+	msgLen := uint32(1 + 1 + payloadLen)
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], msgLen)
+	data := append(lenBuf[:], byte(Extended))
+	data = append(data, byte(0))
+	data = append(data, payloadData...)
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	defer r.Close()
+	go func() {
+		defer w.Close()
+		for {
+			n, err := w.Write(data)
+			if err == io.ErrClosedPipe {
+				return
+			}
+			require.NoError(b, err)
+			require.Equal(b, len(data), n)
+		}
+		}()
+		d := Decoder{
+			R:         bufio.NewReader(r),
+			MaxLength: 1 << 18,
+		}
+		for i := 0; i < b.N; i++ {
+			var msg Message
+			require.NoError(b, d.Decode(&msg))
+	}
 }

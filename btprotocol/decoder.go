@@ -102,7 +102,9 @@ func (d *Decoder) Decode(msg *Message) (err error) {
 			return err
 		}
 		msg.ExtendedID = ExtensionNumber(b)
-		msg.ExtendedPayload, err = io.ReadAll(r)
+		payloadLen := int(r.N)
+		msg.ExtendedPayload = make([]byte, payloadLen)
+		_, err = io.ReadFull(r, msg.ExtendedPayload)
 		return err
 	case Port:
 		return binary.Read(r, binary.BigEndian, &msg.Port)
@@ -122,9 +124,13 @@ func readByte(r io.Reader) (b byte, err error) {
 }
 
 func unmarshalBitfield(b []byte) (bf []bool) {
+	length := len(b) * 8
+	bf = make([]bool, length)
+	idx := 0
 	for _, c := range b {
 		for i := 7; i >= 0; i-- {
-			bf = append(bf, (c>>uint(i))&1 == 1)
+			bf[idx] = (c >> uint(i)) & 1 == 1
+			idx++
 		}
 	}
 	return
