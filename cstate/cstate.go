@@ -56,6 +56,14 @@ func (t *Idler) Idle(next T, d time.Duration) idle {
 }
 
 func (t *Idler) monitor(ctx context.Context) *Idler {
+	go func() {
+		<-ctx.Done()
+		t.target.Broadcast()
+		for _, s := range t.signals {
+			s.Broadcast()
+		}
+	}()
+	
 	for _, s := range t.signals {
 		go func() {
 			for {
@@ -78,18 +86,23 @@ func (t *Idler) monitor(ctx context.Context) *Idler {
 			t.target.Wait()
 			t.target.L.Unlock()
 
+			select {
+				case <-ctx.Done():
+					return
+				default:
+			}
+			
 			if !t.running.Load() {
 				continue
 			}
 
 			select {
-			case t.done <- struct{}{}:
-			case <-ctx.Done():
-				return
+				case t.done <- struct{}{}:
+				case <-ctx.Done():
+					return
 			}
 		}
 	}()
-
 	return t
 }
 
@@ -156,7 +169,6 @@ func Halt() halt {
 type halt struct{}
 
 func (t halt) Update(ctx context.Context, c *Shared) T {
-	c.done(nil)
 	return nil
 }
 func Fn(fn fn) fn {
@@ -197,5 +209,7 @@ func Run(ctx context.Context, s T, l logger) error {
 		if s == nil {
 			return context.Cause(ctx)
 		}
+
+		runtime.Gosched()
 	}
 }
