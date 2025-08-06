@@ -72,6 +72,26 @@ func BenchmarkChunksPop(b *testing.B) {
 	}
 }
 
+func BenchmarkChunksPopBatch(b *testing.B) {
+	info, err := fromFile("testdata/bootstrap.dat.torrent")
+	require.NoError(b, err)
+	p := quickpopulate(newChunks(defaultChunkSize, &info))
+
+	available := bitmapx.Fill(uint64(p.cmaximum))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reqs, err := p.Pop(32, available)
+		if err != nil {
+			// Stop if queue empties; real benchmark runs will adjust N accordingly.
+			break
+		}
+
+		require.NotEqualValues(b, 0, reqs[0].Digest)
+		require.NotEqualValues(b, reqs[0].Digest, reqs[1].Digest)
+	}
+}
+
 func TestNumChunks(t *testing.T) {
 	// common denominators
 	// 32 KiB, 8 KiB, 1 KiB
