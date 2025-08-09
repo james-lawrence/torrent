@@ -40,11 +40,11 @@ func (cl *captureLogger) Println(v ...interface{}) {
 // TestRunHalt verifies that Halt stops the state machine without error.
 func TestRunHalt(t *testing.T) {
 	var (
-		ctx = context.Background()
-		s   = Halt()
-		l   = testLogger{t}
+	    ctx = context.Background()
+	    s   = Halt()
+	    l   = testLogger{t}
 	)
-
+	
 	err := Run(ctx, s, l)
 	if err != nil {
 		t.Errorf("expected nil error, got %v", err)
@@ -59,7 +59,7 @@ func TestRunFailure(t *testing.T) {
 		s        = Failure(expected)
 		l        = testLogger{t}
 	)
-
+	
 	err := Run(ctx, s, l)
 	if !errors.Is(err, expected) {
 		t.Errorf("expected error %v, got %v", expected, err)
@@ -75,7 +75,7 @@ func TestRunWarning(t *testing.T) {
 		s        = Warning(Halt(), warnErr)
 		expected = "[warning] test warning"
 	)
-
+	
 	err := Run(ctx, s, cl)
 	if err != nil {
 		t.Errorf("expected nil error, got %v", err)
@@ -87,14 +87,14 @@ func TestRunWarning(t *testing.T) {
 
 // TestRunFn verifies that Fn executes the function and returns next state.
 func TestRunFn(t *testing.T) {
-	var (
+    var (
 		ctx = context.Background()
 		l   = testLogger{t}
 		fn  = Fn(func(context.Context, *Shared) T {
 			return Halt()
 		})
 	)
-
+	
 	err := Run(ctx, fn, l)
 	if err != nil {
 		t.Errorf("expected nil error, got %v", err)
@@ -104,16 +104,16 @@ func TestRunFn(t *testing.T) {
 // TestIdleTimeout verifies that idle times out and proceeds.
 func TestIdleTimeout(t *testing.T) {
 	var (
-		mu    sync.Mutex
-		cond  = sync.NewCond(&mu)
-		ctx   = context.Background()
-		idler = Idle(ctx, cond)
-		d     = 50 * time.Millisecond
-		s     = idler.Idle(Halt(), d)
-		l     = testLogger{t}
-		start = time.Now()
+		mu      sync.Mutex
+		cond    = sync.NewCond(&mu)
+		ctx     = context.Background()
+		idler   = Idle(ctx, cond)
+		d       = 50 * time.Millisecond
+		s       = idler.Idle(Halt(), d)
+		l       = testLogger{t}
+		start   = time.Now()
 	)
-
+	
 	err := Run(ctx, s, l)
 	if err != nil {
 		t.Errorf("expected nil error, got %v", err)
@@ -127,21 +127,21 @@ func TestIdleTimeout(t *testing.T) {
 // TestIdleSignal verifies that signaling wakes the idler.
 func TestIdleSignal(t *testing.T) {
 	var (
-		mu     sync.Mutex
-		cond   = sync.NewCond(&mu)
-		signal = sync.NewCond(&mu)
-		ctx    = context.Background()
-		idler  = Idle(ctx, cond, signal)
-		d      = time.Hour
-		s      = idler.Idle(Halt(), d)
-		l      = testLogger{t}
-		done   = make(chan error)
+		mu      sync.Mutex
+		cond    = sync.NewCond(&mu)
+		signal  = sync.NewCond(&mu)
+		ctx     = context.Background()
+		idler   = Idle(ctx, cond, signal)
+		d       = time.Hour
+		s       = idler.Idle(Halt(), d)
+		l       = testLogger{t}
+		done    = make(chan error)
 	)
-
+	
 	go func() {
 		done <- Run(ctx, s, l)
 	}()
-
+	
 	time.Sleep(50 * time.Millisecond)
 	signal.Broadcast()
 	err := <-done
@@ -162,11 +162,11 @@ func TestIdleCancel(t *testing.T) {
 		l        = testLogger{t}
 		done     = make(chan error)
 	)
-
+	
 	go func() {
 		done <- Run(ctx, s, l)
 	}()
-
+	
 	time.Sleep(50 * time.Millisecond)
 	cxl()
 	err := <-done
@@ -193,17 +193,17 @@ func TestIdlerNoLeak(t *testing.T) {
 			l        = testLogger{t}
 			done     = make(chan struct{})
 		)
-
+		
 		go func() {
 			Run(ctx, s, l)
 			close(done)
 		}()
-
+		
 		time.Sleep(10 * time.Millisecond)
 		cxl()
 		<-done
 	}
-
+	
 	after := runtime.NumGoroutine()
 	delta := after - before
 	if delta > tolerance {

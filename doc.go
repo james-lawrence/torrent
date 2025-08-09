@@ -1,23 +1,23 @@
 /*
 Package torrent implements a torrent client
-  - simple api.
-  - performant.
+ - simple api.
+ - performant.
 
 BitTorrent features implemented include:
-  - Protocol obfuscation
-  - DHT
-  - uTP
-  - PEX
-  - Magnet links
-  - IP Blocklists
-  - Some IPv6
-  - HTTP and UDP tracker clients
-  - BEPs:
-  - 3: Basic BitTorrent protocol
-  - 5: DHT
-  - 6: Fast Extension (have all/none only)
-  - 7: IPv6 Tracker Extension
-  - 9: ut_metadata
+ * Protocol obfuscation
+ * DHT
+ * uTP
+ * PEX
+ * Magnet links
+ * IP Blocklists
+ * Some IPv6
+ * HTTP and UDP tracker clients
+ * BEPs:
+  -  3: Basic BitTorrent protocol
+  -  5: DHT
+  -  6: Fast Extension (have all/none only)
+  -  7: IPv6 Tracker Extension
+  -  9: ut_metadata
   - 10: Extension protocol
   - 11: PEX
   - 12: Multitracker metadata extension
