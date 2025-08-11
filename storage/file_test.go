@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/md5"
 	"crypto/rand"
+	"fmt"
 	"hash"
 	"io"
 	"os"
@@ -115,4 +116,50 @@ func IOTorrent(dir string, src io.Reader, n int64) (d *os.File, err error) {
 	}
 
 	return d, nil
+}
+
+func BenchmarkFileStorage(b *testing.B) {
+	const numFiles = 1 << 20
+	const fileLength = 1
+
+	info := &metainfo.Info{
+		Name:        "test_torrent",
+		PieceLength: 1024,
+		Files:       make([]metainfo.FileInfo, numFiles),
+	}
+	totalLength := int64(0)
+	for i := 0; i < numFiles; i++ {
+		info.Files[i] = metainfo.FileInfo{
+			Length: fileLength,
+			Path:   []string{fmt.Sprintf("file%d", i)},
+		}
+		totalLength += fileLength
+	}
+	info.Length = totalLength
+
+	dir := b.TempDir()
+	fs := NewFile(dir)
+
+	ti, err := fs.OpenTorrent(info, metainfo.Hash{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer ti.Close()
+
+	data := []byte{0xFF}
+
+	_, err = ti.WriteAt(data, totalLength-1)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	b.Run("WriteAtLastByte", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			_, err := ti.WriteAt(data, totalLength-1)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
