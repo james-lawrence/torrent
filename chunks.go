@@ -11,7 +11,6 @@ import (
 	pp "github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/metainfo"
 
-	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/x/bitmapx"
 )
@@ -168,6 +167,11 @@ type chunks struct {
 	mu *sync.RWMutex
 }
 
+type peeked struct {
+	cidx int64
+	req  request
+}
+
 func (t *chunks) reap(window time.Duration) {
 	ts := time.Now()
 	recovered := 0
@@ -267,20 +271,39 @@ func (t *chunks) zero(b *roaring.Bitmap) *roaring.Bitmap {
 	return b
 }
 
-func (t *chunks) peek(available *roaring.Bitmap) (cidx int, req request, err error) {
+// Fills the provided slice with the next available chunks without modifying state.
+func (t *chunks) peekn(available *roaring.Bitmap, dst []peeked) (int, error) {
 	union := available.Clone()
 	union.And(t.missing)
 
 	if union.IsEmpty() {
-		return cidx, req, empty{Outstanding: len(t.outstanding), Missing: int(t.missing.GetCardinality())}
+		return 0, empty{Outstanding: len(t.outstanding), Missing: int(t.missing.GetCardinality())}
 	}
 
-	cidx = int(union.Minimum())
-	if req, err = t.request(int64(cidx)); err != nil {
-		return cidx, req, errorsx.Wrap(err, "invalid request")
+	it := union.Iterator()
+	i := 0
+	for ; i < len(dst) && it.HasNext(); i++ {
+		ucidx := it.Next()
+		cidx := int64(ucidx)
+		req, reqerr := t.request(cidx)
+		if reqerr != nil {
+			return i, reqerr
+		}
+		dst[i] = peeked{cidx: cidx, req: req}
 	}
+	return i, nil
+}
 
-	return cidx, req, nil
+func (t *chunks) peek(available *roaring.Bitmap) (cidx int, req request, err error) {
+	var buf [1]peeked
+	n, err := t.peekn(available, buf[:])
+	if err != nil {
+		return -1, request{}, err
+	}
+	if n == 0 {
+		return -1, request{}, empty{Outstanding: len(t.outstanding), Missing: int(t.missing.GetCardinality())}
+	}
+	return int(buf[0].cidx), buf[0].req, nil
 }
 
 // ChunksMissing checks if the given piece has any missing chunks.
@@ -489,28 +512,23 @@ func (t *chunks) Pop(n int, available *roaring.Bitmap) (reqs []request, err erro
 		return reqs, nil
 	}
 
-	// trace(fmt.Sprintf("initiated: %p", t.mu.(*DebugLock).m))
-	// defer trace(fmt.Sprintf("completed: %p", t.mu.(*DebugLock).m))
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.recover()
 
-	reqs = make([]request, 0, n)
-	for i := 0; i < n; i++ {
-		var (
-			cidx int
-			req  request
-		)
+	dst := make([]peeked, n)
+	filled, err := t.peekn(available, dst)
+	if err != nil {
+		return nil, err
+	}
 
-		if cidx, req, err = t.peek(available); err != nil {
-			return reqs, err
-		}
-
-		t.outstanding[req.Digest] = req
-		t.missing.Remove(uint32(cidx))
-
-		reqs = append(reqs, req)
+	reqs = make([]request, filled)
+	for i := 0; i < filled; i++ {
+		p := dst[i]
+		t.outstanding[p.req.Digest] = p.req
+		t.missing.Remove(uint32(p.cidx))
+		reqs[i] = p.req
 	}
 
 	return reqs, nil
