@@ -73,11 +73,6 @@ func (t *Idler) monitor(ctx context.Context) *Idler {
 	}
 
 	go func() {
-		defer func() {
-			for _, s := range t.signals {
-				s.Broadcast()
-			}
-		}()
 		for {
 			t.target.L.Lock()
 			t.target.Wait()
