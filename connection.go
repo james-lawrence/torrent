@@ -17,7 +17,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anacrolix/missinggo/v2"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/james-lawrence/torrent/bep0006"
 	"github.com/james-lawrence/torrent/bep0009"
@@ -32,6 +31,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
+	"github.com/james-lawrence/torrent/internal/multiless"
 	"github.com/james-lawrence/torrent/internal/timex"
 	"github.com/james-lawrence/torrent/internal/x/bitmapx"
 	"github.com/james-lawrence/torrent/mse"
@@ -230,7 +230,7 @@ func (cn *connection) isPreferredDirection() bool {
 // considering only their networking properties. If ok is false, we can't
 // decide.
 func (cn *connection) hasPreferredNetworkOver(r *connection) (left, ok bool) {
-	var ml missinggo.MultiLess
+	var ml multiless.T
 	ml.NextBool(cn.isPreferredDirection(), r.isPreferredDirection())
 	ml.NextBool(!cn.utp(), !r.utp())
 	ml.NextBool(cn.ipv6(), r.ipv6())
