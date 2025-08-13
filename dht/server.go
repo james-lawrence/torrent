@@ -19,6 +19,7 @@ import (
 	"github.com/anacrolix/missinggo/v2"
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/internal/errorsx"
+	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/iplist"
 	"github.com/james-lawrence/torrent/logonce"
 
@@ -304,9 +305,7 @@ func (s *Server) processPacket(ctx context.Context, b []byte, addr Addr) {
 					return
 				}
 			}
-			// if missinggo.CryHeard() {
 			log.Printf("%s: received bad krpc message from %s: %s: %+q", s, addr, err, b)
-			// }
 		}()
 		return
 	}
@@ -358,7 +357,8 @@ func (s *Server) serve() error {
 			logonce.Stderr.Printf("received dht packet exceeds buffer size")
 			continue
 		}
-		if missinggo.AddrPort(addr) == 0 {
+
+		if errorsx.Zero(netx.NetPort(addr)) == 0 {
 			readZeroPort.Add(1)
 			continue
 		}
@@ -368,7 +368,7 @@ func (s *Server) serve() error {
 			if s.closed.IsSet() {
 				return false, errors.New("server is closed")
 			}
-			return s.ipBlocked(missinggo.AddrIP(addr)), nil
+			return s.ipBlocked(netx.NetIPOrNil(addr)), nil
 		}()
 		if err != nil {
 			return err

@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/anacrolix/missinggo/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/james-lawrence/torrent/bencode"
+	"github.com/james-lawrence/torrent/internal/iox"
 )
 
 func testFile(t *testing.T, filename string) {
@@ -68,7 +68,7 @@ func TestNumPieces(t *testing.T) {
 			PieceLength: _case.PieceLength,
 		}
 		err := info.GeneratePieces(func(fi FileInfo) (io.ReadCloser, error) {
-			return io.NopCloser(missinggo.ZeroReader), nil
+			return io.NopCloser(iox.Zero()), nil
 		})
 		assert.NoError(t, err)
 		assert.EqualValues(t, _case.NumPieces, info.NumPieces())

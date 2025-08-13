@@ -9,13 +9,13 @@ import (
 	"net"
 	"time"
 
-	"github.com/anacrolix/missinggo/v2"
 	"golang.org/x/time/rate"
 
 	"github.com/james-lawrence/torrent/dht/bep44"
 	"github.com/james-lawrence/torrent/dht/krpc"
 	peer_store "github.com/james-lawrence/torrent/dht/peer-store"
 	"github.com/james-lawrence/torrent/dht/transactions"
+	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/iplist"
 	"github.com/james-lawrence/torrent/metainfo"
 )
@@ -147,6 +147,6 @@ func MakeDeterministicNodeID(public net.Addr) (id krpc.ID) {
 	h := crypto.SHA1.New()
 	h.Write([]byte(public.String()))
 	h.Sum(id[:0:20])
-	SecureNodeId(&id, missinggo.AddrIP(public))
+	SecureNodeId(&id, netx.NetIPOrNil(public))
 	return
 }

@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/anacrolix/missinggo/pproffd"
-	"github.com/anacrolix/missinggo/v2"
 	"github.com/james-lawrence/torrent/dht/krpc"
 	"github.com/james-lawrence/torrent/internal/errorsx"
+	"github.com/james-lawrence/torrent/internal/netx"
 )
 
 type Action int32
@@ -93,7 +93,7 @@ func (c *udpAnnounce) Close() error {
 }
 
 func (c *udpAnnounce) ipv6() bool {
-	rip := missinggo.AddrIP(c.socket.RemoteAddr())
+	rip := netx.NetIPOrNil(c.socket.RemoteAddr())
 	return rip.To16() != nil && rip.To4() == nil
 }
 
@@ -260,12 +260,7 @@ func (c *udpAnnounce) connect(ctx context.Context) (err error) {
 	}
 	c.connectionId = connectRequestConnectionId
 	if c.socket == nil {
-		hmp := missinggo.SplitHostMaybePort(c.url.Host)
-		if hmp.NoPort {
-			hmp.NoPort = false
-			hmp.Port = 80
-		}
-		c.socket, err = c.a.Dialer.DialContext(ctx, c.dialNetwork(), hmp.String())
+		c.socket, err = c.a.Dialer.DialContext(ctx, c.dialNetwork(), netx.DefaultPort(c.url.Host, 80))
 		if err != nil {
 			return
 		}

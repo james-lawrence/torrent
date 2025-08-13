@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/anacrolix/missinggo/v2"
+	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/internal/utpx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,7 +19,7 @@ func testListenerNetwork(
 	require.NoError(t, err)
 	defer l.Close()
 	assert.EqualValues(t, expectedNet, l.Addr().Network())
-	ip := missinggo.AddrIP(l.Addr())
+	ip := netx.NetIPOrNil(l.Addr())
 	assert.Equal(t, validIP4, ip.To4() != nil, ip)
 }
 
@@ -49,7 +49,7 @@ func testAcceptedConnAddr(
 	require.NoError(t, err)
 	defer c.Close()
 	assert.EqualValues(t, network, c.RemoteAddr().Network())
-	assert.Equal(t, valid4, missinggo.AddrIP(c.RemoteAddr()).To4() != nil)
+	assert.Equal(t, valid4, netx.NetIPOrNil(c.RemoteAddr()).To4() != nil)
 }
 
 func listenClosure(rawListenFunc func(string, string) (net.Listener, error), network, addr string) func() (net.Listener, error) {
