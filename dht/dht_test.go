@@ -8,11 +8,11 @@ import (
 	"log"
 	"math/big"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/anacrolix/missinggo/inproc"
-	"github.com/anacrolix/sync"
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
