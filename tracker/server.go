@@ -8,8 +8,8 @@ import (
 	"math/rand"
 	"net"
 
-	"github.com/anacrolix/missinggo/v2"
 	"github.com/james-lawrence/torrent/dht/krpc"
+	"github.com/james-lawrence/torrent/internal/netx"
 )
 
 type torrent struct {
@@ -94,7 +94,7 @@ func (s *server) serveOne() (err error) {
 		}
 		t := s.t[ar.InfoHash]
 		bm := func() encoding.BinaryMarshaler {
-			ip := missinggo.AddrIP(addr)
+			ip := netx.NetIPOrNil(addr)
 			if ip.To4() != nil {
 				return krpc.CompactIPv4NodeAddrs(t.Peers)
 			}

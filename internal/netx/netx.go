@@ -2,6 +2,7 @@ package netx
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/netip"
@@ -152,4 +153,15 @@ func FirstAddrOrZero(addrs ...netip.Addr) netip.Addr {
 
 func IsAddrInUse(err error) bool {
 	return strings.Contains(err.Error(), "address already in use")
+}
+
+// debfault the port if its not present in the hostport string.
+// assumes: host:port syntax.
+func DefaultPort(hostport string, fallback int) string {
+	host, _, ok := strings.Cut(hostport, ":")
+	if ok {
+		return hostport
+	}
+
+	return fmt.Sprintf("%s:%d", host, fallback)
 }
