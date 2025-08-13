@@ -1,9 +1,9 @@
 package stmutil
 
 import (
+	"iter"
 	"unsafe"
 
-	"github.com/anacrolix/missinggo/v2/iter"
 	"github.com/benbjohnson/immutable"
 )
 
@@ -12,12 +12,16 @@ type KeyConstraint interface {
 	comparable
 }
 
+type Iterable[T any] interface {
+	Iter() iter.Seq[T]
+}
+
 type Settish[K KeyConstraint] interface {
+	Iterable[K]
 	Add(K) Settish[K]
 	Delete(K) Settish[K]
 	Contains(K) bool
 	Range(func(K) bool)
-	iter.Iterable
 	Len() int
 }
 
@@ -69,10 +73,12 @@ func (s mapToSet[K]) Range(f func(K) bool) {
 	})
 }
 
-func (s mapToSet[K]) Iter(cb iter.Callback) {
-	s.Range(func(k K) bool {
-		return cb(k)
-	})
+func (s mapToSet[K]) Iter() iter.Seq[K] {
+	return func(yield func(K) bool) {
+		s.Range(func(k K) bool {
+			return yield(k)
+		})
+	}
 }
 
 type Map[K KeyConstraint, V any] struct {
@@ -106,10 +112,12 @@ func (sm Map[K, V]) Range(f func(K, V) bool) {
 	}
 }
 
-func (sm Map[K, V]) Iter(cb iter.Callback) {
-	sm.Range(func(key K, _ V) bool {
-		return cb(key)
-	})
+func (sm Map[K, V]) Iter() iter.Seq[K] {
+	return func(yield func(K) bool) {
+		sm.Range(func(key K, _ V) bool {
+			return yield(key)
+		})
+	}
 }
 
 type SortedMap[K KeyConstraint, V any] struct {
@@ -139,10 +147,12 @@ func (sm SortedMap[K, V]) Range(f func(key K, value V) bool) {
 	}
 }
 
-func (sm SortedMap[K, V]) Iter(cb iter.Callback) {
-	sm.Range(func(key K, _ V) bool {
-		return cb(key)
-	})
+func (sm SortedMap[K, V]) Iter() iter.Seq[K] {
+	return func(yield func(K) bool) {
+		sm.Range(func(key K, _ V) bool {
+			return yield(key)
+		})
+	}
 }
 
 type lessFunc[T KeyConstraint] func(l, r T) bool
@@ -173,7 +183,7 @@ type Mappish[K, V any] interface {
 	Get(key K) (V, bool)
 	Range(func(K, V) bool)
 	Len() int
-	iter.Iterable
+	Iter() iter.Seq[K]
 }
 
 func GetLeft(l, _ any) any {

@@ -12,10 +12,9 @@ import (
 	"time"
 
 	"github.com/anacrolix/stm"
+	"github.com/james-lawrence/torrent/internal/iterx"
+	"github.com/james-lawrence/torrent/internal/multiless"
 	"github.com/james-lawrence/torrent/internal/stmutil"
-
-	"github.com/anacrolix/missinggo/v2"
-	"github.com/anacrolix/missinggo/v2/iter"
 )
 
 type reason = string
@@ -142,7 +141,7 @@ func (i *Instance) Wait(ctx context.Context, e Entry, reason string, p priority)
 			return true
 		}
 		haveRoom := i.noMaxEntries.Get(tx) || es.Len() < i.maxEntries.Get(tx)
-		topPrio, ok := iter.First(i.waitersByPriority.Get(tx).Iter)
+		topPrio, ok := iterx.First(i.waitersByPriority.Get(tx).Iter())
 		if !ok {
 			panic("y u no waiting")
 		}
@@ -180,7 +179,7 @@ func (i *Instance) Allow(tx *stm.Tx, e Entry, reason string, p priority) *EntryH
 		return eh
 	}
 	haveRoom := i.noMaxEntries.Get(tx) || es.Len() < i.maxEntries.Get(tx)
-	topPrio, ok := iter.First(i.waitersByPriority.Get(tx).Iter)
+	topPrio, ok := iterx.First(i.waitersByPriority.Get(tx).Iter())
 	if haveRoom && (!ok || p == topPrio) {
 		i.entries.Set(tx, addToMapToSet(es, e, eh))
 		return eh
@@ -229,7 +228,7 @@ func (i *Instance) PrintStatus(w io.Writer) {
 	sort.Slice(entriesItems, func(i, j int) bool {
 		l := entriesItems[i].Entry
 		r := entriesItems[j].Entry
-		var ml missinggo.MultiLess
+		var ml multiless.T
 		f := func(l, r string) {
 			pl := parseHostPort(l)
 			pr := parseHostPort(r)

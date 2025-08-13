@@ -1,10 +1,9 @@
 package containers
 
 import (
-	"github.com/anacrolix/missinggo/v2/iter"
-
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/types"
+	"github.com/james-lawrence/torrent/internal/iterx"
 	"github.com/james-lawrence/torrent/internal/stmutil"
 )
 
@@ -22,8 +21,8 @@ type stmSettishWrapper struct {
 }
 
 func (me stmSettishWrapper) Next() addrMaybeId {
-	first, _ := iter.First(me.set.Iter)
-	return first.(addrMaybeId)
+	first, _ := iterx.First(me.set.Iter())
+	return first
 }
 
 func (me stmSettishWrapper) Delete(x addrMaybeId) AddrMaybeIdsByDistance {

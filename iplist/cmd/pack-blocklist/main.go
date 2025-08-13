@@ -7,13 +7,10 @@ import (
 	"log"
 	"os"
 
-	"github.com/anacrolix/tagflag"
-
 	"github.com/james-lawrence/torrent/iplist"
 )
 
 func main() {
-	tagflag.Parse(nil)
 	l, err := iplist.NewFromReader(os.Stdin)
 	if err != nil {
 		log.Fatal(err)
