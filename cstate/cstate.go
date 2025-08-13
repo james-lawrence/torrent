@@ -79,6 +79,11 @@ func (t *Idler) monitor(ctx context.Context) *Idler {
 			t.target.L.Unlock()
 
 			if !t.running.Load() {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
 				continue
 			}
 
@@ -106,10 +111,10 @@ func (t idle) Update(ctx context.Context, c *Shared) T {
 	case <-t.done:
 	case <-t.Idler.timeout.C:
 	case <-ctx.Done():
+		t.Idler.target.Broadcast()
 	}
 	return t.next
 }
-
 func (t idle) String() string {
 	return fmt.Sprintf("%T - %s - idle", t.next, t.next)
 }
@@ -156,7 +161,6 @@ func Halt() halt {
 type halt struct{}
 
 func (t halt) Update(ctx context.Context, c *Shared) T {
-	c.done(nil)
 	return nil
 }
 func Fn(fn fn) fn {
@@ -197,5 +201,7 @@ func Run(ctx context.Context, s T, l logger) error {
 		if s == nil {
 			return context.Cause(ctx)
 		}
+
+		runtime.Gosched()
 	}
 }
