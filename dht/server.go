@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/anacrolix/generics"
-	"github.com/anacrolix/missinggo/v2"
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/netx"
@@ -48,7 +47,7 @@ type Server struct {
 	mu           sync.RWMutex
 	transactions transactions.Dispatcher[*transaction]
 	table        *table
-	closed       missinggo.Event
+	closed       chan struct{}
 	ipBlockList  iplist.Ranger
 	tokenServer  tokenServer // Manages tokens we issue to our queriers.
 	config       ServerConfig
@@ -232,9 +231,10 @@ func NewServer(c *ServerConfig) (s *Server, err error) {
 			interval:         5 * time.Minute,
 			secret:           make([]byte, 20),
 		},
-		table: newTable(c.BucketLimit),
-		store: bep44.NewWrapper(c.Store, c.Exp),
-		mux:   DefaultMuxer(),
+		table:  newTable(c.BucketLimit),
+		store:  bep44.NewWrapper(c.Store, c.Exp),
+		mux:    DefaultMuxer(),
+		closed: make(chan struct{}),
 	}
 	rand.Read(s.tokenServer.secret)
 	s.socket = c.Conn
@@ -249,11 +249,20 @@ func NewServer(c *ServerConfig) (s *Server, err error) {
 	return
 }
 
+func (s *Server) isClosed() bool {
+	select {
+	case _, ok := <-s.closed:
+		return ok
+	default:
+		return false
+	}
+}
+
 func (s *Server) serveUntilClosed() error {
 	err := s.serve()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed.IsSet() {
+	if s.isClosed() {
 		return nil
 	}
 	return err
@@ -310,7 +319,7 @@ func (s *Server) processPacket(ctx context.Context, b []byte, addr Addr) {
 		return
 	}
 
-	if s.closed.IsSet() {
+	if s.isClosed() {
 		return
 	}
 
@@ -365,7 +374,7 @@ func (s *Server) serve() error {
 		blocked, err := func() (bool, error) {
 			s.mu.RLock()
 			defer s.mu.RUnlock()
-			if s.closed.IsSet() {
+			if s.isClosed() {
 				return false, errors.New("server is closed")
 			}
 			return s.ipBlocked(netx.NetIPOrNil(addr)), nil
@@ -662,7 +671,7 @@ func (s *Server) SendToNode(ctx context.Context, b []byte, node Addr, maximum in
 		// instead.
 		s.mu.RLock()
 		defer s.mu.RUnlock()
-		if s.closed.IsSet() {
+		if s.isClosed() {
 			err = errors.New("server is closed")
 			return
 		}
@@ -942,7 +951,10 @@ func (s *Server) notBadNodes() (nis []krpc.NodeInfo) {
 func (s *Server) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.closed.Set()
+	if s.isClosed() {
+		return
+	}
+	close(s.closed)
 	go s.socket.Close()
 }
 
@@ -1070,7 +1082,7 @@ func (s *Server) PeerStore() peer_store.Interface {
 }
 
 func (s *Server) shouldStopRefreshingBucket(bucketIndex int) bool {
-	if s.closed.IsSet() {
+	if s.isClosed() {
 		return true
 	}
 	b := &s.table.buckets[bucketIndex]
@@ -1114,14 +1126,13 @@ wait:
 		}
 		op.AddNodes(types.AddrMaybeIdSliceFromNodeInfoSlice(s.notBadNodes()))
 		bucketChanged := b.changed.Signaled()
-		serverClosed := s.closed.C()
 		s.mu.RUnlock()
 		select {
 		case <-op.Stalled():
 			s.mu.RLock()
 			break wait
 		case <-bucketChanged:
-		case <-serverClosed:
+		case <-s.closed:
 		}
 		s.mu.RLock()
 	}
@@ -1195,7 +1206,7 @@ func (s *Server) TableMaintainer() {
 		}
 		s.mu.RUnlock()
 		select {
-		case <-s.closed.LockedChan(&s.mu):
+		case <-s.closed:
 			return
 		case <-time.After(time.Minute):
 		}
