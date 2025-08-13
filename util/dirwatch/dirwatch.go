@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/anacrolix/missinggo/v2"
 	"github.com/fsnotify/fsnotify"
 
+	"github.com/james-lawrence/torrent/internal/iox"
 	"github.com/james-lawrence/torrent/metainfo"
 )
 
@@ -107,7 +107,7 @@ func scanDir(dirName string) (ee map[metainfo.Hash]entity) {
 			e := entity{
 				TorrentFilePath: fullName,
 			}
-			missinggo.CopyExact(&e.Hash, ih)
+			iox.CopyExact(&e.Hash, ih)
 			addEntity(e)
 		case ".magnet":
 			uris, err := magnetFileURIs(fullName)
