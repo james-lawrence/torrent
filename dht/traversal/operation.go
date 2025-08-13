@@ -3,12 +3,12 @@ package traversal
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/anacrolix/chansync"
 	"github.com/anacrolix/chansync/events"
-	"github.com/anacrolix/sync"
 
 	"github.com/james-lawrence/torrent/dht/containers"
 	"github.com/james-lawrence/torrent/dht/int160"
