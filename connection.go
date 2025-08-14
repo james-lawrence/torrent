@@ -211,10 +211,6 @@ func (cn *connection) requestseq() iter.Seq[request] {
 	}
 }
 
-func (cn *connection) expectingChunks() bool {
-	return cn.Interested && !cn.PeerChoked
-}
-
 // Returns true if the connection is over IPv6.
 func (cn *connection) ipv6() bool {
 	return cn.remoteAddr.Addr().Unmap().Is6()

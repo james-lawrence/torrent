@@ -38,7 +38,7 @@ func (me stmSettishWrapper) Add(x addrMaybeId) AddrMaybeIdsByDistance {
 }
 
 func NewImmutableAddrMaybeIdsByDistance(target int160.T) AddrMaybeIdsByDistance {
-	return stmSettishWrapper{stmutil.NewSortedSet[addrMaybeId](func(l, r addrMaybeId) bool {
+	return stmSettishWrapper{stmutil.NewSortedSet(func(l, r addrMaybeId) bool {
 		return l.CloserThan(r, target)
 	})}
 }
