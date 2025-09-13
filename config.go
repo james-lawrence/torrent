@@ -322,7 +322,7 @@ func ClientConfigBootstrapGlobal(c *ClientConfig) {
 func ClientConfigBootstrapPeerFile(path string) ClientConfigOption {
 	return ClientConfigBootstrapFn(func(n string) dht.StartingNodesGetter {
 		return func() (res []dht.Addr, err error) {
-			ps, err := dht.ReadNodesFromFile(n)
+			ps, err := dht.ReadNodesFromFile(path)
 			if err != nil {
 				return nil, err
 			}
