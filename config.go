@@ -43,7 +43,7 @@ type ClientConfig struct {
 
 	UpnpID string
 
-	DhtStartingNodes func(network string) dht.StartingNodesGetter
+	dhtStartingNodes []func(network string) dht.StartingNodesGetter
 
 	// Upload even after there's nothing in it for us. By default uploading is
 	// not altruistic, we'll only upload to encourage the peer to reciprocate.
@@ -301,16 +301,21 @@ func ClientConfigPeerID(s string) ClientConfigOption {
 	}
 }
 
+// resets the set of bootstrap functions to an empty set.
+func ClientConfigBootstrapNone(c *ClientConfig) {
+	c.dhtStartingNodes = nil
+}
+
 func ClientConfigBootstrapFn(fn func(n string) dht.StartingNodesGetter) ClientConfigOption {
 	return func(c *ClientConfig) {
-		c.DhtStartingNodes = fn
+		c.dhtStartingNodes = append(c.dhtStartingNodes, fn)
 	}
 }
 
 func ClientConfigBootstrapGlobal(c *ClientConfig) {
-	c.DhtStartingNodes = func(network string) dht.StartingNodesGetter {
+	c.dhtStartingNodes = append(c.dhtStartingNodes, func(network string) dht.StartingNodesGetter {
 		return func() ([]dht.Addr, error) { return dht.GlobalBootstrapAddrs(network) }
-	}
+	})
 }
 
 // Bootstrap from a file written by dht.WriteNodesToFile
@@ -459,15 +464,13 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		TorrentPeersLowWater:           48,
 		HandshakesTimeout:              4 * time.Second,
 		dynamicip:                      UPnPPortForward,
-		DhtStartingNodes: func(network string) dht.StartingNodesGetter {
-			return func() ([]dht.Addr, error) { return nil, nil }
-		},
-		UploadRateLimiter:   rate.NewLimiter(rate.Limit(128*bytesx.MiB), bytesx.MiB),
-		DownloadRateLimiter: rate.NewLimiter(rate.Limit(256*bytesx.MiB), bytesx.MiB),
-		dialRateLimiter:     rate.NewLimiter(rate.Limit(32), 128),
-		acceptRateLimiter:   rate.NewLimiter(rate.Limit(runtime.NumCPU()), runtime.NumCPU()),
-		dialPoolSize:        uint16(runtime.NumCPU()),
-		ConnTracker:         conntrack.NewInstance(),
+		dhtStartingNodes:               nil,
+		UploadRateLimiter:              rate.NewLimiter(rate.Limit(128*bytesx.MiB), bytesx.MiB),
+		DownloadRateLimiter:            rate.NewLimiter(rate.Limit(256*bytesx.MiB), bytesx.MiB),
+		dialRateLimiter:                rate.NewLimiter(rate.Limit(32), 128),
+		acceptRateLimiter:              rate.NewLimiter(rate.Limit(runtime.NumCPU()), runtime.NumCPU()),
+		dialPoolSize:                   uint16(runtime.NumCPU()),
+		ConnTracker:                    conntrack.NewInstance(),
 		HeaderObfuscationPolicy: HeaderObfuscationPolicy{
 			Preferred:        false,
 			RequirePreferred: false,

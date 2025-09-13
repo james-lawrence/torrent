@@ -219,10 +219,18 @@ func (cl *Client) newDhtServer(conn net.PacketConn) (s *dht.Server, err error) {
 			}
 			return cl.config.publicIP4
 		}(),
-		StartingNodes: cl.config.DhtStartingNodes(conn.LocalAddr().Network()),
-		OnQuery:       cl.config.DHTOnQuery,
-		Logger:        newlogger(cl.config.Logger, "dht", log.Flags()),
-		BucketLimit:   cl.config.bucketLimit,
+		StartingNodes: func() (res []dht.Addr, err error) {
+			for _, fn := range cl.config.dhtStartingNodes {
+				_local, _err := fn(conn.LocalAddr().Network())()
+				res = append(res, _local...)
+				err = errorsx.Compact(err, _err)
+			}
+
+			return res, err
+		},
+		OnQuery:     cl.config.DHTOnQuery,
+		Logger:      newlogger(cl.config.Logger, "dht", log.Flags()),
+		BucketLimit: cl.config.bucketLimit,
 	}
 
 	if s, err = dht.NewServer(&cfg); err != nil {

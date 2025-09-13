@@ -281,8 +281,7 @@ func TestAddMetainfoWithNodes(t *testing.T) {
 	// ctx, done := testx.Context(t)
 	// defer done()
 
-	cfg := TestingConfig(t, t.TempDir(), ClientConfigSeed(true), ClientConfigDebugLogger(log.Default()))
-	cfg.DhtStartingNodes = func(n string) dht.StartingNodesGetter { return func() ([]dht.Addr, error) { return nil, nil } }
+	cfg := TestingConfig(t, t.TempDir(), ClientConfigSeed(true), ClientConfigDebugLogger(log.Default()), ClientConfigBootstrapNone)
 	// For now, we want to just jam the nodes into the table, without
 	// verifying them first. Also the DHT code doesn't support mixing secure
 	// and insecure nodes if security is enabled (yet).
