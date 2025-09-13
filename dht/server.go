@@ -1157,7 +1157,9 @@ func (s *Server) pingQuestionableNodesInBucket(bucketIndex int) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				err := s.questionableNodePing(context.TODO(), n.Addr, n.Id.AsByteArray()).Err
+				ctx, done := context.WithTimeout(context.Background(), 15*time.Second)
+				defer done()
+				err := s.questionableNodePing(ctx, n.Addr, n.Id.AsByteArray()).Err
 				if err != nil {
 					s.logger().Printf("error pinging questionable node in bucket %v: %v", bucketIndex, err)
 				}
