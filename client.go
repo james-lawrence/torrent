@@ -106,7 +106,7 @@ func (cl *Client) MaybeStart(t Metadata, failed error, options ...Tuner) (dl Tor
 
 func (cl *Client) start(md Metadata, options ...Tuner) (dlt *torrent, added bool, err error) {
 	dlt, cached, err := cl.torrents.Load(cl, int160.FromByteArray(md.ID), tuneMerge(md), langx.Compose(options...))
-	if err != nil && !errorsx.Is(err, fs.ErrNotExist) {
+	if errorsx.Ignore(err, fs.ErrNotExist) != nil {
 		return nil, false, err
 	}
 
