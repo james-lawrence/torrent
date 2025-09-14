@@ -21,12 +21,13 @@ import (
 	"github.com/james-lawrence/torrent/bep0009"
 	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/internal/bitmapx"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
+	"github.com/james-lawrence/torrent/internal/iox"
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/internal/slicesx"
-	"github.com/james-lawrence/torrent/internal/x/bitmapx"
 	"github.com/james-lawrence/torrent/tracker"
 
 	"github.com/james-lawrence/torrent/bencode"
@@ -343,6 +344,21 @@ func DownloadInto(ctx context.Context, dst io.Writer, m Torrent, options ...Tune
 	}
 
 	return n, nil
+}
+
+// Return a ReadSeeker for the given range
+func DownloadRange(ctx context.Context, m Torrent, off int64, length int64, options ...Tuner) (_ io.ReadSeeker) {
+	if err := m.Tune(options...); err != nil {
+		return iox.ErrReader(err)
+	}
+
+	select {
+	case <-m.GotInfo():
+	case <-ctx.Done():
+		return iox.ErrReader(errorsx.Compact(context.Cause(ctx), ctx.Err()))
+	}
+
+	return io.NewSectionReader(m.Storage(), off, length)
 }
 
 func Verify(ctx context.Context, t Torrent) error {

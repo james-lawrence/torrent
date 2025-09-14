@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/v2"
-	"github.com/james-lawrence/torrent/internal/x/bitmapx"
+	"github.com/james-lawrence/torrent/internal/bitmapx"
 )
 
 // This is a lazy union representing all the possible fields for messages. Go doesn't have ADTs, and

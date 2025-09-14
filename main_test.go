@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/james-lawrence/torrent/internal/x/debugx"
+	"github.com/james-lawrence/torrent/internal/debugx"
 )
 
 func init() {

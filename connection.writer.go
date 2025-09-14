@@ -16,10 +16,10 @@ import (
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/atomicx"
 	"github.com/james-lawrence/torrent/internal/backoffx"
+	"github.com/james-lawrence/torrent/internal/bitmapx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/timex"
-	"github.com/james-lawrence/torrent/internal/x/bitmapx"
 )
 
 func RunHandshookConn(c *connection, t *torrent) error {

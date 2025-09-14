@@ -24,13 +24,13 @@ import (
 	"github.com/james-lawrence/torrent/connections"
 
 	"github.com/james-lawrence/torrent/bencode"
+	"github.com/james-lawrence/torrent/internal/bitmapx"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/cryptox"
 	"github.com/james-lawrence/torrent/internal/md5x"
 	"github.com/james-lawrence/torrent/internal/testutil"
 	"github.com/james-lawrence/torrent/internal/testx"
 	"github.com/james-lawrence/torrent/internal/utpx"
-	"github.com/james-lawrence/torrent/internal/x/bitmapx"
 	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/james-lawrence/torrent/storage"
 )
@@ -956,6 +956,54 @@ func Test3MBPlus1Torrent(t *testing.T) {
 	defer leecher.Close()
 
 	testTransferRandomData(t, dir, 3*bytesx.MiB+1, seeder, leecher)
+}
+
+func TestDownloadRange(t *testing.T) {
+	datadir := t.TempDir()
+	from, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, datadir)))
+	require.NoError(t, err)
+	defer from.Close()
+
+	to, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
+	require.NoError(t, err)
+	defer to.Close()
+
+	ctx, done := testx.Context(t)
+	defer done()
+
+	data, expected, err := testutil.IOTorrent(datadir, cryptox.NewChaCha8(t.Name()), 128*bytesx.KiB)
+	require.NoError(t, err)
+	defer os.Remove(data.Name())
+
+	metadata, err := torrent.NewFromFile(
+		data.Name(),
+		torrent.OptionStorage(storage.NewFile(datadir, storage.FileOptionPathMakerFixed(filepath.Base(data.Name())))),
+	)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(datadir, metadata.ID.String()), 0700))
+
+	dl0, added, err := from.Start(metadata, torrent.TuneVerifyFull)
+	require.NoError(t, err)
+	require.True(t, added)
+	defer from.Stop(dl0.Metadata())
+
+	metadata, err = torrent.NewFromFile(data.Name(), torrent.OptionStorage(storage.NewFile(t.TempDir())))
+	require.NoError(t, err)
+
+	digestdl := md5.New()
+	dl1, added, err := to.Start(metadata, torrent.TuneClientPeer(from), torrent.TuneNewConns)
+	require.NoError(t, err)
+	require.True(t, added)
+	defer to.Stop(dl1.Metadata())
+
+	dln := torrent.DownloadRange(ctx, dl1, 0, 32*bytesx.KiB)
+
+	n, err := io.Copy(digestdl, dln)
+	require.NoError(t, err)
+	require.EqualValues(t, 32*bytesx.KiB, n)
+
+	require.Equal(t, n, dln)
+	require.Equal(t, expected.Sum(nil), digestdl.Sum(nil), "digest mismatch: generated torrent length", n)
 }
 
 func TestTorrentPieceLengthMultipleOfTotalLength(t *testing.T) {

@@ -22,8 +22,12 @@ func (t errReader) Read([]byte) (int, error) {
 	return 0, t
 }
 
+func (t errReader) Seek(offset int64, whence int) (int64, error) {
+	return 0, t
+}
+
 // ErrReader returns an io.Reader that returns the provided error.
-func ErrReader(err error) io.Reader {
+func ErrReader(err error) io.ReadSeeker {
 	return errReader{err}
 }
 

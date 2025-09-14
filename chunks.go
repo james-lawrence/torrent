@@ -11,8 +11,8 @@ import (
 	pp "github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/metainfo"
 
+	"github.com/james-lawrence/torrent/internal/bitmapx"
 	"github.com/james-lawrence/torrent/internal/langx"
-	"github.com/james-lawrence/torrent/internal/x/bitmapx"
 )
 
 // empty error signifies that the queue is empty.
