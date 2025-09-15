@@ -143,7 +143,7 @@ func AddrFromIP(ip net.IP) netip.Addr {
 
 func FirstAddrOrZero(addrs ...netip.Addr) netip.Addr {
 	for _, a := range addrs {
-		if a.IsValid() {
+		if a.IsValid() && !a.IsUnspecified() {
 			return a
 		}
 	}

@@ -191,7 +191,6 @@ func TestChunkLength(t *testing.T) {
 
 	// cid(134508) cmax(134509) - total(2203780254) plength(262144) clength(16384)
 	assert.Equal(t, int64(1182), chunkLength(2203780254, 134508, 262144, 16384, true))
-
 }
 
 func TestChunkFill(t *testing.T) {

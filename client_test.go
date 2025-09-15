@@ -40,7 +40,6 @@ func TestingSeedConfig(t *testing.T, dir string) *torrent.ClientConfig {
 		t,
 		dir,
 		torrent.ClientConfigSeed(true),
-		torrent.ClientConfigDebugLogger(log.Default()),
 	)
 	return cfg
 }
@@ -50,7 +49,6 @@ func TestingLeechConfig(t *testing.T, dir string) *torrent.ClientConfig {
 		t,
 		dir,
 		torrent.ClientConfigSeed(true),
-		torrent.ClientConfigDebugLogger(log.Default()),
 	)
 	return cfg
 }
@@ -959,51 +957,66 @@ func Test3MBPlus1Torrent(t *testing.T) {
 }
 
 func TestDownloadRange(t *testing.T) {
-	datadir := t.TempDir()
-	from, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, datadir)))
-	require.NoError(t, err)
-	defer from.Close()
+	testRange := func(n, offset, length int64) func(t *testing.T) {
+		return func(t *testing.T) {
+			log.Println(t.Name(), n, offset, length)
+			datadir := t.TempDir()
+			from, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, datadir)))
+			require.NoError(t, err)
+			defer from.Close()
 
-	to, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
-	require.NoError(t, err)
-	defer to.Close()
+			to, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
+			require.NoError(t, err)
+			defer to.Close()
 
-	ctx, done := testx.Context(t)
-	defer done()
+			ctx, done := testx.Context(t)
+			defer done()
 
-	data, expected, err := testutil.IOTorrent(datadir, cryptox.NewChaCha8(t.Name()), 128*bytesx.KiB)
-	require.NoError(t, err)
-	defer os.Remove(data.Name())
+			data, _, err := testutil.IOTorrent(datadir, cryptox.NewChaCha8(t.Name()), n)
+			require.NoError(t, err)
+			defer os.Remove(data.Name())
 
-	metadata, err := torrent.NewFromFile(
-		data.Name(),
-		torrent.OptionStorage(storage.NewFile(datadir, storage.FileOptionPathMakerFixed(filepath.Base(data.Name())))),
-	)
-	require.NoError(t, err)
-	require.NoError(t, os.MkdirAll(filepath.Join(datadir, metadata.ID.String()), 0700))
+			metadata, err := torrent.NewFromFile(
+				data.Name(),
+				torrent.OptionStorage(storage.NewFile(datadir, storage.FileOptionPathMakerFixed(filepath.Base(data.Name())))),
+			)
+			require.NoError(t, err)
+			require.NoError(t, os.MkdirAll(filepath.Join(datadir, metadata.ID.String()), 0700))
 
-	dl0, added, err := from.Start(metadata, torrent.TuneVerifyFull)
-	require.NoError(t, err)
-	require.True(t, added)
-	defer from.Stop(dl0.Metadata())
+			dl0, added, err := from.Start(metadata, torrent.TuneVerifyFull)
+			require.NoError(t, err)
+			require.True(t, added)
+			defer from.Stop(dl0.Metadata())
 
-	metadata, err = torrent.NewFromFile(data.Name(), torrent.OptionStorage(storage.NewFile(t.TempDir())))
-	require.NoError(t, err)
+			metadata, err = torrent.NewFromFile(data.Name(), torrent.OptionStorage(storage.NewFile(t.TempDir())))
+			require.NoError(t, err)
 
-	digestdl := md5.New()
-	dl1, added, err := to.Start(metadata, torrent.TuneClientPeer(from), torrent.TuneNewConns)
-	require.NoError(t, err)
-	require.True(t, added)
-	defer to.Stop(dl1.Metadata())
+			digestdl := md5.New()
 
-	dln := torrent.DownloadRange(ctx, dl1, 0, 32*bytesx.KiB)
+			expected := md5.New()
+			n, err = io.Copy(expected, io.NewSectionReader(data, offset, length))
+			require.NoError(t, err)
+			require.EqualValues(t, length, n)
 
-	n, err := io.Copy(digestdl, dln)
-	require.NoError(t, err)
-	require.EqualValues(t, 32*bytesx.KiB, n)
+			dl1, added, err := to.Start(metadata)
+			require.NoError(t, err)
+			require.True(t, added)
+			defer to.Stop(dl1.Metadata())
+			log.Printf("from %d -> to %d, offset %d length %d\n", from.LocalPort(), to.LocalPort(), offset, length)
+			dl := torrent.DownloadRange(ctx, dl1, offset, length, torrent.TuneClientPeer(from))
 
-	require.Equal(t, n, dln)
-	require.Equal(t, expected.Sum(nil), digestdl.Sum(nil), "digest mismatch: generated torrent length", n)
+			n, err := io.Copy(digestdl, dl)
+			require.NoError(t, err)
+			require.EqualValues(t, length, n)
+
+			require.Equal(t, expected.Sum(nil), digestdl.Sum(nil), "digest mismatch: generated torrent length", n)
+		}
+	}
+
+	t.Run("example.1", testRange(128*bytesx.KiB, 0, 32*bytesx.KiB))
+	t.Run("example.2", testRange(128*bytesx.KiB, 16*bytesx.KiB, 16*bytesx.KiB))
+	t.Run("example.3", testRange(128*bytesx.KiB, 16*bytesx.KiB, 112*bytesx.KiB))
+	t.Run("example.4", testRange(128*bytesx.KiB, 0, 128*bytesx.KiB))
 }
 
 func TestTorrentPieceLengthMultipleOfTotalLength(t *testing.T) {

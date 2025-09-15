@@ -33,7 +33,6 @@ func TestingConfig(t testing.TB, dir string, options ...ClientConfigOption) *Cli
 		ClientConfigStorageDir(dir),
 		ClientConfigCacheDirectory(dir),
 		ClientConfigPeerID(krpc.RandomID().String()),
-		// ClientConfigBootstrapGlobal,
 		ClientConfigPortForward(false),
 		ClientConfigInfoLogger(log.New(os.Stderr, "[info] ", log.Flags())),
 		ClientConfigDebugLogger(log.New(os.Stderr, "[debug] ", log.Flags())),

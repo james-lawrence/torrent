@@ -382,6 +382,11 @@ func (t *chunks) ChunksReadable(pid uint64) (b bool) {
 	return t.completed.ContainsInt(int(pid)) || bitmapx.Range(t.Range(pid)).AndCardinality(t.unverified) > 0
 }
 
+func (t *chunks) PIDForOffset(offset uint64) uint64 {
+	pid0 := t.meta.OffsetToIndex(int64(offset))
+	return uint64(pid0)
+}
+
 // returns the number of bytes allowed to read for the given offset.
 // 0 is acceptable. -1 means read is blocked.
 func (t *chunks) DataAvailableForOffset(offset int64) (allowed int64) {
@@ -524,7 +529,7 @@ func (t *chunks) Pop(n int, available *roaring.Bitmap) (reqs []request, err erro
 	}
 
 	reqs = make([]request, filled)
-	for i := 0; i < filled; i++ {
+	for i := range filled {
 		p := dst[i]
 		t.outstanding[p.req.Digest] = p.req
 		t.missing.Remove(uint32(p.cidx))

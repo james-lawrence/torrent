@@ -445,6 +445,13 @@ func ClientConfigAcceptLimit(l *rate.Limiter) ClientConfigOption {
 	}
 }
 
+// peer id prefix for BEP20 implementation.
+func ClientConfigIDPrefix(prefix string) ClientConfigOption {
+	return func(cc *ClientConfig) {
+		cc.Bep20 = prefix
+	}
+}
+
 // NewDefaultClientConfig default client configuration.
 func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, options ...ClientConfigOption) *ClientConfig {
 	cc := &ClientConfig{

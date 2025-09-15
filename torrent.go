@@ -149,8 +149,10 @@ func TuneReadAnnounce(v *tracker.Announce) Tuner {
 func TuneClientPeer(cl *Client) Tuner {
 	return func(t *torrent) {
 		ps := []Peer{}
+		id := cl.PeerID().AsByteArray()
 		for _, la := range cl.ListenAddrs() {
 			ps = append(ps, Peer{
+				ID:      id,
 				IP:      langx.Must(netx.NetIP(la)),
 				Port:    langx.Must(netx.NetPort(la)),
 				Trusted: true,
@@ -207,6 +209,18 @@ func TuneAutoDownload(t *torrent) {
 	}
 
 	t.chunks.fill(t.chunks.missing, uint64(t.chunks.cmaximum))
+}
+
+// mark missing the provided range of bytes.
+func TuneDownloadRange(offset int64, length int64) Tuner {
+	return func(t *torrent) {
+		min := t.chunks.PIDForOffset(uint64(offset))
+		max := t.chunks.PIDForOffset(uint64(offset + length))
+		min, _ = t.chunks.Range(min)
+		_, max = t.chunks.Range(max)
+		t.chunks.zero(t.chunks.missing)
+		t.chunks.MergeInto(t.chunks.missing, bitmapx.Range(min, max))
+	}
 }
 
 // Announce to trackers looking for at least one successful request that returns peers.
@@ -280,8 +294,6 @@ func TuneSeeding(t *torrent) {
 	t.chunks.MergeInto(t.chunks.completed, bitmapx.Fill(t.chunks.pieces))
 }
 
-// used after info has been received to mark all chunks missing.
-// will only happen if missing and completed are zero.
 func TuneRecordMetadata(t *torrent) {
 	if t.Info() == nil {
 		panic("cannot persist torrent metadata when missing info")
@@ -356,6 +368,10 @@ func DownloadRange(ctx context.Context, m Torrent, off int64, length int64, opti
 	case <-m.GotInfo():
 	case <-ctx.Done():
 		return iox.ErrReader(errorsx.Compact(context.Cause(ctx), ctx.Err()))
+	}
+
+	if err := m.Tune(TuneDownloadRange(off, length), TuneNewConns); err != nil {
+		return iox.ErrReader(err)
 	}
 
 	return io.NewSectionReader(m.Storage(), off, length)
@@ -1425,10 +1441,18 @@ func (t *torrent) SetMaxEstablishedConns(max int) (oldMax int) {
 // appropriate.
 func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
 	if t.cln.config.localID.Cmp(int160.FromByteArray(peer.ID)) == 0 {
+		t.cln.config.debug().Println("skipping connection to self based on peer id")
 		return
 	}
 
 	addr := peer.addr()
+
+	// ignore connections to self.
+	if pubaddr := t.cln.publicAddr(addr); pubaddr.Compare(addr) == 0 {
+		t.cln.config.debug().Println("skipping connection to self based on address", pubaddr, addr)
+		return
+	}
+
 	if t.addrActive(addr.String()) {
 		return
 	}
