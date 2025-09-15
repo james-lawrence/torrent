@@ -39,6 +39,8 @@ import (
 // Tuner runtime tuning of an actively running torrent.
 type Tuner func(*torrent)
 
+func TuneNoop(t *torrent) {}
+
 // TuneMaxConnections adjust the maximum connections allowed for a torrent.
 func TuneMaxConnections(m int) Tuner {
 	return func(t *torrent) {
