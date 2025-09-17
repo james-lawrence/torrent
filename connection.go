@@ -510,8 +510,14 @@ func (cn *connection) raisePeerMinPieces(newMin uint64) {
 }
 
 func (cn *connection) peerSentHave(piece uint64) error {
+	if cn.t.chunks.pieces == 0 {
+		// TODO: write a connection test where we send haves before the metadata.
+		cn.cfg.debug().Println("encountered bug with have messages when metadata is unknown, mostly harmless may cause issues on torrent with limited seeders")
+		return nil
+	}
+
 	if piece >= cn.t.chunks.pieces {
-		return errorsx.New("invalid piece")
+		return errorsx.Errorf("invalid piece %d/%d", piece, cn.t.chunks.pieces)
 	}
 
 	if cn.PeerHasPiece(piece) {
