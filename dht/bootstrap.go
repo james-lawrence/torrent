@@ -12,12 +12,11 @@ import (
 type TraversalStats = traversal.Stats
 
 // Populates the node table.
-func (s *Server) Bootstrap(ctx context.Context) (_ TraversalStats, err error) {
+func (s *Server) Bootstrap(ctx context.Context) (_zero TraversalStats, err error) {
 	s.mu.Lock()
 	if s.bootstrappingNow {
 		s.mu.Unlock()
-		err = errors.New("already bootstrapping")
-		return
+		return _zero, errors.New("already bootstrapping")
 	}
 	s.bootstrappingNow = true
 	s.mu.Unlock()
@@ -30,16 +29,18 @@ func (s *Server) Bootstrap(ctx context.Context) (_ TraversalStats, err error) {
 	// won't let wake up STM transactions that are observing the value.)
 	t := traversal.Start(traversal.OperationInput{
 		Target: s.id.AsByteArray(),
-		K:      16,
+		K:      64,
 		DoQuery: func(ctx context.Context, addr krpc.NodeAddr) traversal.QueryResult {
-			return s.FindNode(NewAddr(addr.UDP()), s.id, QueryRateLimiting{}).TraversalQueryResult(addr)
+			return s.FindNode(ctx, NewAddr(addr.UDP()), s.id, QueryRateLimiting{}).TraversalQueryResult(addr)
 		},
 		NodeFilter: s.TraversalNodeFilter,
 	})
+
 	nodes, err := s.TraversalStartingNodes()
 	if err != nil {
-		return
+		return _zero, err
 	}
+
 	t.AddNodes(nodes)
 	s.mu.Lock()
 	s.lastBootstrap = time.Now()

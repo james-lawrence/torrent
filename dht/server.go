@@ -133,11 +133,7 @@ func (s *Server) WriteStatus(w io.Writer) {
 }
 
 func (s *Server) numNodes() (num int) {
-	s.table.forNodes(func(n *node) bool {
-		num++
-		return true
-	})
-	return
+	return s.table.numNodes()
 }
 
 // Stats returns statistics for the server.
@@ -337,13 +333,14 @@ func (s *Server) processPacket(ctx context.Context, b []byte, addr Addr) {
 		T:          d.T,
 	}
 	if !s.transactions.Have(tk) {
-		s.logger().Printf("received response for untracked transaction %q from %v", d.T, addr)
+		s.logger().Printf("received response for untracked transaction %q from %v\n", d.T, addr)
 		return
 	}
 	t := s.transactions.Pop(tk)
 
-	// s.logger().Printf("received response for transaction %q from %v", d.T, addr)
+	// s.logger().Printf("received response for transaction %q from %v\n", d.T, addr)
 	go t.handleResponse(b, d)
+
 	s.updateNode(addr, d.SenderID(), !d.ReadOnly, func(n *node) {
 		n.lastGotResponse = time.Now()
 		n.failedLastQuestionablePing = false
@@ -404,13 +401,13 @@ func (s *Server) AddNode(nis ...krpc.NodeInfo) error {
 	addnode := func(n krpc.NodeInfo) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		return s.updateNode(NewAddr(n.Addr.UDP()), (*krpc.ID)(&n.ID), true, func(*node) {})
+		return s.updateNode(NewAddr(n.Addr.UDP()), &n.ID, true, func(*node) {})
 	}
+
 	for _, ni := range nis {
-		id := int160.FromByteArray(ni.ID)
-		if id.IsZero() {
+		if id := int160.FromByteArray(ni.ID); id.IsZero() {
 			go s.Ping(ni.Addr.UDP())
-			return nil
+			continue
 		}
 
 		if err := addnode(ni); err != nil {
@@ -421,18 +418,9 @@ func (s *Server) AddNode(nis ...krpc.NodeInfo) error {
 	return nil
 }
 
-func wantsContain(ws []krpc.Want, w krpc.Want) bool {
-	for _, _w := range ws {
-		if _w == w {
-			return true
-		}
-	}
-	return false
-}
-
 func shouldReturnNodes(queryWants []krpc.Want, querySource net.IP) bool {
 	if len(queryWants) != 0 {
-		return wantsContain(queryWants, krpc.WantNodes)
+		return slices.Contains(queryWants, krpc.WantNodes)
 	}
 	// Is it possible to be over IPv6 with IPv4 endpoints?
 	return querySource.To4() != nil
@@ -440,7 +428,7 @@ func shouldReturnNodes(queryWants []krpc.Want, querySource net.IP) bool {
 
 func shouldReturnNodes6(queryWants []krpc.Want, querySource net.IP) bool {
 	if len(queryWants) != 0 {
-		return wantsContain(queryWants, krpc.WantNodes6)
+		return slices.Contains(queryWants, krpc.WantNodes6)
 	}
 	return querySource.To4() == nil
 }
@@ -619,26 +607,29 @@ func (s *Server) NodeRespondedToPing(addr Addr, id int160.T) {
 }
 
 // Updates the node, adding it if appropriate.
-func (s *Server) updateNode(addr Addr, id *krpc.ID, tryAdd bool, update func(*node)) error {
+func (s *Server) updateNode(addr Addr, id *krpc.ID, tryAdd bool, update func(*node)) (err error) {
 	if id == nil {
 		return errors.New("id is nil")
 	}
-	int160Id := int160.FromByteArray(*id)
-	n := s.table.getNode(addr, int160Id)
+	_id := int160.FromByteArray(*id)
+	n := s.table.getNode(addr, _id)
 	missing := n == nil
+
 	if missing {
 		if !tryAdd {
 			return errors.New("node not present and add flag false")
 		}
-		if int160Id == s.id {
+		if _id == s.id {
 			return errors.New("can't store own id in routing table")
 		}
 		n = &node{nodeKey: nodeKey{
-			Id:   int160Id,
+			Id:   _id,
 			Addr: addr,
 		}}
 	}
+
 	update(n)
+
 	if !missing {
 		return nil
 	}
@@ -914,8 +905,8 @@ func (s *Server) announcePeer(
 
 // Sends a find_node query to addr. targetID is the node we're looking for. The Server makes use of
 // some of the response fields.
-func (s *Server) FindNode(addr Addr, targetID int160.T, rl QueryRateLimiting) (ret QueryResult) {
-	return FindNode(context.Background(), s, addr, s.ID(), targetID, s.config.DefaultWant)
+func (s *Server) FindNode(ctx context.Context, addr Addr, targetID int160.T, rl QueryRateLimiting) (ret QueryResult) {
+	return FindNode(ctx, s, addr, s.ID(), targetID, s.config.DefaultWant)
 }
 
 // Returns how many nodes are in the node table.
@@ -1060,14 +1051,15 @@ func (s *Server) TraversalStartingNodes() (nodes []addrMaybeId, err error) {
 func (s *Server) AddNodesFromFile(fileName string) (added int, err error) {
 	ns, err := ReadNodesFromFile(fileName)
 	if err != nil {
+		log.Println("failed to read peers", err)
 		return
 	}
-	for _, n := range ns {
-		if s.AddNode(n) == nil {
-			added++
-		}
+
+	if s.AddNode(ns...) == nil {
+		added += len(ns)
 	}
-	return
+
+	return added, nil
 }
 
 func (s *Server) logger() *log.Logger {
@@ -1104,7 +1096,7 @@ func (s *Server) refreshBucket(bucketIndex int) *traversal.Stats {
 		// as soon as the bucket is good.
 		K: s.table.K(),
 		DoQuery: func(ctx context.Context, addr krpc.NodeAddr) traversal.QueryResult {
-			res := s.FindNode(NewAddr(addr.UDP()), id, QueryRateLimiting{})
+			res := s.FindNode(ctx, NewAddr(addr.UDP()), id, QueryRateLimiting{})
 			err := res.Err
 			if err != nil && !errors.Is(err, ErrTransactionTimeout) {
 				s.logger().Printf("error doing find node while refreshing bucket: %v\n", err)
