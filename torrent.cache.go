@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/internal/langx"
 )
 
 func NewCache(s MetadataStore, b BitmapStore) *memoryseeding {
@@ -102,11 +103,7 @@ func (t *memoryseeding) Insert(cl *Client, md Metadata, options ...Tuner) (*torr
 		return nil, err
 	}
 
-	dlt := newTorrent(cl, md, options...)
-	dlt.chunks.InitFromUnverified(unverified)
-	// lets randomly verify some of the data.
-	// will block until complete.
-	dlt.Tune(TuneVerifySample(8))
+	dlt := newTorrent(cl, md, tuneVerifySample(unverified, 8), langx.Compose(options...))
 
 	t._mu.Lock()
 	t.torrents[id] = dlt
@@ -134,11 +131,7 @@ func (t *memoryseeding) Load(cl *Client, id int160.T, options ...Tuner) (_ *torr
 		return nil, false, err
 	}
 
-	dlt := newTorrent(cl, md, options...)
-	dlt.chunks.InitFromUnverified(unverified)
-	// lets randomly verify some of the data.
-	// will block until complete.
-	dlt.Tune(TuneVerifySample(8))
+	dlt := newTorrent(cl, md, tuneVerifySample(unverified, 8), langx.Compose(options...))
 
 	t._mu.Lock()
 	defer t._mu.Unlock()
