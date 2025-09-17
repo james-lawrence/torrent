@@ -333,14 +333,25 @@ func (t _connWriterClosed) Update(ctx context.Context, _ *cstate.Shared) (r csta
 	// detect effectively dead connections, choking them for at least 1 minute.
 	if timedout(ws.connection, ws.t.chunks.gracePeriod) {
 		if err := ws.Choke(ws.bufmsg); err != nil {
-			return cstate.Failure(errorsx.Wrapf(err, "c(%p) peer isnt sending chunks in a timely manner requests (%d > %d) last(%s) and we failed to choke them", ws, len(ws.requests), ws.PeerMaxRequests, ws.lastUsefulChunkReceived))
+			return cstate.Failure(errorsx.Wrapf(err, "c(%p) peer isnt sending chunks in a timely manner requests (%d > %d) last(%s) and we failed to choke them", ws, len(ws.requests), ws.PeerMaxRequests, time.Since(ws.lastUsefulChunkReceived)))
 		}
 
-		ws.chokeduntil = time.Now().Add(backoffx.DynamicHash1m(ws.PeerID.String()) + backoffx.Random(10*time.Minute))
+		ts := time.Now()
+
+		if ws.chokeduntil.Add(time.Minute).Before(ts) {
+			ws.chokeduntil = ts.Add(backoffx.DynamicHash1m(ws.PeerID.String()) + backoffx.Random(10*time.Minute))
+		} else if d := time.Since(ws.lastUsefulChunkReceived); d > 4*ws.t.chunks.gracePeriod {
+			return cstate.Failure(
+				errorsx.Timedout(
+					errorsx.Errorf("c(%p) peer did not send chunks in a timely manner requests (%d > %d) last(%s)", ws, len(ws.requests), ws.PeerMaxRequests, d),
+					time.Minute,
+				),
+			)
+		}
 
 		return cstate.Warning(
-			t.next,
-			errorsx.Errorf("c(%p) peer isnt sending chunks in a timely manner requests (%d > %d) last(%s)", ws, len(ws.requests), ws.PeerMaxRequests, ws.lastUsefulChunkReceived),
+			ws.Idler.Idle(t.next, 5*time.Second),
+			errorsx.Errorf("c(%p) peer isnt sending chunks in a timely manner requests (%d > %d) last(%s)", ws, len(ws.requests), ws.PeerMaxRequests, time.Since(ws.lastUsefulChunkReceived)),
 		)
 	}
 

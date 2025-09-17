@@ -58,7 +58,7 @@ func (tbl *table) numNodes() (num int) {
 	for i := range tbl.buckets {
 		num += tbl.buckets[i].Len()
 	}
-	return
+	return num
 }
 
 func (tbl *table) bucketIndex(id int160.T) int {
@@ -116,12 +116,13 @@ func (tbl *table) addNode(n *node) error {
 		return errors.New("is root id")
 	}
 	b := &tbl.buckets[tbl.bucketIndex(n.Id)]
-	if b.GetNode(n.Addr, n.Id) != nil {
-		return errors.New("already present")
-	}
 	if b.Len() >= tbl.k {
 		return errors.New("bucket is full")
 	}
+	if b.GetNode(n.Addr, n.Id) != nil {
+		return errors.New("already present")
+	}
+
 	b.AddNode(n, tbl.k)
 
 	tbl.m.Lock()

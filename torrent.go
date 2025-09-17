@@ -252,6 +252,23 @@ func TuneVerifyFull(t *torrent) {
 	t.chunks.FailuresReset()
 }
 
+// Verify the provided byte range (expanding as needed to match piece boundaries). will block.
+func TuneVerifyRange(offset, length int64) Tuner {
+	return func(t *torrent) {
+		min := t.chunks.PIDForOffset(uint64(offset))
+		max := t.chunks.PIDForOffset(uint64(offset + length))
+
+		t.digests.EnqueueBitmap(bitmapx.Range(min, max))
+		t.digests.Wait()
+
+		t.chunks.MergeInto(t.chunks.missing, t.chunks.failed)
+		t.chunks.Locked(func() {
+			t.chunks.unverified.AndNot(t.chunks.missing)
+		})
+		t.chunks.FailuresReset()
+	}
+}
+
 // Verify the contents asynchronously
 func TuneVerifyAsync(t *torrent) {
 	t.digests.EnqueueBitmap(bitmapx.Fill(t.chunks.pieces))
@@ -289,6 +306,15 @@ func TuneVerifySample(n uint64) Tuner {
 		}
 
 		TuneVerifyFull(t)
+	}
+}
+
+// lets randomly verify some of the data.
+// will block until complete.
+func tuneVerifySample(unverified *roaring.Bitmap, n uint64) Tuner {
+	return func(t *torrent) {
+		t.chunks.InitFromUnverified(unverified)
+		t.Tune(TuneVerifySample(8))
 	}
 }
 
