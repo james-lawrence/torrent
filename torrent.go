@@ -1276,13 +1276,13 @@ func (t *torrent) announceToDht(impliedPort bool, s *dht.Server) error {
 func (t *torrent) dhtAnnouncer(s *dht.Server) {
 	errdelay := time.Duration(0) // for the first run 0 delay to immediately find peers
 	for {
-		t.cln.config.debug().Println("dht ancouncer waiting for peers event", int160.FromByteArray(s.ID()))
+		t.cln.config.debug().Println("dht ancouncer waiting for peers event", int160.FromByteArray(s.ID()), t.md.ID)
 		select {
 		case <-t.closed:
 			return
 		case <-time.After(errdelay):
 		case <-t.wantPeersEvent:
-			log.Println("dht ancouncing peers wanted event", int160.FromByteArray(s.ID()))
+			log.Println("dht ancouncing peers wanted event", int160.FromByteArray(s.ID()), t.md.ID)
 		}
 
 		t.stats.DHTAnnounce.Add(1)
