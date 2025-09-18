@@ -14,13 +14,21 @@ func newBlockingReader(imp storage.TorrentImpl, c *chunks, d *digests) *blocking
 		TorrentImpl: imp,
 		c:           c,
 		d:           d,
+		closed:      atomicx.Bool(false),
 	}
 }
 
 type blockingreader struct {
 	storage.TorrentImpl
-	d *digests
-	c *chunks
+	d      *digests
+	c      *chunks
+	closed *atomic.Bool
+}
+
+func (t *blockingreader) Close() error {
+	defer t.c.cond.Broadcast()
+	t.closed.Store(true)
+	return t.TorrentImpl.Close()
 }
 
 func (t *blockingreader) ReadAt(p []byte, offset int64) (n int, err error) {
@@ -38,6 +46,9 @@ func (t *blockingreader) ReadAt(p []byte, offset int64) (n int, err error) {
 		}
 
 		t.c.cond.Wait()
+		if t.closed.Load() {
+			return 0, io.ErrClosedPipe
+		}
 	}
 	t.c.cond.L.Unlock()
 
@@ -54,15 +65,15 @@ type Reader interface {
 
 func NewReader(t Torrent) Reader {
 	return &reader{
-		ReaderAt: t.Storage(),
-		length:   t.Info().TotalLength(),
+		TorrentImpl: t.Storage(),
+		length:      t.Info().TotalLength(),
 	}
 }
 
 // Accesses Torrent data via a Client. Reads block until the data is
 // available. Seeks and readahead also drive Client behaviour.
 type reader struct {
-	io.ReaderAt
+	storage.TorrentImpl
 	// Adjust the read/seek window to handle Readers locked to File extents
 	// and the like.
 	offset, length int64
@@ -80,7 +91,7 @@ func (r *reader) Read(b []byte) (n int, err error) {
 }
 
 func (r *reader) Close() error {
-	return nil
+	return r.TorrentImpl.Close()
 }
 
 func (r *reader) Seek(off int64, whence int) (ret int64, err error) {

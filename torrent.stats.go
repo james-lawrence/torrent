@@ -1,5 +1,7 @@
 package torrent
 
+import "time"
+
 // Stats high level stats about the torrent.
 type Stats struct {
 	// Aggregates stats over all connections past and present. Some values may
@@ -22,5 +24,6 @@ type Stats struct {
 	HalfOpenPeers       int
 	// ConnectedSeeders    int
 
-	Seeding bool
+	Seeding        bool
+	LastConnection time.Time
 }
