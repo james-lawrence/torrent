@@ -48,7 +48,7 @@ func AndNot(l *roaring.Bitmap, rs ...*roaring.Bitmap) (dup *roaring.Bitmap) {
 
 func Range[T constraints.Integer](min, max T) *roaring.Bitmap {
 	m := roaring.New()
-	m.AddRange(uint64(min), uint64(max)+1)
+	m.AddRange(uint64(min), uint64(max))
 	return m
 }
 

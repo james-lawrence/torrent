@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -153,11 +154,18 @@ func TuneClientPeer(cl *Client) Tuner {
 	return func(t *torrent) {
 		ps := []Peer{}
 		id := cl.PeerID().AsByteArray()
+
 		for _, la := range cl.ListenAddrs() {
+			addrport := errorsx.Must(netx.AddrPort(la))
+			addr := netx.FirstAddrOrZero(addrport.Addr())
+			if !addr.IsValid() {
+				addr = netip.IPv6Loopback()
+			}
+
 			ps = append(ps, Peer{
 				ID:      id,
-				IP:      langx.Must(netx.NetIP(la)),
-				Port:    langx.Must(netx.NetPort(la)),
+				IP:      net.IP(addr.AsSlice()),
+				Port:    int(addrport.Port()),
 				Trusted: true,
 			})
 		}
@@ -268,6 +276,9 @@ func TuneVerifyRange(offset, length int64) Tuner {
 	return func(t *torrent) {
 		min := t.chunks.PIDForOffset(uint64(offset))
 		max := t.chunks.PIDForOffset(uint64(offset + length))
+		// since the Range function is a [0, n) range.
+		// we need to handle the edge case of min == max.
+		atomic.CompareAndSwapUint64(&max, min, max+1)
 
 		t.digests.EnqueueBitmap(bitmapx.Range(min, max))
 		t.digests.Wait()
@@ -989,6 +1000,10 @@ func (t *torrent) close() (err error) {
 		close(t.closed)
 	}
 
+	for _, conn := range t.conns.list() {
+		conn.Close()
+	}
+
 	func() {
 		if t.storage == nil {
 			return
@@ -996,10 +1011,6 @@ func (t *torrent) close() (err error) {
 
 		t.storage.Close()
 	}()
-
-	for _, conn := range t.conns.list() {
-		conn.Close()
-	}
 
 	t.event.Broadcast()
 
