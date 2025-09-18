@@ -6,14 +6,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"iter"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 
-	"github.com/anacrolix/missinggo/slices"
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/langx"
@@ -33,22 +34,28 @@ func OptionDisplayName(s string) Option {
 	}
 }
 
+// Creates a new Info from the given reader.
 func NewFromReader(src io.Reader, options ...Option) (info *Info, err error) {
 	info = langx.Autoptr(langx.Clone(Info{
 		PieceLength: bytesx.MiB,
 	}, options...))
 
-	digest := md5.New()
+	var wrapped io.Reader = src
+	var digest io.Writer
+	if info.Name == "" {
+		md5Hasher := md5.New()
+		digest = md5Hasher
+		wrapped = io.TeeReader(wrapped, digest)
+	}
 	length := readlength(0)
-	wrapped := io.TeeReader(src, digest)
 	wrapped = io.TeeReader(wrapped, &length)
-	if info.Pieces, err = ComputePieces(wrapped, info.PieceLength); err != nil {
+	if info.Pieces, err = ComputePieces(wrapped, info.PieceLength, 0); err != nil {
 		return nil, err
 	}
 
 	info.Length = int64(length)
 	if info.Name == "" {
-		info.Name = hex.EncodeToString(digest.Sum(nil))
+		info.Name = hex.EncodeToString(digest.(hash.Hash).Sum(nil))
 	}
 
 	return info, nil
@@ -68,11 +75,18 @@ func NewInfoFromReader(r io.Reader, options ...Option) (_ *Info, err error) {
 	return &info, nil
 }
 
+// Creates a new Info from the given file path.
 func NewFromPath(root string, options ...Option) (info *Info, err error) {
 	info = langx.Autoptr(langx.Clone(Info{
 		Name:        filepath.Base(root),
 		PieceLength: bytesx.MiB,
 	}, options...))
+
+	type tempFile struct {
+		rel    string
+		length int64
+	}
+	var temp []tempFile
 
 	err = filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
 		if err != nil {
@@ -91,9 +105,9 @@ func NewFromPath(root string, options ...Option) (info *Info, err error) {
 		if err != nil {
 			return fmt.Errorf("error getting relative path: %s", err)
 		}
-		info.Files = append(info.Files, FileInfo{
-			Path:   strings.Split(relPath, string(filepath.Separator)),
-			Length: fi.Size(),
+		temp = append(temp, tempFile{
+			rel:    relPath,
+			length: fi.Size(),
 		})
 		return nil
 	})
@@ -101,9 +115,15 @@ func NewFromPath(root string, options ...Option) (info *Info, err error) {
 		return nil, err
 	}
 
-	slices.Sort(info.Files, func(l, r FileInfo) bool {
-		return strings.Join(l.Path, "/") < strings.Join(r.Path, "/")
+	sort.Slice(temp, func(i, j int) bool {
+		return temp[i].rel < temp[j].rel
 	})
+	for _, t := range temp {
+		info.Files = append(info.Files, FileInfo{
+			Path:   strings.Split(t.rel, string(filepath.Separator)),
+			Length: t.length,
+		})
+	}
 
 	err = info.GeneratePieces(func(fi FileInfo) (io.ReadCloser, error) {
 		return os.Open(filepath.Join(root, strings.Join(fi.Path, string(filepath.Separator))))
@@ -115,15 +135,18 @@ func NewFromPath(root string, options ...Option) (info *Info, err error) {
 	return info, err
 }
 
-// Compute the pieces from the given reader and block size
-func ComputePieces(src io.Reader, length int64) (pieces []byte, err error) {
-	if length == 0 {
+// Computes the pieces from the given reader and piece length, with optional preallocation capacity.
+func ComputePieces(src io.Reader, pieceLength int64, capacity int) (pieces []byte, err error) {
+	if pieceLength == 0 {
 		return nil, errors.New("piece length must be non-zero")
 	}
-
+	if capacity > 0 {
+		pieces = make([]byte, 0, capacity)
+	}
+	hasher := sha1.New()
 	for {
-		hasher := sha1.New()
-		wn, err := io.CopyN(hasher, src, length)
+		hasher.Reset()
+		wn, err := io.CopyN(hasher, src, pieceLength)
 		if err == io.EOF {
 			err = nil
 		}
@@ -134,7 +157,7 @@ func ComputePieces(src io.Reader, length int64) (pieces []byte, err error) {
 			break
 		}
 		pieces = hasher.Sum(pieces)
-		if wn < length {
+		if wn < pieceLength {
 			break
 		}
 	}
@@ -174,13 +197,16 @@ func (info *Info) writeFiles(w io.Writer, open func(fi FileInfo) (io.ReadCloser,
 // Sets Pieces (the block of piece hashes in the Info) by using the passed
 // function to get at the torrent data.
 func (info *Info) GeneratePieces(open func(fi FileInfo) (io.ReadCloser, error)) (err error) {
+	total := info.TotalLength()
+	numPieces := (total + info.PieceLength - 1) / info.PieceLength
+	capacity := int(numPieces) * sha1.Size
 	pr, pw := io.Pipe()
 	go func() {
 		err := info.writeFiles(pw, open)
 		pw.CloseWithError(err)
 	}()
 	defer pr.Close()
-	info.Pieces, err = ComputePieces(pr, info.PieceLength)
+	info.Pieces, err = ComputePieces(pr, info.PieceLength, capacity)
 	return err
 }
 
