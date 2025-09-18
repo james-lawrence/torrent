@@ -2,7 +2,6 @@ package dht
 
 import (
 	"iter"
-	"maps"
 	"sync"
 	"time"
 
@@ -27,14 +26,14 @@ func (b *bucket) Len() int {
 
 func (b *bucket) NodeIter() iter.Seq[*node] {
 	return func(yield func(*node) bool) {
-		next, stop := iter.Pull(maps.Keys(b.nodes))
-		defer stop()
-		_next := func() (*node, bool) {
-			b._m.RLock()
-			defer b._m.RUnlock()
-			return next()
+		b._m.RLock()
+		snapshot := make([]*node, 0, len(b.nodes))
+		for n := range b.nodes {
+			snapshot = append(snapshot, n)
 		}
-		for n, ok := _next(); ok; n, ok = _next() {
+		b._m.RUnlock()
+
+		for _, n := range snapshot {
 			if !yield(n) {
 				return
 			}
@@ -85,6 +84,7 @@ func (b *bucket) GetNode(addr Addr, id int160.T) *node {
 	}
 	return nil
 }
+
 
 func (b *bucket) Remove(n *node) {
 	b._m.Lock()
