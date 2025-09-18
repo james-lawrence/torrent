@@ -1,6 +1,8 @@
 package torrent
 
 import (
+	"slices"
+
 	"github.com/james-lawrence/torrent/dht/krpc"
 
 	"github.com/james-lawrence/torrent/btprotocol"
@@ -10,16 +12,18 @@ import (
 type Peers []Peer
 
 func (me *Peers) AppendFromPex(nas []krpc.NodeAddr, fs []btprotocol.PexPeerFlags) {
+	*me = slices.Grow(*me, len(nas))
 	for i, na := range nas {
-		var p Peer
 		var f btprotocol.PexPeerFlags
 		if i < len(fs) {
 			f = fs[i]
 		}
+		p := Peer{}
 		p.FromPex(na, f)
 		*me = append(*me, p)
 	}
 }
+
 
 func (ret Peers) AppendFromTracker(ps []tracker.Peer) Peers {
 	for _, p := range ps {
