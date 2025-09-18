@@ -9,7 +9,6 @@ import (
 
 func NewCache(s MetadataStore, b BitmapStore) *memoryseeding {
 	return &memoryseeding{
-		_mu:           &sync.RWMutex{},
 		MetadataStore: s,
 		bm:            b,
 		torrents:      make(map[int160.T]*torrent, 128),
@@ -25,9 +24,15 @@ type memoryseeding struct {
 
 func (t *memoryseeding) Close() error {
 	t._mu.Lock()
-	defer t._mu.Unlock()
+	toClose := make([]*torrent, 0, len(t.torrents))
 
 	for _, c := range t.torrents {
+		toClose = append(toClose, c)
+	}
+	t.torrents = make(map[int160.T]*torrent, 128)
+	t._mu.Unlock()
+
+	for _, c := range toClose {
 		if err := c.close(); err != nil {
 			return err
 		}
@@ -39,18 +44,21 @@ func (t *memoryseeding) Close() error {
 // sync bitmap to disk
 func (t *memoryseeding) Sync(id int160.T) error {
 	t._mu.Lock()
-	defer t._mu.Unlock()
-
 	c, ok := t.torrents[id]
-
 	if !ok {
+		t._mu.Unlock()
+		return nil
+	}
+	if !c.haveInfo() {
+		t._mu.Unlock()
 		return nil
 	}
 
-	if c.haveInfo() {
-		if err := t.bm.Write(id, c.chunks.ReadableBitmap()); err != nil {
-			return err
-		}
+	bm := c.chunks.ReadableBitmap()
+	t._mu.Unlock()
+
+	if err := t.bm.Write(id, bm); err != nil {
+		return err
 	}
 
 	return nil
@@ -142,12 +150,12 @@ func (t *memoryseeding) Load(cl *Client, id int160.T, options ...Tuner) (_ *torr
 }
 
 func (t *memoryseeding) Metadata(id int160.T) (md Metadata, err error) {
-	t._mu.Lock()
-	defer t._mu.Unlock()
-
+	t._mu.RLock()
 	if x, ok := t.torrents[id]; ok {
+		t._mu.RUnlock()
 		return x.md, nil
 	}
+	t._mu.RUnlock()
 
 	return t.MetadataStore.Read(id)
 }
