@@ -1314,7 +1314,7 @@ func (t *torrent) dhtAnnouncer(s *dht.Server) {
 		t.stats.DHTAnnounce.Add(1)
 
 		if err := t.announceToDht(true, s); err == nil {
-			errdelay = time.Minute // when we succeeded wait an hour unless a wantPeersEvent comes in.
+			errdelay = time.Minute // when we succeeded wait unless a wantPeersEvent comes in.
 			t.cln.config.debug().Println("dht ancouncing completed", int160.FromByteArray(s.ID()), t.md.ID)
 			t.maybeNewConns()
 			continue
