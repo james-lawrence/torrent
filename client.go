@@ -40,7 +40,7 @@ func ClientOperationClearIdleTorrents(idle func(Stats) bool) ClientOperation {
 				continue
 			}
 
-			errorsx.Log(errorsx.Wrapf(t.close(), "failed to shutdown idle torrent: %s", id))
+			errorsx.Log(errorsx.Wrapf(c.Stop(t.md), "failed to shutdown idle torrent: %s", id))
 		}
 
 		return nil
