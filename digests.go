@@ -22,7 +22,7 @@ func newDigestsFromTorrent(t *torrent) digests {
 		t.piece,
 		func(idx int, cause error) func() {
 			// log.Printf("hashed %d - %v\n", idx, cause)
-			// log.Printf("hashed %p %d / %d - %v", t.chunks, idx+1, t.numPieces(), cause)
+			// log.Printf("hashed %p %d / %d - %v", t.chunks, idx+1, t.chunks.pieces, cause)
 			t.chunks.Hashed(uint64(idx), cause)
 
 			t.event.Broadcast()

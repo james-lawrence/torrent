@@ -30,6 +30,7 @@ func RunHandshookConn(c *connection, t *torrent) error {
 
 	c.conn.SetWriteDeadline(time.Time{})
 	c.r = deadlineReader{c.conn, c.r}
+	t.lastConnection.Store(langx.Autoptr(time.Now()))
 	completedHandshakeConnectionFlags.Add(c.connectionFlags(), 1)
 
 	defer t.event.Broadcast()

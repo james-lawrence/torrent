@@ -46,21 +46,20 @@ func AndNot(l *roaring.Bitmap, rs ...*roaring.Bitmap) (dup *roaring.Bitmap) {
 	return dup
 }
 
-func Range(min, max uint64) *roaring.Bitmap {
+func Range[T constraints.Integer](min, max T) *roaring.Bitmap {
 	m := roaring.New()
-	m.AddRange(min, max)
+	m.AddRange(uint64(min), uint64(max))
 	return m
 }
 
-func Zero(max uint64) *roaring.Bitmap {
-	m := roaring.New()
-	m.AddRange(0, max)
+func Zero[T constraints.Integer](max T) *roaring.Bitmap {
+	m := Range(0, max)
 	m.Clear()
 	return m
 }
 
 func Fill[T constraints.Integer](max T) *roaring.Bitmap {
-	return Range(0, uint64(max))
+	return Range(0, max)
 }
 
 func RandomFromSource(max uint64, bits uint64, src rand.Source) *roaring.Bitmap {

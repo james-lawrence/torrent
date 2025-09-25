@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	"github.com/james-lawrence/torrent/bep0009"
 	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/internal/atomicx"
 	"github.com/james-lawrence/torrent/internal/bitmapx"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
@@ -152,11 +154,18 @@ func TuneClientPeer(cl *Client) Tuner {
 	return func(t *torrent) {
 		ps := []Peer{}
 		id := cl.PeerID().AsByteArray()
+
 		for _, la := range cl.ListenAddrs() {
+			addrport := errorsx.Must(netx.AddrPort(la))
+			addr := netx.FirstAddrOrZero(addrport.Addr())
+			if !addr.IsValid() {
+				addr = netip.IPv6Loopback()
+			}
+
 			ps = append(ps, Peer{
 				ID:      id,
-				IP:      langx.Must(netx.NetIP(la)),
-				Port:    langx.Must(netx.NetPort(la)),
+				IP:      net.IP(addr.AsSlice()),
+				Port:    int(addrport.Port()),
 				Trusted: true,
 			})
 		}
@@ -240,6 +249,16 @@ func TuneAnnounceUntilComplete(t *torrent) {
 	})
 }
 
+// reset all the bitmaps
+func TuneResetBitmaps(t *torrent) {
+	t.chunks.Locked(func() {
+		t.chunks.missing.Clear()
+		t.chunks.unverified.Clear()
+		t.chunks.failed.Clear()
+		t.chunks.completed.Clear()
+	})
+}
+
 // Verify the entirety of the torrent. will block
 func TuneVerifyFull(t *torrent) {
 	t.digests.EnqueueBitmap(bitmapx.Fill(t.chunks.pieces))
@@ -257,6 +276,9 @@ func TuneVerifyRange(offset, length int64) Tuner {
 	return func(t *torrent) {
 		min := t.chunks.PIDForOffset(uint64(offset))
 		max := t.chunks.PIDForOffset(uint64(offset + length))
+		// since the Range function is a [0, n) range.
+		// we need to handle the edge case of min == max.
+		atomic.CompareAndSwapUint64(&max, min, max+1)
 
 		t.digests.EnqueueBitmap(bitmapx.Range(min, max))
 		t.digests.Wait()
@@ -387,7 +409,7 @@ func DownloadInto(ctx context.Context, dst io.Writer, m Torrent, options ...Tune
 }
 
 // Return a ReadSeeker for the given range
-func DownloadRange(ctx context.Context, m Torrent, off int64, length int64, options ...Tuner) (_ io.ReadSeeker) {
+func DownloadRange(ctx context.Context, m Torrent, off int64, length int64, options ...Tuner) (_ io.ReadSeekCloser) {
 	if err := m.Tune(options...); err != nil {
 		return iox.ErrReader(err)
 	}
@@ -402,7 +424,8 @@ func DownloadRange(ctx context.Context, m Torrent, off int64, length int64, opti
 		return iox.ErrReader(err)
 	}
 
-	return io.NewSectionReader(m.Storage(), off, length)
+	d := m.Storage()
+	return iox.CloseReadSeeker(io.NewSectionReader(d, off, length), d)
 }
 
 func Verify(ctx context.Context, t Torrent) error {
@@ -470,6 +493,7 @@ func newTorrent(cl *Client, src Metadata, options ...Tuner) *torrent {
 		digests:                 new(digests),
 		wantPeersEvent:          make(chan struct{}, 1),
 		closed:                  make(chan struct{}),
+		lastConnection:          atomicx.Pointer(time.Now()),
 	}
 	t.event = &sync.Cond{L: tlocker{torrent: t}}
 	*t.digests = newDigestsFromTorrent(t)
@@ -567,8 +591,6 @@ type torrent struct {
 	storageOpener *storage.Client
 	// Storage for torrent data.
 	storage storage.TorrentImpl
-	// Read-locked for using storage, and write-locked for Closing.
-	storageLock sync.RWMutex
 
 	// The info dict. nil if we don't have it (yet).
 	info  *metainfo.Info
@@ -611,6 +633,9 @@ type torrent struct {
 
 	// peer exchange for the current torrent
 	pex *pex
+
+	// last time a peer connection was established.
+	lastConnection *atomic.Pointer[time.Time]
 
 	// signal events on this torrent.
 	event *sync.Cond
@@ -975,19 +1000,17 @@ func (t *torrent) close() (err error) {
 		close(t.closed)
 	}
 
+	for _, conn := range t.conns.list() {
+		conn.Close()
+	}
+
 	func() {
 		if t.storage == nil {
 			return
 		}
 
-		t.storageLock.Lock()
-		defer t.storageLock.Unlock()
 		t.storage.Close()
 	}()
-
-	for _, conn := range t.conns.list() {
-		conn.Close()
-	}
 
 	t.event.Broadcast()
 
@@ -1082,6 +1105,9 @@ func (t *torrent) openNewConns() {
 		ok bool
 		p  Peer
 	)
+
+	// log.Println("opening new connections initiated", t.md.ID)
+	// defer log.Println("opening new connections completed", t.md.ID)
 
 	for {
 		if !t.wantConns() {
@@ -1276,20 +1302,20 @@ func (t *torrent) announceToDht(impliedPort bool, s *dht.Server) error {
 func (t *torrent) dhtAnnouncer(s *dht.Server) {
 	errdelay := time.Duration(0) // for the first run 0 delay to immediately find peers
 	for {
-		t.cln.config.debug().Println("dht ancouncer waiting for peers event", int160.FromByteArray(s.ID()))
+		t.cln.config.debug().Println("dht ancouncer waiting for peers event", int160.FromByteArray(s.ID()), t.md.ID)
 		select {
 		case <-t.closed:
 			return
 		case <-time.After(errdelay):
 		case <-t.wantPeersEvent:
-			log.Println("dht ancouncing peers wanted event", int160.FromByteArray(s.ID()))
+			log.Println("dht ancouncing peers wanted event", int160.FromByteArray(s.ID()), t.md.ID)
 		}
 
 		t.stats.DHTAnnounce.Add(1)
 
 		if err := t.announceToDht(true, s); err == nil {
 			errdelay = time.Hour // when we succeeded wait an hour unless a wantPeersEvent comes in.
-			t.cln.config.debug().Println("dht ancouncing completed", int160.FromByteArray(s.ID()))
+			t.cln.config.debug().Println("dht ancouncing completed", int160.FromByteArray(s.ID()), t.md.ID)
 			continue
 		} else if errors.Is(err, dht.ErrDHTNoInitialNodes) {
 			t.cln.config.errors().Println(t, err)
@@ -1320,6 +1346,7 @@ func (t *torrent) statsLocked() (ret Stats) {
 	ret.ActivePeers = len(t.conns.list())
 	ret.HalfOpenPeers = len(t.halfOpen)
 	ret.PendingPeers = t.peers.Len()
+	ret.LastConnection = langx.Autoderef(t.lastConnection.Load())
 	t.chunks.Snapshot(&ret)
 
 	// TODO: these can be moved to the connections directly.

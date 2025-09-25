@@ -26,8 +26,12 @@ func (t errReader) Seek(offset int64, whence int) (int64, error) {
 	return 0, t
 }
 
+func (t errReader) Close() error {
+	return t
+}
+
 // ErrReader returns an io.Reader that returns the provided error.
-func ErrReader(err error) io.ReadSeeker {
+func ErrReader(err error) io.ReadSeekCloser {
 	return errReader{err}
 }
 
@@ -126,6 +130,19 @@ func (t readCompositeCloser) Close() (err error) {
 // the provided Writer w.
 func ReaderCompositeCloser(w io.Reader, closers ...func() error) io.ReadCloser {
 	return readCompositeCloser{Reader: w, closefn: closers}
+}
+
+func CloseReadSeeker(d io.ReadSeeker, c io.Closer) closeableReadSeeker {
+	return closeableReadSeeker{ReadSeeker: d, Closer: c}
+}
+
+type closeableReadSeeker struct {
+	io.ReadSeeker
+	io.Closer
+}
+
+func (t closeableReadSeeker) Close() error {
+	return t.Closer.Close()
 }
 
 // deprecated: this is a silly function do not use.

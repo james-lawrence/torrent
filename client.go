@@ -29,6 +29,24 @@ import (
 	"github.com/james-lawrence/torrent/metainfo"
 )
 
+type ClientOperation func(*Client) error
+
+func ClientOperationClearIdleTorrents(idle func(Stats) bool) ClientOperation {
+	return func(c *Client) error {
+		c.torrents._mu.Lock()
+		defer c.torrents._mu.Unlock()
+		for id, t := range c.torrents.torrents {
+			if !idle(t.Stats()) {
+				continue
+			}
+
+			errorsx.Log(errorsx.Wrapf(t.close(), "failed to shutdown idle torrent: %s", id))
+		}
+
+		return nil
+	}
+}
+
 // Client contain zero or more Torrents. A Client manages a blocklist, the
 // TCP/UDP protocol ports, and DHT as desired.
 type Client struct {
@@ -315,6 +333,16 @@ func (cl *Client) closeSockets() {
 	})
 }
 
+func (cl *Client) Tune(ops ...ClientOperation) error {
+	for _, op := range ops {
+		if err := op(cl); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // Close stops the client. All connections to peers are closed and all activity will
 // come to a halt.
 func (cl *Client) Close() error {
@@ -441,7 +469,7 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 		return nil, err
 	}
 
-	return c, err
+	return c, nil
 }
 
 // Returns nil connection and nil error if no connection could be established
@@ -463,7 +491,7 @@ func (cl *Client) establishOutgoingConn(ctx context.Context, t *torrent, addr ne
 		return c, err
 	}
 
-	return c, err
+	return c, nil
 }
 
 // Called to dial out and run a connection. The addr we're given is already
