@@ -110,6 +110,7 @@ type ClientConfig struct {
 	// Minimum peer dial timeout to use (even if we have lots of peers).
 	MinDialTimeout          time.Duration
 	HalfOpenConnsPerTorrent int
+
 	// Maximum number of peer addresses in reserve.
 	TorrentPeersHighWater int
 	// Minumum number of peers before effort is made to obtain more peers.
