@@ -1342,8 +1342,16 @@ func (t *torrent) Stats() Stats {
 }
 
 func (t *torrent) statsLocked() (ret Stats) {
+	conns := t.conns.list()
 	ret.Seeding = t.seeding()
-	ret.ActivePeers = len(t.conns.list())
+	ret.ActivePeers = len(conns)
+	ret.Seeders = slicesx.Reduce(0, func(sum int, c *connection) int {
+		if c.peerSentHaveAll {
+			return sum + 1
+		}
+		return sum
+	}, conns...)
+
 	ret.HalfOpenPeers = len(t.halfOpen)
 	ret.PendingPeers = t.peers.Len()
 	ret.LastConnection = langx.Autoderef(t.lastConnection.Load())

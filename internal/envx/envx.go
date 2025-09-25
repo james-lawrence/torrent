@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/james-lawrence/torrent/internal/errorsx"
-	"github.com/james-lawrence/torrent/internal/slicesx"
+	"github.com/james-lawrence/torrent/internal/langx"
 )
 
 // Int retrieve a integer flag from the environment, checks each key in order
@@ -254,7 +254,7 @@ func Vars(v string, keys ...string) (environ []string) {
 //
 // - if the key or value are an empty string it'll return an empty string. it will log if debugging is enabled.
 func Format(k, v string, options ...func(*formatopts)) string {
-	opts := slicesx.Reduce(&formatopts{
+	opts := langx.Clone(formatopts{
 		transformer: ignoreEmptyVariables,
 	}, options...)
 	evar := strings.TrimSpace(opts.transformer(fmt.Sprintf("%s=%s", k, v)))

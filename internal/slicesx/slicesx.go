@@ -95,12 +95,12 @@ func MapTransformErr[T, X any](m func(T) (X, error), items ...T) (zero []X, err 
 	return results, nil
 }
 
-func Reduce[T any, Y ~func(*T)](v *T, options ...Y) *T {
-	for _, opt := range options {
-		opt(v)
+func Reduce[X any, T any, Y ~func(X, T) X](accum X, op Y, ele ...T) X {
+	for _, e := range ele {
+		accum = op(accum, e)
 	}
 
-	return v
+	return accum
 }
 
 // First returns first element in the slice if it exists.

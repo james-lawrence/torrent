@@ -31,21 +31,31 @@ func Idle(ctx context.Context, cond *sync.Cond, signals ...*sync.Cond) *Idler {
 	tt := time.NewTimer(time.Hour)
 	tt.Stop()
 
+	_ctx, done := context.WithCancel(ctx)
 	return (&Idler{
 		timeout: tt,
 		target:  cond,
 		signals: signals,
+		stop:    done,
 		done:    make(chan struct{}),
 		running: langx.Autoderef(atomicx.Bool(false)),
-	}).monitor(ctx)
+	}).monitor(_ctx)
 }
 
 type Idler struct {
 	timeout *time.Timer
 	target  *sync.Cond
 	signals []*sync.Cond
+	stop    context.CancelFunc
 	done    chan struct{}
 	running atomic.Bool
+}
+
+func (t *Idler) Stop() {
+	t.stop()
+	for _, s := range t.signals {
+		s.Broadcast()
+	}
 }
 
 func (t *Idler) Idle(next T, d time.Duration) idle {

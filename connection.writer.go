@@ -228,6 +228,7 @@ func connwriterinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		Idler:               cstate.Idle(ctx, cn.request, cn.t.chunks.cond),
 	}
 
+	defer ws.Idler.Stop()
 	defer cn.checkFailures()
 	defer cn.deleteAllRequests()
 

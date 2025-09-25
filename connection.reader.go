@@ -13,7 +13,6 @@ import (
 	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/cstate"
 	"github.com/james-lawrence/torrent/internal/atomicx"
-	"github.com/james-lawrence/torrent/internal/backoffx"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
@@ -33,7 +32,6 @@ func connreaderinit(ctx context.Context, cn *connection, to time.Duration) (err 
 		keepAliveTimeout: to,
 		chokeduntil:      ts.Add(-1 * time.Minute),
 		uploadavailable:  atomicx.Pointer(ts),
-		lastpeerrequest:  atomicx.Pointer(ts),
 		seed:             cn.t.seeding(),
 		Idler:            cstate.Idle(ctx, cn.upload),
 		requestbuffer:    new(bytes.Buffer),
@@ -44,6 +42,7 @@ func connreaderinit(ctx context.Context, cn *connection, to time.Duration) (err 
 			},
 		},
 	}
+	defer ws.Idler.Stop()
 
 	return cstate.Run(ctx, connReaderAllowRequests(ws), cn.cfg.debug())
 }
@@ -55,9 +54,8 @@ type readerstate struct {
 	chokeduntil      time.Time
 	seed             bool
 	uploadavailable  *atomic.Pointer[time.Time]
-	lastpeerrequest  *atomic.Pointer[time.Time] // last time we requested peer connections.
-	pool             *sync.Pool                 // buffer pool for storing chunks
-	requestbuffer    *bytes.Buffer              // message buffer
+	pool             *sync.Pool    // buffer pool for storing chunks
+	requestbuffer    *bytes.Buffer // message buffer
 	*cstate.Idler
 }
 
@@ -100,11 +98,6 @@ func (t _connreaderAllowRequests) Update(ctx context.Context, _ *cstate.Shared) 
 		if t.Choke(t.readerstate.bufmsgold) == nil {
 			t.cfg.debug().Printf("c(%p) seed(%t) disallowing peer to make requests\n", t.connection, t.seed)
 		}
-	}
-
-	if t.t.conns.length() < t.t.maxEstablishedConns && t.readerstate.lastpeerrequest.Load().Before(ts) {
-		t.readerstate.lastpeerrequest.Store(langx.Autoptr(ts.Add(time.Minute + backoffx.Random(5*time.Second))))
-		t.t.openNewConns()
 	}
 
 	return t.next
