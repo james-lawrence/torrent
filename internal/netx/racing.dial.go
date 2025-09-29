@@ -90,7 +90,7 @@ func (t RacingDialer) Dial(_ctx context.Context, timeout time.Duration, address 
 		dup.network = n
 
 		if err := queue(_ctx, dup); err != nil {
-			cancel(err)
+			cancel(errorsx.Wrapf(err, "timeout: %d", timeout))
 			return nil, err
 		}
 	}
