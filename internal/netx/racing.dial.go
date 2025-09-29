@@ -74,14 +74,14 @@ type RacingDialer struct {
 }
 
 func (t RacingDialer) Dial(_ctx context.Context, timeout time.Duration, address string, networks ...DialableNetwork) (net.Conn, error) {
+	_ctx, done := context.WithTimeout(_ctx, timeout)
+	defer done()
 	_ctx, cancel := context.WithCancelCause(_ctx)
 	defer cancel(nil)
 
 	w := initRacingDial(address, timeout, uint64(len(networks)), cancel)
 
 	queue := func(__ctx context.Context, _w racingdialworkload) error {
-		__ctx, done := context.WithTimeout(__ctx, _w.timeout)
-		defer done()
 		return t.arena.Run(__ctx, _w)
 	}
 
