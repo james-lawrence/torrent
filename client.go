@@ -748,13 +748,13 @@ func (cl *Client) publicIP(peer netip.Addr) netip.Addr {
 	if peer.Is4() {
 		return netx.FirstAddrOrZero(
 			netx.AddrFromIP(cl.config.publicIP4),
-			cl.findListenerIP(func(ip netip.Addr) bool { return ip.Is4() }),
+			cl.findListenerIP(func(ip netip.Addr) bool { return ip.Is4() && ip.IsValid() }),
 		)
 	}
 
 	return netx.FirstAddrOrZero(
 		netx.AddrFromIP(cl.config.publicIP6),
-		cl.findListenerIP(func(ip netip.Addr) bool { return ip.Is6() }),
+		cl.findListenerIP(func(ip netip.Addr) bool { return ip.Is6() && ip.IsValid() }),
 	)
 }
 

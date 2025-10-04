@@ -34,7 +34,7 @@ func mask(prefix, bytes int) net.IPMask {
 	for i := range ret {
 		ret[i] = 0x55
 	}
-	for i := 0; i < prefix; i++ {
+	for i := range prefix {
 		ret[i] = 0xff
 	}
 	return ret

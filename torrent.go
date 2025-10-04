@@ -157,9 +157,8 @@ func TuneClientPeer(cl *Client) Tuner {
 
 		for _, la := range cl.ListenAddrs() {
 			addrport := errorsx.Must(netx.AddrPort(la))
-			addr := netx.FirstAddrOrZero(addrport.Addr())
-			if !addr.IsValid() {
-				addr = netip.IPv6Loopback()
+			if !addrport.IsValid() {
+				addrport = netip.AddrPortFrom(netip.IPv6Loopback(), addrport.Port())
 			}
 
 			ps = append(ps, NewPeer(

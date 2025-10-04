@@ -130,6 +130,14 @@ func FromByteArray(b [20]byte) (ret T) {
 	return
 }
 
+func FromBytesOrZero(b []byte) T {
+	if len(b) == 20 {
+		return FromBytes(b)
+	}
+
+	return Zero()
+}
+
 func FromByteString(s string) (ret T) {
 	ret.SetBytes([]byte(s))
 	return
