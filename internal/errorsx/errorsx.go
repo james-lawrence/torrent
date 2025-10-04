@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
 	"time"
 
 	"github.com/james-lawrence/torrent/internal/langx"
@@ -120,8 +121,15 @@ func StdlibTimeout(err error, d time.Duration, additional ...error) error {
 		Timeout() bool
 	}
 
-	var to timeout
+	var (
+		to   timeout
+		nerr net.Error
+	)
 	if errors.As(err, &to) && to.Timeout() {
+		return Timedout(err, d)
+	}
+
+	if errors.As(err, &nerr) && nerr.Timeout() {
 		return Timedout(err, d)
 	}
 

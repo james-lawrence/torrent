@@ -40,6 +40,11 @@ func Random() (id T) {
 	return id
 }
 
+func Zero() (id T) {
+	id.bits = [20]byte{}
+	return id
+}
+
 type T struct {
 	bits [20]uint8
 }

@@ -119,7 +119,7 @@ type ClientConfig struct {
 	// Limit how long handshake can take. This is to reduce the lingering
 	// impact of a few bad apples. 4s loses 1% of successful handshakes that
 	// are obtained with 60s timeout, and 5% of unsuccessful handshakes.
-	HandshakesTimeout time.Duration
+	handshakesTimeout time.Duration
 
 	dialer netx.Dialer
 	// The IP addresses as our peers should see them. May differ from the
@@ -453,6 +453,13 @@ func ClientConfigIDPrefix(prefix string) ClientConfigOption {
 	}
 }
 
+// how long we should wait for handshakes
+func ClientConfigHandshakeTimeout(d time.Duration) ClientConfigOption {
+	return func(cc *ClientConfig) {
+		cc.handshakesTimeout = d
+	}
+}
+
 // NewDefaultClientConfig default client configuration.
 func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, options ...ClientConfigOption) *ClientConfig {
 	cc := &ClientConfig{
@@ -470,7 +477,7 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		HalfOpenConnsPerTorrent:        32,
 		TorrentPeersHighWater:          128,
 		TorrentPeersLowWater:           48,
-		HandshakesTimeout:              4 * time.Second,
+		handshakesTimeout:              4 * time.Second,
 		dynamicip:                      UPnPPortForward,
 		dhtStartingNodes:               nil,
 		UploadRateLimiter:              rate.NewLimiter(rate.Limit(128*bytesx.MiB), bytesx.MiB),

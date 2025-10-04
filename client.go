@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/james-lawrence/torrent/connections"
@@ -457,7 +458,7 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 		tc.SetKeepAlive(true)
 	}
 
-	dl := time.Now().Add(cl.config.HandshakesTimeout)
+	dl := time.Now().Add(cl.config.handshakesTimeout)
 	if err = nc.SetDeadline(dl); err != nil {
 		return nil, err
 	}
@@ -496,22 +497,28 @@ func (cl *Client) establishOutgoingConn(ctx context.Context, t *torrent, addr ne
 
 // Called to dial out and run a connection. The addr we're given is already
 // considered half-open.
-func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, addr netip.AddrPort, ps peerSource, trusted bool) error {
+func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (err error) {
 	var (
-		c   *connection
-		err error
+		c       *connection
+		ps      peerSource = p.Source
+		trusted bool       = p.Trusted
 	)
 
+	defer func() {
+		err = errorsx.StdlibTimeout(err, 300*time.Millisecond, syscall.ECONNRESET)
+	}()
+
 	if err = cl.config.dialRateLimiter.Wait(ctx); err != nil {
+		t.peers.Attempted(p, nil)
 		return errorsx.Wrap(err, "dial rate limit failed")
 	}
 
-	if c, err = cl.establishOutgoingConn(ctx, t, addr); err != nil {
-		t.noLongerHalfOpen(addr.String())
-		return errorsx.Wrapf(err, "error establishing connection to %v", addr)
+	if c, err = cl.establishOutgoingConn(ctx, t, p.AddrPort); err != nil {
+		t.peers.Attempted(p, nil)
+		return errorsx.Wrapf(err, "error establishing connection to %v", p.AddrPort)
 	}
 
-	t.noLongerHalfOpen(addr.String())
+	t.peers.Attempted(p, nil)
 
 	c.Discovery = ps
 	c.trusted = trusted
@@ -636,7 +643,7 @@ func (cl *Client) runReceivedConn(c *connection) {
 		timedout errorsx.Timeout
 	)
 
-	if err := c.conn.SetDeadline(time.Now().Add(cl.config.HandshakesTimeout)); err != nil {
+	if err := c.conn.SetDeadline(time.Now().Add(cl.config.handshakesTimeout)); err != nil {
 		cl.config.errors().Println(errorsx.Wrap(err, "failed setting handshake deadline"))
 		return
 	}
@@ -711,11 +718,12 @@ func (cl *Client) onDHTAnnouncePeer(ih metainfo.Hash, ip net.IP, port int, portO
 		return
 	}
 
-	t.addPeers([]Peer{{
-		IP:     ip,
-		Port:   port,
-		Source: peerSourceDhtAnnouncePeer,
-	}})
+	t.addPeers(NewPeerDeprecated(
+		int160.Zero(),
+		ip,
+		port,
+		PeerOptionSource(peerSourceDhtAnnouncePeer),
+	))
 }
 
 func (cl *Client) eachListener(f func(sockets.Socket) bool) {

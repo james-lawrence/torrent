@@ -153,7 +153,7 @@ func TuneReadAnnounce(v *tracker.Announce) Tuner {
 func TuneClientPeer(cl *Client) Tuner {
 	return func(t *torrent) {
 		ps := []Peer{}
-		id := cl.PeerID().AsByteArray()
+		id := cl.PeerID()
 
 		for _, la := range cl.ListenAddrs() {
 			addrport := errorsx.Must(netx.AddrPort(la))
@@ -162,12 +162,11 @@ func TuneClientPeer(cl *Client) Tuner {
 				addr = netip.IPv6Loopback()
 			}
 
-			ps = append(ps, Peer{
-				ID:      id,
-				IP:      net.IP(addr.AsSlice()),
-				Port:    int(addrport.Port()),
-				Trusted: true,
-			})
+			ps = append(ps, NewPeer(
+				id,
+				addrport,
+				PeerOptionTrusted(true),
+			))
 		}
 
 		t.AddPeers(ps)
@@ -478,11 +477,9 @@ func newTorrent(cl *Client, src Metadata, options ...Tuner) *torrent {
 		cln: cl,
 		_mu: m,
 		peers: newPeerPool(32, func(p Peer) peerPriority {
-			return bep40PriorityIgnoreError(cl.publicAddr(p.addr()), p.addr())
+			return bep40PriorityIgnoreError(cl.publicAddr(p.AddrPort), p.AddrPort)
 		}),
 		conns:                   newconnset(2 * maxEstablishedConns),
-		halfOpen:                make(map[string]Peer),
-		_halfOpenmu:             &sync.RWMutex{},
 		pieceStateChanges:       pubsub.NewPubSub(),
 		storageOpener:           storage.NewClient(langx.DefaultIfZero(cl.config.defaultStorage, src.Storage)),
 		maxEstablishedConns:     maxEstablishedConns,
@@ -602,13 +599,8 @@ type torrent struct {
 
 	maxEstablishedConns int
 
-	// Set of addrs to which we're attempting to connect. Connections are
-	// half-open until all handshakes are completed.
-	halfOpen    map[string]Peer
-	_halfOpenmu *sync.RWMutex
-
 	// Reserve of peers to connect to. A peer can be both here and in the
-	// active connections if were told about the peer after connecting with
+	// active connections if we're told about the peer after connecting with
 	// them. That encourages us to reconnect to peers that are well known in
 	// the swarm.
 	peers          peerPool
@@ -719,28 +711,20 @@ func (t *torrent) KnownSwarm() (ks []Peer) {
 		ks = append(ks, peer)
 	})
 
-	t._halfOpenmu.RLock()
-	// Add half-open peers to the list
-	for _, peer := range t.halfOpen {
-		ks = append(ks, peer)
-	}
-	t._halfOpenmu.RUnlock()
-
 	// Add active peers to the list
 	for _, conn := range t.conns.list() {
-		ks = append(ks, Peer{
-			ID:     conn.PeerID.AsByteArray(),
-			IP:     conn.remoteAddr.Addr().AsSlice(),
-			Port:   int(conn.remoteAddr.Port()),
-			Source: conn.Discovery,
+		ks = append(ks, NewPeer(
+			conn.PeerID,
+			conn.remoteAddr,
+			PeerOptionSource(conn.Discovery),
 			// > If the connection is encrypted, that's certainly enough to set SupportsEncryption.
 			// > But if we're not connected to them with an encrypted connection, I couldn't say
 			// > what's appropriate. We can carry forward the SupportsEncryption value as we
 			// > received it from trackers/DHT/PEX, or just use the encryption state for the
 			// > connection. It's probably easiest to do the latter for now.
 			// https://github.com/anacrolix/torrent/pull/188
-			SupportsEncryption: conn.headerEncrypted,
-		})
+			PeerOptionEncrypted(conn.headerEncrypted),
+		))
 	}
 
 	return ks
@@ -754,17 +738,13 @@ func (t *torrent) setChunkSize(size uint64) {
 }
 
 // There's a connection to that address already.
-func (t *torrent) addrActive(addr string) bool {
-	t._halfOpenmu.RLock()
-	_, ok := t.halfOpen[addr]
-	t._halfOpenmu.RUnlock()
-	if ok {
+func (t *torrent) addrActive(p Peer) bool {
+	if t.peers.Connecting(p) {
 		return true
 	}
 
 	for _, c := range t.conns.list() {
-		ra := c.remoteAddr
-		if ra.String() == addr {
+		if c.remoteAddr.Compare(p.AddrPort) == 0 {
 			return true
 		}
 	}
@@ -1080,20 +1060,6 @@ func (t *torrent) incrementReceivedConns(c *connection, delta int64) {
 	}
 }
 
-func (t *torrent) dropHalfOpen(addr string) {
-	t._halfOpenmu.RLock()
-	_, ok := t.halfOpen[addr]
-	t._halfOpenmu.RUnlock()
-	if !ok {
-		t.cln.config.debug().Println("warning: attempted to drop a half open connection that doesn't exist")
-		return
-	}
-
-	t._halfOpenmu.Lock()
-	delete(t.halfOpen, addr)
-	t._halfOpenmu.Unlock()
-}
-
 func (t *torrent) maybeNewConns() {
 	// Tickle the accept routine.
 	t.cln.event.Broadcast()
@@ -1102,8 +1068,8 @@ func (t *torrent) maybeNewConns() {
 
 func (t *torrent) openNewConns() {
 	var (
-		ok bool
-		p  Peer
+		ok     bool
+		popped prioritizedPeer
 	)
 
 	// log.Println("opening new connections initiated", t.md.ID)
@@ -1115,13 +1081,13 @@ func (t *torrent) openNewConns() {
 			return
 		}
 
-		if p, ok = t.peers.PopMax(); !ok {
+		if popped, ok = t.peers.PopMax(); !ok {
 			t.cln.config.debug().Println("openNewConns: no peers")
 			return
 		}
 
-		t.cln.config.debug().Printf("initiating connection to peer %p %s %d\n", t, p.IP, p.Port)
-		t.initiateConn(context.Background(), p)
+		t.cln.config.debug().Printf("initiating connection to peer %p %s\n", t, popped.p.AddrPort)
+		t.initiateConn(context.Background(), popped.p)
 	}
 }
 
@@ -1263,11 +1229,11 @@ func (t *torrent) consumeDhtAnnouncePeers(ctx context.Context, pvs <-chan dht.Pe
 			}
 
 			peers := slicesx.MapTransform(func(cp dht.Peer) Peer {
-				return Peer{
-					IP:     cp.Addr().AsSlice(),
-					Port:   int(cp.Port()),
-					Source: peerSourceDhtGetPeers,
-				}
+				return NewPeer(
+					int160.Zero(),
+					cp.AddrPort,
+					PeerOptionSource(peerSourceDhtGetPeers),
+				)
 			}, slicesx.Filter(func(v dht.Peer) bool { return v.Port() != 0 }, v.Peers...)...)
 
 			t.cln.config.debug().Println("adding peers", len(peers))
@@ -1330,7 +1296,7 @@ func (t *torrent) dhtAnnouncer(s *dht.Server) {
 	}
 }
 
-func (t *torrent) addPeers(peers []Peer) {
+func (t *torrent) addPeers(peers ...Peer) {
 	for _, p := range peers {
 		t.addPeer(p)
 	}
@@ -1353,8 +1319,7 @@ func (t *torrent) statsLocked() (ret Stats) {
 		return sum
 	}, conns...)
 
-	ret.HalfOpenPeers = len(t.halfOpen)
-	ret.PendingPeers = t.peers.Len()
+	ret.PendingPeers, ret.HalfOpenPeers = t.peers.Stats()
 	ret.LastConnection = langx.Autoderef(t.lastConnection.Load())
 	t.chunks.Snapshot(&ret)
 
@@ -1371,7 +1336,7 @@ func (t *torrent) statsLocked() (ret Stats) {
 
 // The total number of peers in the torrent.
 func (t *torrent) numTotalPeers() int {
-	peers := make(map[string]struct{})
+	peers := make(map[netip.AddrPort]struct{})
 
 	for _, c := range t.conns.list() {
 		if c == nil {
@@ -1383,17 +1348,11 @@ func (t *torrent) numTotalPeers() int {
 			// It's been closed and doesn't support RemoteAddr.
 			continue
 		}
-		peers[ra.String()] = struct{}{}
+		peers[c.remoteAddr] = struct{}{}
 	}
-
-	t._halfOpenmu.RLock()
-	for addr := range t.halfOpen {
-		peers[addr] = struct{}{}
-	}
-	t._halfOpenmu.RUnlock()
 
 	t.peers.Each(func(peer Peer) {
-		peers[fmt.Sprintf("%s:%d", peer.IP, peer.Port)] = struct{}{}
+		peers[peer.AddrPort] = struct{}{}
 	})
 
 	return len(peers)
@@ -1504,35 +1463,33 @@ func (t *torrent) SetMaxEstablishedConns(max int) (oldMax int) {
 // Start the process of connecting to the given peer for the given torrent if
 // appropriate.
 func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
-	if t.cln.config.localID.Cmp(int160.FromByteArray(peer.ID)) == 0 {
+	if t.cln.config.localID.Cmp(peer.ID) == 0 {
 		t.cln.config.debug().Println("skipping connection to self based on peer id")
 		return
 	}
 
-	addr := peer.addr()
-
 	// ignore connections to self.
-	if pubaddr := t.cln.publicAddr(addr); pubaddr.Compare(addr) == 0 {
-		t.cln.config.debug().Println("skipping connection to self based on address", pubaddr, addr)
+	if pubaddr := t.cln.publicAddr(peer.AddrPort); pubaddr.Compare(peer.AddrPort) == 0 {
+		t.cln.config.debug().Println("skipping connection to self based on address", pubaddr, peer.AddrPort)
 		return
 	}
 
-	if t.addrActive(addr.String()) {
+	if t.addrActive(peer) {
 		return
 	}
 
 	go func() {
-		for {
+		defer t.openNewConns()
+
+		for range 5 {
 			var (
 				timedout errorsx.Timeout
 			)
 
-			t._halfOpenmu.Lock()
-			t.halfOpen[addr.String()] = peer
-			t._halfOpenmu.Unlock()
+			t.peers.Loaned(peer)
 
 			// outgoing connection has a dial rate limit
-			if err := t.cln.outgoingConnection(ctx, t, addr, peer.Source, peer.Trusted); err == nil {
+			if err := t.cln.outgoingConnection(ctx, t, peer); err == nil {
 				t.cln.config.debug().Printf("outgoing connection completed\n")
 				return
 			} else if errors.As(err, &timedout) {
@@ -1542,14 +1499,11 @@ func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
 			} else if errorsx.Ignore(err, context.DeadlineExceeded, context.Canceled) != nil {
 				t.cln.config.debug().Printf("outgoing connection failed %T - %v\n", errorsx.Compact(errorsx.Unwrap(err), err), err)
 				return
+			} else {
+				t.cln.config.debug().Printf("outgoing connection retrying %T - %v\n", errorsx.Compact(errorsx.Unwrap(err), err), err)
 			}
 		}
 	}()
-}
-
-func (t *torrent) noLongerHalfOpen(addr string) {
-	t.dropHalfOpen(addr)
-	t.openNewConns()
 }
 
 func (t *torrent) dialTimeout() time.Duration {
@@ -1633,7 +1587,7 @@ func (t *torrent) Files() []*File {
 func (t *torrent) AddPeers(pp []Peer) {
 	t.lock()
 	defer t.unlock()
-	t.addPeers(pp)
+	t.addPeers(pp...)
 }
 
 func (t *torrent) String() string {

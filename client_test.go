@@ -7,8 +7,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 	"math/rand/v2"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/james-lawrence/torrent"
 	"github.com/james-lawrence/torrent/autobind"
 	"github.com/james-lawrence/torrent/connections"
+	"github.com/james-lawrence/torrent/dht/int160"
 
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/internal/bitmapx"
@@ -35,11 +37,12 @@ import (
 	"github.com/james-lawrence/torrent/storage"
 )
 
-func TestingSeedConfig(t *testing.T, dir string) *torrent.ClientConfig {
+func TestingSeedConfig(t *testing.T, dir string, options ...torrent.ClientConfigOption) *torrent.ClientConfig {
 	cfg := torrent.TestingConfig(
 		t,
 		dir,
 		torrent.ClientConfigSeed(true),
+		torrent.ClientConfigCompose(options...),
 	)
 	return cfg
 }
@@ -507,7 +510,7 @@ func TestDownload(t *testing.T) {
 	tor, added, err := seeder.Start(metadata, torrent.TuneVerifyFull)
 	require.NoError(t, err)
 	require.True(t, added)
-	_, err = torrent.DownloadInto(context.Background(), io.Discard, tor)
+	_, err = torrent.DownloadInto(t.Context(), io.Discard, tor)
 	require.NoError(t, err)
 
 	lcfg := TestingLeechConfig(t, t.TempDir())
@@ -520,7 +523,7 @@ func TestDownload(t *testing.T) {
 	ltor, added, err := leecher.Start(metadata)
 	require.NoError(t, err)
 	require.True(t, added)
-	_, err = torrent.DownloadInto(context.Background(), buf, ltor, torrent.TuneClientPeer(seeder))
+	_, err = torrent.DownloadInto(t.Context(), buf, ltor, torrent.TuneClientPeer(seeder))
 	require.NoError(t, err)
 	require.Equal(t, "hello, world\n", buf.String())
 }
@@ -537,7 +540,7 @@ func TestDownloadMetadataTimeout(t *testing.T) {
 	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer leecher.Close()
-	ctx, done := context.WithTimeout(context.Background(), 0)
+	ctx, done := context.WithTimeout(t.Context(), 0)
 	defer done()
 	ltor, added, err := leecher.Start(metadata)
 	require.NoError(t, err)
@@ -959,13 +962,13 @@ func Test3MBPlus1Torrent(t *testing.T) {
 func TestDownloadRange(t *testing.T) {
 	testRange := func(n, offset, length int64) func(t *testing.T) {
 		return func(t *testing.T) {
-			log.Println(t.Name(), n, offset, length)
+			// log.Println(t.Name(), n, offset, length)
 			datadir := t.TempDir()
 			from, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, datadir)))
 			require.NoError(t, err)
 			defer from.Close()
 
-			to, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
+			to, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingLeechConfig(t, t.TempDir())))
 			require.NoError(t, err)
 			defer to.Close()
 
@@ -1002,7 +1005,7 @@ func TestDownloadRange(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, added)
 			defer to.Stop(dl1.Metadata())
-			log.Printf("from %d -> to %d, offset %d length %d\n", from.LocalPort(), to.LocalPort(), offset, length)
+			// log.Printf("from %d -> to %d, offset %d length %d\n", from.LocalPort(), to.LocalPort(), offset, length)
 			dl := torrent.DownloadRange(ctx, dl1, offset, length, torrent.TuneClientPeer(from))
 
 			n, err := io.Copy(digestdl, dl)
@@ -1113,3 +1116,65 @@ func TestClientHasDhtServersWhenUTPDisabled(t *testing.T) {
 // 	assert.True(t, added)
 // 	require.True(t, cl.WaitAll())
 // }
+
+func TestProtocolSwarmManagement(t *testing.T) {
+	// const iolimit int64 = 128 * bytesx.KiB
+
+	t.Run("should maintain a peer even in face of networking issues", func(t *testing.T) {
+		datadir := t.TempDir()
+		from, err := autobind.NewLoopback().Bind(
+			torrent.NewClient(
+				TestingSeedConfig(
+					t,
+					datadir,
+					torrent.ClientConfigHandshakeTimeout(200*time.Millisecond),
+					torrent.ClientConfigDialTimeouts(20*time.Millisecond, 200*time.Millisecond),
+				),
+			),
+		)
+		require.NoError(t, err)
+		defer from.Close()
+
+		md, _ := TorrentFile(t, datadir, cryptox.NewChaCha8(t.Name()), 128*bytesx.KiB)
+
+		seeding, _, err := from.Start(md)
+		require.NoError(t, err)
+		_ = seeding
+
+		a := netip.AddrPortFrom(netip.IPv6Loopback(), 0)
+
+		l, err := net.Listen("tcp6", a.String())
+		require.NoError(t, err)
+		defer l.Close()
+		a, err = netip.ParseAddrPort(l.Addr().String())
+		require.NoError(t, err)
+
+		require.EqualValues(t, 0, seeding.Stats().ActivePeers)
+		require.NoError(t, seeding.Tune(torrent.TunePeers(torrent.NewPeer(int160.Random(), a))))
+
+		for range 5 {
+			// log.Println("stats 0", spew.Sdump(seeding.Stats()))
+			require.EventuallyWithT(t, func(collect *assert.CollectT) {
+				stat := seeding.Stats()
+				if stat.HalfOpenPeers > 0 {
+					return
+				}
+				collect.Errorf("waiting for peers to be attempted")
+			}, 5*time.Second, time.Millisecond)
+
+			c, err := l.Accept()
+			require.NoError(t, err)
+			require.NoError(t, c.Close())
+
+			// log.Println("stats 1", spew.Sdump(seeding.Stats()))
+
+			require.EventuallyWithT(t, func(collect *assert.CollectT) {
+				stat := seeding.Stats()
+				if stat.HalfOpenPeers == 0 && stat.TotalPeers == 1 {
+					return
+				}
+				collect.Errorf("waiting for peers attempt to fail")
+			}, 5*time.Second, 25*time.Millisecond)
+		}
+	})
+}

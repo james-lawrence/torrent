@@ -1,6 +1,7 @@
 package torrent
 
 import (
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
 
 	"github.com/james-lawrence/torrent/btprotocol"
@@ -23,13 +24,7 @@ func (me *Peers) AppendFromPex(nas []krpc.NodeAddr, fs []btprotocol.PexPeerFlags
 
 func (ret Peers) AppendFromTracker(ps []tracker.Peer) Peers {
 	for _, p := range ps {
-		_p := Peer{
-			IP:     p.IP,
-			Port:   p.Port,
-			Source: peerSourceTracker,
-		}
-		copy(_p.ID[:], p.ID)
-		ret = append(ret, _p)
+		ret = append(ret, NewPeerDeprecated(int160.FromBytes(p.ID), p.IP, p.Port, PeerOptionSource(peerSourceTracker)))
 	}
 	return ret
 }

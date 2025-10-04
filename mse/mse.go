@@ -230,7 +230,7 @@ func (h *handshake) establishS() error {
 	var b [96]byte
 	_, err := io.ReadFull(h.conn, b[:])
 	if err != nil {
-		return fmt.Errorf("error reading Y: %s", err)
+		return errorsx.Wrap(err, "error reading Y")
 	}
 	var Y, S big.Int
 	Y.SetBytes(b[:])
@@ -443,7 +443,7 @@ func (h *handshake) initerSteps() (ret io.ReadWriter, selected CryptoMethod, err
 	if err = readUntil(io.LimitReader(h.conn, 520), eVC[:]); err == io.EOF {
 		return nil, selected, errors.New("failed to synchronize on VC")
 	} else if err != nil {
-		return nil, selected, fmt.Errorf("error reading until VC: %s", err)
+		return nil, selected, errorsx.Wrap(err, "error reading until VC")
 	}
 	r := newCipherReader(bC, h.conn)
 	var method CryptoMethod
@@ -555,8 +555,7 @@ func (h *handshake) Do() (ret io.ReadWriter, method CryptoMethod, err error) {
 	}()
 	err = h.establishS()
 	if err != nil {
-		err = fmt.Errorf("error while establishing secret: %s", err)
-		return
+		return nil, method, errorsx.Wrap(err, "error while establishing secret")
 	}
 	pad := make([]byte, newPadLen())
 	io.ReadFull(rand.Reader, pad)
