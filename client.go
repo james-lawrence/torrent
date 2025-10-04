@@ -610,7 +610,8 @@ func (cl *Client) receiveHandshakes(c *connection) (t *torrent, err error) {
 		return t, errorsx.Wrap(err, "connection does not have the required header obfuscation")
 	} else if err != nil && buffered == nil {
 		cl.config.debug().Println("encryption handshake", err)
-		return nil, err
+		// detect stblib timeouts like io.Timeout.
+		return nil, errorsx.StdlibTimeout(err, 0)
 	} else if err != nil {
 		cl.config.debug().Println("encryption handshake", err)
 	}
