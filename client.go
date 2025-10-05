@@ -622,7 +622,7 @@ func (cl *Client) receiveHandshakes(c *connection) (t *torrent, err error) {
 	}.Incoming(buffered)
 
 	if err != nil {
-		return nil, errorsx.Wrap(err, "invalid handshake failed")
+		return nil, connections.NewBanned(c.conn, errorsx.Wrap(err, "invalid handshake failed"))
 	}
 
 	// cl.config.debug().Println("received incoming connection", int160.FromByteArray(info.PeerID), "->", int160.FromByteArray(cl.config.localID), c.remoteAddr)
@@ -657,7 +657,7 @@ func (cl *Client) runReceivedConn(c *connection) {
 	}
 
 	if err != nil {
-		cl.config.Handshaker.Release(c.conn, connections.NewBanned(c.conn, errorsx.Wrap(err, "error during handshake")))
+		cl.config.Handshaker.Release(c.conn, errorsx.Wrap(err, "error during handshake"))
 		return
 	}
 
