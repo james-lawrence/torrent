@@ -82,11 +82,11 @@ func AnnouncePeer(implied bool, port int) AnnounceOpt {
 
 // Traverses the DHT graph toward nodes that store peers for the infohash, streaming them to the
 // caller.
-func (s *Server) AnnounceTraversal(ctx context.Context, infoHash [20]byte, opts ...AnnounceOpt) (_ *Announce, err error) {
+func (s *Server) AnnounceTraversal(ctx context.Context, id int160.T, opts ...AnnounceOpt) (_ *Announce, err error) {
 	a := &Announce{
 		Peers:         make(chan PeersValues),
 		server:        s,
-		infoHash:      int160.FromByteArray(infoHash),
+		infoHash:      id,
 		peerAnnounced: make(chan struct{}),
 		closed:        make(chan struct{}),
 		closer:        &sync.Once{},
@@ -96,7 +96,7 @@ func (s *Server) AnnounceTraversal(ctx context.Context, infoHash [20]byte, opts 
 		opt(a)
 	}
 	a.traversal = traversal.Start(traversal.OperationInput{
-		Target:     infoHash,
+		Target:     id.AsByteArray(),
 		DoQuery:    a.getPeers,
 		NodeFilter: s.TraversalNodeFilter,
 		DataFilter: func(data any) bool {

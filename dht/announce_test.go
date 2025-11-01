@@ -19,9 +19,8 @@ func TestAnnounceNoStartingNodes(t *testing.T) {
 	})
 	require.NoError(t, err)
 	defer s.Close()
-	var ih [20]byte
-	copy(ih[:], "blah")
-	_, err = s.AnnounceTraversal(t.Context(), ih, AnnouncePeer(true, 0))
+
+	_, err = s.AnnounceTraversal(t.Context(), int160.Random(), AnnouncePeer(true, 0))
 	require.ErrorIs(t, err, ErrDHTNoInitialNodes)
 }
 
@@ -34,7 +33,7 @@ func TestAnnounceStopsNoPending(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	a, err := s.AnnounceTraversal(t.Context(), int160.Random().AsByteArray(), AnnouncePeer(true, 0))
+	a, err := s.AnnounceTraversal(t.Context(), int160.Random(), AnnouncePeer(true, 0))
 	require.NoError(t, err)
 	defer a.Close()
 	<-a.Peers

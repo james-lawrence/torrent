@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/james-lawrence/torrent/bencode"
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/metainfo"
@@ -91,7 +92,7 @@ func OptionNoop(t *Metadata) {}
 type Metadata struct {
 	// The tiered tracker URIs.
 	Trackers  []string
-	ID        metainfo.Hash
+	ID        int160.T
 	InfoBytes []byte
 	// The name to use if the Name field from the Info isn't available.
 	DisplayName string
@@ -125,7 +126,7 @@ func (t Metadata) Merge(options ...Option) Metadata {
 // New create a torrent from just a infohash and any additional options.
 func New(info metainfo.Hash, options ...Option) (t Metadata, err error) {
 	t = Metadata{
-		ID:        info,
+		ID:        int160.FromByteArray(info),
 		ChunkSize: defaultChunkSize,
 	}.Merge(options...)
 
@@ -281,7 +282,7 @@ func (t Metadata) Metainfo() metainfo.MetaInfo {
 func NewMagnet(md Metadata) metainfo.Magnet {
 	return metainfo.Magnet{
 		DisplayName: md.DisplayName,
-		InfoHash:    md.ID,
+		InfoHash:    md.ID.AsByteArray(),
 		Trackers:    md.Trackers,
 	}
 }

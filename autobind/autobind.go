@@ -15,6 +15,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/netx"
+	"github.com/james-lawrence/torrent/internal/utpx"
 	"github.com/james-lawrence/torrent/sockets"
 	"github.com/james-lawrence/torrent/storage"
 )
@@ -34,7 +35,7 @@ type Option func(*Autobind)
 
 // DisableUTP disable UTP sockets
 func DisableUTP(a *Autobind) {
-	a.utpListen = nil
+	a.DisableUTP = true
 }
 
 // DisableTCP disable TCP sockets
@@ -56,12 +57,6 @@ func EnableDHT(a *Autobind) {
 	a.EnableDHT = true
 }
 
-func UTPListener(fn func(network string, address string) (s sockets.Socket, err error)) func(*Autobind) {
-	return func(a *Autobind) {
-		a.utpListen = fn
-	}
-}
-
 // Autobind manages automatically binding a client to available networks.
 type Autobind struct {
 	// The address to listen for new uTP and TCP bittorrent protocol
@@ -72,9 +67,8 @@ type Autobind struct {
 	DisableIPv4 bool
 	DisableIPv6 bool
 	DisableTCP  bool
+	DisableUTP  bool
 	EnableDHT   bool
-	utpListen   func(network string, address string) (s sockets.Socket, err error)
-	tcpListen   func(network string, address string) (s sockets.Socket, err error)
 }
 
 // New used to automatically listen to available networks
@@ -84,7 +78,6 @@ func New(options ...Option) Autobind {
 	autobind := Autobind{
 		ListenHost: func(string) string { return "" },
 		ListenPort: 0,
-		tcpListen:  listenTCP,
 	}
 
 	for _, opt := range options {
@@ -126,10 +119,10 @@ func NewSpecified(dst string) Autobind {
 		panic(err)
 	}
 
-	return New(func(a *Autobind) {
-		a.ListenHost = func(string) string { return host }
-		a.ListenPort = port
-	})
+	return Autobind{
+		ListenHost: func(string) string { return host },
+		ListenPort: port,
+	}
 }
 
 // Bind the client to available networks. consumes the result of NewClient.
@@ -171,9 +164,6 @@ func (t Autobind) Close() error {
 func (t Autobind) listenNetworks() (ns []network) {
 	for _, n := range allPeerNetworks {
 		if t.listenOnNetwork(n) {
-			n.UTPListen = t.utpListen
-			n.TCPListen = t.tcpListen
-			n.UDP = t.utpListen != nil
 			ns = append(ns, n)
 		}
 	}
@@ -193,11 +183,7 @@ func (t Autobind) listenOnNetwork(n network) (b bool) {
 		return false
 	}
 
-	if n.UDP && !t.EnableDHT && t.utpListen == nil {
-		return false
-	}
-
-	if n.UDP && !t.EnableDHT && t.utpListen == nil {
+	if n.UDP && t.DisableUTP && !t.EnableDHT {
 		return false
 	}
 
@@ -205,7 +191,7 @@ func (t Autobind) listenOnNetwork(n network) (b bool) {
 }
 
 func (t Autobind) peerNetworkEnabled(n network) bool {
-	if t.utpListen == nil && n.UDP {
+	if t.DisableUTP && n.UDP {
 		return false
 	}
 	if t.DisableTCP && n.TCP {
@@ -218,17 +204,6 @@ func (t Autobind) peerNetworkEnabled(n network) bool {
 		return false
 	}
 	return true
-}
-
-func listen(n network, addr string) (sockets.Socket, error) {
-	switch {
-	case n.TCP:
-		return n.TCPListen(n.String(), addr)
-	case n.UDP:
-		return n.UTPListen(n.String(), addr)
-	default:
-		panic(n)
-	}
 }
 
 func listenAll(networks []network, getHost func(string) string, port int) ([]sockets.Socket, error) {
@@ -277,6 +252,17 @@ func listenAllRetry(nahs []networkAndHost, port int) (ss []sockets.Socket, retry
 	return
 }
 
+func listen(n network, addr string) (sockets.Socket, error) {
+	switch {
+	case n.TCP:
+		return listenTCP(n.String(), addr)
+	case n.UDP:
+		return listenUtp(n.String(), addr)
+	default:
+		panic(n)
+	}
+}
+
 func listenTCP(network, address string) (s sockets.Socket, err error) {
 	l, err := net.Listen(network, address)
 	if err != nil {
@@ -289,8 +275,16 @@ func listenTCP(network, address string) (s sockets.Socket, err error) {
 		}
 	}()
 
-	dialer := netx.ProxyDialer()
-	return sockets.New(l, dialer), nil
+	return sockets.New(l, netx.ProxyDialer()), nil
+}
+
+func listenUtp(network, addr string) (s sockets.Socket, err error) {
+	us, err := utpx.New(network, addr)
+	if err != nil {
+		return
+	}
+
+	return sockets.New(us, us), nil
 }
 
 type networkAndHost struct {

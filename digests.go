@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 
 	"github.com/RoaringBitmap/roaring/v2"
-	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/metainfo"
@@ -34,9 +33,8 @@ func newDigestsFromTorrent(t *torrent) digests {
 					return
 				}
 
-				id := int160.FromByteArray(t.md.ID)
-				if err := t.cln.torrents.Sync(id); err != nil {
-					t.cln.config.errors().Printf("failed to record missing chunks bitmap: %s - %v\n", id, err)
+				if err := t.cln.torrents.Sync(t.md.ID); err != nil {
+					t.cln.config.errors().Printf("failed to record missing chunks bitmap: %s - %v\n", t.md.ID, err)
 				}
 			}
 		},

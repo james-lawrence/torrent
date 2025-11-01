@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/metainfo"
 )
 
@@ -12,7 +13,7 @@ func NewClient(cl ClientImpl) *Client {
 	return &Client{cl}
 }
 
-func (cl Client) OpenTorrent(info *metainfo.Info, infoHash metainfo.Hash) (TorrentImpl, error) {
+func (cl Client) OpenTorrent(info *metainfo.Info, infoHash int160.T) (TorrentImpl, error) {
 	t, err := cl.ci.OpenTorrent(info, infoHash)
 	return t, err
 }

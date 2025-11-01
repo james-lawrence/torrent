@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/james-lawrence/torrent/storage"
 	"github.com/stretchr/testify/require"
@@ -34,9 +35,9 @@ func (fs badStorage) Exists() iter.Seq[[]byte] {
 	return func(yield func([]byte) bool) {}
 }
 
-func (bs badStorage) OpenTorrent(info *metainfo.Info, mihash metainfo.Hash) (storage.TorrentImpl, error) {
+func (bs badStorage) OpenTorrent(info *metainfo.Info, mihash int160.T) (storage.TorrentImpl, error) {
 	var f = fnv.New64a()
-	_, err := f.Write(mihash[:])
+	_, err := f.Write(mihash.Bytes())
 	return badStorageImpl{src: rand.New(rand.NewSource(int64(f.Sum64())))}, err
 }
 

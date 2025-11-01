@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	maxRequestsGrace = 5 // grace requests above the limit before we start rejecting
-	defaultChunkSize = 16 * bytesx.KiB
+	defaultMaxEstablishedConns = 200
+	defaultChunkSize           = 16 * bytesx.KiB
+	maxRequestsGrace           = 5 // grace requests above the limit before we start rejecting
 )
 
 func defaultPeerExtensionBytes() pp.ExtensionBits {

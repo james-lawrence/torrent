@@ -1,18 +1,12 @@
 package torrent
 
 import (
-	"context"
 	"errors"
-	"net"
 
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/sockets"
 )
-
-type dialer interface {
-	Dial(ctx context.Context, addr string) (net.Conn, error)
-}
 
 // Binder binds network sockets to the client.
 type Binder interface {

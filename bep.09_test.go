@@ -7,6 +7,7 @@ import (
 
 	"github.com/james-lawrence/torrent"
 	"github.com/james-lawrence/torrent/autobind"
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/testutil"
 	"github.com/james-lawrence/torrent/internal/testx"
@@ -73,5 +74,5 @@ func TestMetadataExtension(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, md.InfoBytes, encoded)
-	require.Equal(t, md.ID, metainfo.NewHashFromBytes(encoded))
+	require.Equal(t, md.ID, int160.FromHashedBytes(encoded))
 }

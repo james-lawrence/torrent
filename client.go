@@ -122,8 +122,12 @@ func (cl *Client) MaybeStart(t Metadata, failed error, options ...Tuner) (dl Tor
 	return dl, added, nil
 }
 
+func (cl *Client) newTorrent(md Metadata, options ...Tuner) *torrent {
+	return newTorrent(cl, md, options...)
+}
+
 func (cl *Client) start(md Metadata, options ...Tuner) (dlt *torrent, added bool, err error) {
-	dlt, cached, err := cl.torrents.Load(cl, int160.FromByteArray(md.ID), tuneMerge(md), langx.Compose(options...))
+	dlt, cached, err := cl.torrents.Load(md.ID, cl.newTorrent, tuneMerge(md), langx.Compose(options...))
 	if errorsx.Ignore(err, fs.ErrNotExist) != nil {
 		return nil, false, err
 	}
@@ -132,7 +136,7 @@ func (cl *Client) start(md Metadata, options ...Tuner) (dlt *torrent, added bool
 		return dlt, false, nil
 	}
 
-	if dlt, err = cl.torrents.Insert(cl, md, tuneMerge(md), langx.Compose(options...)); err != nil {
+	if dlt, err = cl.torrents.Insert(md, cl.newTorrent, tuneMerge(md), langx.Compose(options...)); err != nil {
 		return nil, false, err
 	}
 
@@ -156,7 +160,7 @@ func (cl *Client) start(md Metadata, options ...Tuner) (dlt *torrent, added bool
 // Stop the specified torrent, this halts all network activity around the torrent
 // for this client.
 func (cl *Client) Stop(t Metadata) (err error) {
-	return cl.torrents.Drop(int160.FromByteArray(t.ID))
+	return cl.torrents.Drop(t.ID)
 }
 
 // PeerID ...
@@ -566,7 +570,7 @@ func (cl *Client) initiateHandshakes(c *connection, t *torrent) (err error) {
 		rw, c.cryptoMethod, err = pp.EncryptionHandshake{
 			Keys:           cl.forSkeys,
 			CryptoSelector: cl.config.CryptoSelector,
-		}.Outgoing(rw, t.md.ID[:], cl.config.CryptoProvides)
+		}.Outgoing(rw, t.md.ID.Bytes(), cl.config.CryptoProvides)
 
 		if err != nil {
 			return errorsx.Wrap(err, "encryption handshake failed")
@@ -577,7 +581,7 @@ func (cl *Client) initiateHandshakes(c *connection, t *torrent) (err error) {
 	ebits, info, err := pp.Handshake{
 		PeerID: cl.config.localID.AsByteArray(),
 		Bits:   cl.config.extensionbits,
-	}.Outgoing(c.rw(), t.md.ID)
+	}.Outgoing(c.rw(), t.md.ID.AsByteArray())
 
 	if err != nil {
 		return errorsx.Wrap(err, "bittorrent protocol handshake failure")
@@ -631,7 +635,7 @@ func (cl *Client) receiveHandshakes(c *connection) (t *torrent, err error) {
 	c.PeerID = int160.FromByteArray(info.PeerID)
 	c.completedHandshake = time.Now()
 
-	t, _, err = cl.torrents.Load(cl, int160.FromByteArray(info.Hash))
+	t, _, err = cl.torrents.Load(int160.FromByteArray(info.Hash), cl.newTorrent)
 	if err != nil {
 		return nil, err
 	}
@@ -708,12 +712,12 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr netip.Add
 	return c
 }
 
-func (cl *Client) onDHTAnnouncePeer(ih metainfo.Hash, ip net.IP, port int, portOk bool) {
-	cl.config.DHTAnnouncePeer(ih, ip, port, portOk)
+func (cl *Client) onDHTAnnouncePeer(id int160.T, ip net.IP, port int, portOk bool) {
+	cl.config.DHTAnnouncePeer(id, ip, port, portOk)
 	cl.lock()
 	defer cl.unlock()
 
-	t, _, err := cl.torrents.Load(cl, int160.FromByteArray(ih))
+	t, _, err := cl.torrents.Load(id, cl.newTorrent)
 	if err != nil {
 		log.Println("unable to load torrent for peer announce", err)
 		return

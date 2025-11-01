@@ -7,6 +7,7 @@ import (
 	"net/netip"
 
 	"github.com/RoaringBitmap/roaring/v2"
+	"github.com/james-lawrence/torrent/dht/int160"
 )
 
 // AllowedFastSet computes the allowed fast set for a peer.
@@ -25,7 +26,7 @@ import (
 //
 // Returns a sorted slice of integers representing the piece indices in the
 // allowed fast set, and an error if input validation fails.
-func AllowedFastSet(ip netip.Addr, infoHash [20]byte, numPieces uint64, k uint64) (*roaring.Bitmap, error) {
+func AllowedFastSet(ip netip.Addr, infoHash int160.T, numPieces uint64, k uint64) (*roaring.Bitmap, error) {
 	if numPieces == 0 {
 		return roaring.NewBitmap(), errors.New("numPieces cannot be zero")
 	}
@@ -53,9 +54,10 @@ func AllowedFastSet(ip netip.Addr, infoHash [20]byte, numPieces uint64, k uint64
 	// Step (2): x.append(infohash)
 	// Initialize currentX with the concatenation of the masked IP and the infohash.
 	// This becomes the initial input for the SHA1 hash function in the loop.
-	currentX := make([]byte, 0, len(maskedIP)+len(infoHash)) // Pre-allocate capacity
+
+	currentX := make([]byte, 0, len(maskedIP)+infoHash.BitLen()) // Pre-allocate capacity
 	currentX = append(currentX, maskedIP...)
-	currentX = append(currentX, infoHash[:]...)
+	currentX = append(currentX, infoHash.Bytes()...)
 
 	// The main loop continues until 'k' unique piece indices are found
 	for allowedFastSet.GetCardinality() < k {

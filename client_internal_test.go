@@ -1,6 +1,7 @@
 package torrent
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/internal/testutil"
 	"github.com/james-lawrence/torrent/internal/testx"
+	"github.com/james-lawrence/torrent/internal/utpx"
 	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/james-lawrence/torrent/sockets"
 	"github.com/james-lawrence/torrent/storage"
@@ -43,9 +45,14 @@ func Autosocket(t *testing.T) Binder {
 		bindings []sockets.Socket
 	)
 
-	s, err := net.Listen("tcp", "localhost:")
+	s, err := utpx.New("udp", "localhost:")
 	require.NoError(t, err)
-	bindings = append(bindings, sockets.New(s, &net.Dialer{}))
+	bindings = append(bindings, sockets.New(s, s))
+	if addr, ok := s.Addr().(*net.UDPAddr); ok {
+		s, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", addr.Port))
+		require.NoError(t, err)
+		bindings = append(bindings, sockets.New(s, &net.Dialer{}))
+	}
 
 	return NewSocketsBind(bindings...)
 }

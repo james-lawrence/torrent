@@ -95,6 +95,10 @@ func (l T) Cmp(r T) int {
 	return bytes.Compare(l.bits[:], r.bits[:])
 }
 
+func (l T) Equal(r T) bool {
+	return l.Cmp(r) == 0
+}
+
 func (me *T) SetMax() {
 	for i := range me.bits {
 		me.bits[i] = math.MaxUint8
@@ -114,6 +118,13 @@ func (me *T) IsZero() bool {
 		}
 	}
 	return true
+}
+
+func FromHashedBytes(b []byte) (ret T) {
+	hasher := sha1.New()
+	hasher.Write(b)
+	copy(ret.bits[:], hasher.Sum(nil))
+	return ret
 }
 
 func ByteArray(id T) [20]byte {

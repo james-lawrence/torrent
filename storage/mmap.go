@@ -9,6 +9,7 @@ import (
 
 	"github.com/edsrzf/mmap-go"
 
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/james-lawrence/torrent/mmap_span"
 )
@@ -23,7 +24,7 @@ func NewMMap(baseDir string) ClientImpl {
 	}
 }
 
-func (s *mmapClientImpl) OpenTorrent(info *metainfo.Info, infoHash metainfo.Hash) (t TorrentImpl, err error) {
+func (s *mmapClientImpl) OpenTorrent(info *metainfo.Info, infoHash int160.T) (t TorrentImpl, err error) {
 	if info == nil {
 		panic("can't open a storage for a nil torrent")
 	}
@@ -41,7 +42,7 @@ func (s *mmapClientImpl) Close() error {
 }
 
 type mmapTorrentStorage struct {
-	infoHash metainfo.Hash
+	infoHash int160.T
 	info     *metainfo.Info
 	span     *mmap_span.MMapSpan
 }

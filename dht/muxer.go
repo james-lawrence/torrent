@@ -6,10 +6,10 @@ import (
 
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/dht/bep44"
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
 	peer_store "github.com/james-lawrence/torrent/dht/peer-store"
 	"github.com/james-lawrence/torrent/internal/langx"
-	"github.com/james-lawrence/torrent/metainfo"
 )
 
 // Standard Muxer configuration used by the server.
@@ -116,7 +116,7 @@ func (t HandlerAnnounce) Handle(ctx context.Context, source Addr, s *Server, raw
 	}
 
 	if h := s.config.OnAnnouncePeer; h != nil {
-		go h(metainfo.Hash(m.A.InfoHash), source.IP(), port, portOk)
+		go h(int160.FromByteArray(m.A.InfoHash), source.IP(), port, portOk)
 	}
 
 	if ps := s.config.PeerStore; ps != nil {

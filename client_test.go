@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -102,9 +101,9 @@ func TestAddDropManyTorrents(t *testing.T) {
 	cl, err := autobind.NewLoopback().Bind(torrent.NewClient(torrent.TestingConfig(t, t.TempDir())))
 	require.NoError(t, err)
 	defer cl.Close()
-	for i := range 1000 {
+	for range 1000 {
 		var spec torrent.Metadata
-		binary.PutVarint((&spec).ID[:], int64(i))
+		spec.ID = int160.Random()
 		_, added, err := cl.Start(spec)
 		require.NoError(t, err)
 		assert.True(t, added)

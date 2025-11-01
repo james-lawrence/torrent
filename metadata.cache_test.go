@@ -5,7 +5,6 @@ import (
 
 	"github.com/james-lawrence/torrent"
 	"github.com/james-lawrence/torrent/dht/int160"
-	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,11 +14,11 @@ func TestMetadataCacheShouldPersistAndLoadCorrectly(t *testing.T) {
 
 	cache := torrent.NewMetadataCache(t.TempDir())
 	require.NoError(t, cache.Write(md))
-	md1, err := cache.Read(int160.FromBytes(md.ID.Bytes()))
+	md1, err := cache.Read(md.ID)
 	require.NoError(t, err)
 
 	require.Equal(t, md.InfoBytes, md1.InfoBytes)
 	require.Equal(t, md.DisplayName, md1.DisplayName)
-	require.Equal(t, md.ID, metainfo.NewHashFromBytes(md1.InfoBytes))
-	require.Equal(t, md.ID, metainfo.NewHashFromBytes(md.InfoBytes))
+	require.Equal(t, md.ID, int160.FromHashedBytes(md1.InfoBytes))
+	require.Equal(t, md.ID, int160.FromHashedBytes(md.InfoBytes))
 }

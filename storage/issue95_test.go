@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/metainfo"
 )
 
@@ -16,13 +17,14 @@ func testIssue95(t *testing.T, c ClientImpl) {
 		Files:  []metainfo.FileInfo{{Path: []string{"a"}}},
 		Pieces: make([]byte, 20),
 	}
-	t1, err := c.OpenTorrent(i1, metainfo.NewHashFromBytes([]byte("a")))
+
+	t1, err := c.OpenTorrent(i1, int160.FromHashedBytes([]byte("a")))
 	require.NoError(t, err)
 	i2 := &metainfo.Info{
 		Files:  []metainfo.FileInfo{{Path: []string{"a"}}},
 		Pieces: make([]byte, 20),
 	}
-	t2, err := c.OpenTorrent(i2, metainfo.NewHashFromBytes([]byte("b")))
+	t2, err := c.OpenTorrent(i2, int160.FromHashedBytes([]byte("b")))
 	require.NoError(t, err)
 
 	require.NoError(t, t1.Close())

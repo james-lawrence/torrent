@@ -18,7 +18,6 @@ import (
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/internal/userx"
-	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/james-lawrence/torrent/storage"
 	"github.com/james-lawrence/torrent/tracker"
 	"github.com/james-lawrence/torrent/x/conntrack"
@@ -137,10 +136,10 @@ type ClientConfig struct {
 
 	// OnQuery hook func
 	DHTOnQuery      func(query *krpc.Msg, source net.Addr) (propagate bool)
-	DHTAnnouncePeer func(ih metainfo.Hash, ip net.IP, port int, portOk bool)
+	DHTAnnouncePeer func(ih int160.T, ip net.IP, port int, portOk bool)
 	DHTMuxer        dht.Muxer
 
-	ConnectionClosed func(ih metainfo.Hash, stats ConnStats, remaining int)
+	ConnectionClosed func(ih int160.T, stats ConnStats, remaining int)
 	extensions       map[pp.ExtensionName]pp.ExtensionNumber
 	localID          int160.T
 }
@@ -343,7 +342,7 @@ func ClientConfigHTTPUserAgent(s string) ClientConfigOption {
 	}
 }
 
-func ClientConfigConnectionClosed(fn func(ih metainfo.Hash, stats ConnStats, remaining int)) ClientConfigOption {
+func ClientConfigConnectionClosed(fn func(ih int160.T, stats ConnStats, remaining int)) ClientConfigOption {
 	return func(cc *ClientConfig) {
 		cc.ConnectionClosed = fn
 	}
@@ -495,9 +494,9 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		Logger:           discard{},
 		Warn:             discard{},
 		Debug:            discard{},
-		DHTAnnouncePeer:  func(ih metainfo.Hash, ip net.IP, port int, portOk bool) {},
+		DHTAnnouncePeer:  func(ih int160.T, ip net.IP, port int, portOk bool) {},
 		DHTMuxer:         dht.DefaultMuxer(),
-		ConnectionClosed: func(t metainfo.Hash, stats ConnStats, remaining int) {},
+		ConnectionClosed: func(t int160.T, stats ConnStats, remaining int) {},
 		Handshaker: connections.NewHandshaker(
 			connections.AutoFirewall(),
 		),

@@ -80,7 +80,7 @@ func TuneReadHashID(id *int160.T) Tuner {
 	return func(t *torrent) {
 		t.rLock()
 		defer t.rUnlock()
-		*id = int160.FromByteArray(t.md.ID)
+		*id = t.md.ID
 	}
 }
 
@@ -464,10 +464,30 @@ func VerifyStored(ctx context.Context, md *metainfo.MetaInfo, t io.ReaderAt) (mi
 	return chunks.Clone(chunks.missing), chunks.ReadableBitmap(), nil
 }
 
+func zeroTorrent(md Metadata, options ...Tuner) *torrent {
+	mu := &sync.RWMutex{}
+	return &torrent{
+		_mu: mu,
+		md:  md,
+		peers: newPeerPool(32, func(p Peer) peerPriority {
+			return 0
+		}),
+		conns:                   newconnset(2 * defaultMaxEstablishedConns),
+		pieceStateChanges:       pubsub.NewPubSub(),
+		maxEstablishedConns:     defaultMaxEstablishedConns,
+		duplicateRequestTimeout: time.Second,
+		pex:                     newPex(),
+		storage:                 storage.NewZero(),
+		digests:                 new(digests),
+		wantPeersEvent:          make(chan struct{}, 1),
+		closed:                  make(chan struct{}),
+		lastConnection:          atomicx.Pointer(time.Now()),
+		event:                   &sync.Cond{L: mu},
+	}
+}
+
 func newTorrent(cl *Client, src Metadata, options ...Tuner) *torrent {
-	const (
-		maxEstablishedConns = 200
-	)
+
 	m := &sync.RWMutex{}
 	chunkcond := sync.NewCond(&sync.Mutex{})
 
@@ -478,10 +498,10 @@ func newTorrent(cl *Client, src Metadata, options ...Tuner) *torrent {
 		peers: newPeerPool(32, func(p Peer) peerPriority {
 			return bep40PriorityIgnoreError(cl.publicAddr(p.AddrPort), p.AddrPort)
 		}),
-		conns:                   newconnset(2 * maxEstablishedConns),
+		conns:                   newconnset(2 * defaultMaxEstablishedConns),
 		pieceStateChanges:       pubsub.NewPubSub(),
 		storageOpener:           storage.NewClient(langx.DefaultIfZero(cl.config.defaultStorage, src.Storage)),
-		maxEstablishedConns:     maxEstablishedConns,
+		maxEstablishedConns:     defaultMaxEstablishedConns,
 		duplicateRequestTimeout: time.Second,
 		chunks:                  newChunks(langx.DefaultIfZero(defaultChunkSize, src.ChunkSize), metainfo.NewInfo(), chunkoptCond(chunkcond)),
 		pex:                     newPex(),
@@ -577,7 +597,6 @@ type torrent struct {
 	// How long to avoid duplicating a pending request.
 	duplicateRequestTimeout time.Duration
 
-	// closed         missinggo.Event
 	closed chan struct{}
 
 	// Values are the piece indices that changed.
@@ -868,7 +887,7 @@ func (t *torrent) setInfoBytes(b []byte) error {
 		return nil
 	}
 
-	if id := metainfo.NewHashFromBytes(b); id != t.md.ID {
+	if id := int160.FromHashedBytes(b); !id.Equal(t.md.ID) {
 		return errorsx.Errorf("info bytes have wrong hash %d %s != %s", len(b), id.String(), t.md.ID.String())
 	}
 
@@ -1223,7 +1242,7 @@ func (t *torrent) consumeDhtAnnouncePeers(ctx context.Context, pvs <-chan dht.Pe
 		select {
 		case v, ok := <-pvs:
 			if !ok {
-				t.cln.config.debug().Println(int160.FromByteArray(t.md.ID), "peer events completed")
+				t.cln.config.debug().Println(t.md.ID, "peer events completed")
 				return
 			}
 

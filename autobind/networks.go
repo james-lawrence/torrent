@@ -1,10 +1,6 @@
 package autobind
 
-import (
-	"strings"
-
-	"github.com/james-lawrence/torrent/sockets"
-)
+import "strings"
 
 var allPeerNetworks = func() (ret []network) {
 	for _, s := range []string{"tcp4", "tcp6", "udp4", "udp6"} {
@@ -14,12 +10,10 @@ var allPeerNetworks = func() (ret []network) {
 }()
 
 type network struct {
-	Ipv4      bool
-	Ipv6      bool
-	UDP       bool
-	TCP       bool
-	UTPListen func(network string, address string) (s sockets.Socket, err error)
-	TCPListen func(network string, address string) (s sockets.Socket, err error)
+	Ipv4 bool
+	Ipv6 bool
+	UDP  bool
+	TCP  bool
 }
 
 func (n network) String() (ret string) {

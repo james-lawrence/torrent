@@ -50,7 +50,7 @@ func (t metadatafilestore) Write(md Metadata) error {
 		return err
 	}
 
-	return os.WriteFile(t.path(int160.FromByteArray(md.ID)), encoded, 0600)
+	return os.WriteFile(t.path(md.ID), encoded, 0600)
 }
 
 func (t metadatafilestore) Each() iter.Seq[int160.T] {

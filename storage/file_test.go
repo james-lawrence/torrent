@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/md5x"
 	"github.com/james-lawrence/torrent/metainfo"
@@ -27,13 +28,13 @@ func TestShortFile(t *testing.T) {
 		PieceLength: bytesx.MiB,
 	}
 
-	require.NoError(t, os.MkdirAll(filepath.Dir(InfoHashPathMaker(td, metainfo.Hash{}, info, nil)), 0700))
-	f, err := os.Create(InfoHashPathMaker(td, metainfo.Hash{}, info, nil))
+	require.NoError(t, os.MkdirAll(filepath.Dir(InfoHashPathMaker(td, int160.Zero(), info, nil)), 0700))
+	f, err := os.Create(InfoHashPathMaker(td, int160.Zero(), info, nil))
 	require.NoError(t, err)
 	require.NoError(t, f.Truncate(1))
 	f.Close()
 
-	ts, err := s.OpenTorrent(info, metainfo.Hash{})
+	ts, err := s.OpenTorrent(info, int160.Zero())
 	require.NoError(t, err)
 
 	var buf bytes.Buffer
@@ -58,7 +59,7 @@ func TestReadAllData(t *testing.T) {
 	encoded, err := metainfo.Encode(info)
 	require.NoError(t, err)
 
-	ts, err := s.OpenTorrent(info, metainfo.NewHashFromBytes(encoded))
+	ts, err := s.OpenTorrent(info, int160.FromHashedBytes(encoded))
 	require.NoError(t, err)
 
 	_, err = io.Copy(result, io.NewSectionReader(ts, 0, info.Length))
@@ -140,7 +141,7 @@ func BenchmarkFileStorage(b *testing.B) {
 	dir := b.TempDir()
 	fs := NewFile(dir)
 
-	ti, err := fs.OpenTorrent(info, metainfo.Hash{})
+	ti, err := fs.OpenTorrent(info, int160.Zero())
 	if err != nil {
 		b.Fatal(err)
 	}

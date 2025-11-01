@@ -12,12 +12,12 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/james-lawrence/torrent/dht/bep44"
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
 	peer_store "github.com/james-lawrence/torrent/dht/peer-store"
 	"github.com/james-lawrence/torrent/dht/transactions"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/iplist"
-	"github.com/james-lawrence/torrent/metainfo"
 )
 
 func defaultQueryResendDelay() time.Duration {
@@ -57,7 +57,7 @@ type ServerConfig struct {
 	// Hook received queries. Return false if you don't want to propagate to the default handlers.
 	OnQuery func(query *krpc.Msg, source net.Addr) (propagate bool)
 	// Called when a peer successfully announces to us.
-	OnAnnouncePeer func(infoHash metainfo.Hash, ip net.IP, port int, portOk bool)
+	OnAnnouncePeer func(infoHash int160.T, ip net.IP, port int, portOk bool)
 	// How long to wait before resending queries that haven't received a response. Defaults to 2s.
 	// After the last send, a query is aborted after this time.
 	QueryResendDelay func() time.Duration

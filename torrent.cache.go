@@ -80,7 +80,7 @@ func (t *memoryseeding) Drop(id int160.T) error {
 	return c.close()
 }
 
-func (t *memoryseeding) Insert(cl *Client, md Metadata, options ...Tuner) (*torrent, error) {
+func (t *memoryseeding) Insert(md Metadata, fn func(md Metadata, options ...Tuner) *torrent, options ...Tuner) (*torrent, error) {
 	id := int160.FromBytes(md.ID.Bytes())
 	t._mu.RLock()
 	x, ok := t.torrents[id]
@@ -90,6 +90,8 @@ func (t *memoryseeding) Insert(cl *Client, md Metadata, options ...Tuner) (*torr
 		return x, x.Tune(options...)
 	}
 
+	t._mu.Lock()
+	defer t._mu.Unlock()
 	// only record if the info is there.
 	if len(md.InfoBytes) > 0 {
 		if err := t.MetadataStore.Write(md); err != nil {
@@ -103,16 +105,13 @@ func (t *memoryseeding) Insert(cl *Client, md Metadata, options ...Tuner) (*torr
 		return nil, err
 	}
 
-	dlt := newTorrent(cl, md, tuneVerifySample(unverified, 8), langx.Compose(options...))
-
-	t._mu.Lock()
+	dlt := fn(md, tuneVerifySample(unverified, 8), langx.Compose(options...))
 	t.torrents[id] = dlt
-	t._mu.Unlock()
 
 	return dlt, nil
 }
 
-func (t *memoryseeding) Load(cl *Client, id int160.T, options ...Tuner) (_ *torrent, cached bool, _ error) {
+func (t *memoryseeding) Load(id int160.T, fn func(md Metadata, options ...Tuner) *torrent, options ...Tuner) (_ *torrent, cached bool, _ error) {
 	t._mu.RLock()
 	x, ok := t.torrents[id]
 	t._mu.RUnlock()
@@ -131,11 +130,14 @@ func (t *memoryseeding) Load(cl *Client, id int160.T, options ...Tuner) (_ *torr
 		return nil, false, err
 	}
 
-	dlt := newTorrent(cl, md, tuneVerifySample(unverified, 8), langx.Compose(options...))
-
 	t._mu.Lock()
 	defer t._mu.Unlock()
 
+	if x, ok := t.torrents[id]; ok {
+		return x, true, x.Tune(options...)
+	}
+
+	dlt := fn(md, tuneVerifySample(unverified, 8), langx.Compose(options...))
 	t.torrents[id] = dlt
 
 	return dlt, false, nil

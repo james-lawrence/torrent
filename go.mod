@@ -8,9 +8,11 @@ require (
 	filippo.io/edwards25519 v1.1.0
 	github.com/RoaringBitmap/roaring/v2 v2.13.0
 	github.com/alexflint/go-arg v1.6.0
+	github.com/anacrolix/go-libutp v1.3.2
 	github.com/anacrolix/missinggo v1.3.0
 	github.com/anacrolix/multiless v0.4.0
 	github.com/anacrolix/stm v0.5.0
+	github.com/anacrolix/utp v0.2.0
 	github.com/benbjohnson/immutable v0.4.3
 	github.com/bits-and-blooms/bloom/v3 v3.7.1
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
@@ -29,8 +31,10 @@ require (
 )
 
 require (
-	github.com/anacrolix/envpprof v1.3.0 // indirect
 	github.com/anacrolix/log v0.17.0 // indirect
+	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
+	github.com/anacrolix/mmsg v1.0.1 // indirect
+	github.com/anacrolix/sync v0.4.0 // indirect
 )
 
 require (

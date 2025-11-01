@@ -7,11 +7,12 @@ import (
 	"sort"
 	"sync/atomic"
 
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/metainfo"
 )
 
-type FilePathMaker func(baseDir string, infoHash metainfo.Hash, info *metainfo.Info, finfo *metainfo.FileInfo) string
+type FilePathMaker func(baseDir string, infoHash int160.T, info *metainfo.Info, finfo *metainfo.FileInfo) string
 type FileOption func(*fileClientImpl)
 
 func FileOptionPathMaker(m FilePathMaker) FileOption {
@@ -42,18 +43,18 @@ type fileClientImpl struct {
 }
 
 func fixedPathMaker(name string) FilePathMaker {
-	return func(baseDir string, infoHash metainfo.Hash, info *metainfo.Info, fi *metainfo.FileInfo) string {
+	return func(baseDir string, infoHash int160.T, info *metainfo.Info, fi *metainfo.FileInfo) string {
 		s := filepath.Join(baseDir, name)
 		return s
 	}
 }
 
-func InfoHashPathMaker(baseDir string, infoHash metainfo.Hash, info *metainfo.Info, fi *metainfo.FileInfo) string {
+func InfoHashPathMaker(baseDir string, infoHash int160.T, info *metainfo.Info, fi *metainfo.FileInfo) string {
 	s := filepath.Join(baseDir, infoHash.String(), filepath.Join(langx.DerefOrZero(fi).Path...))
 	return s
 }
 
-func infoHashPathMakerV0(baseDir string, infoHash metainfo.Hash, info *metainfo.Info, fi *metainfo.FileInfo) string {
+func infoHashPathMakerV0(baseDir string, infoHash int160.T, info *metainfo.Info, fi *metainfo.FileInfo) string {
 	return filepath.Join(baseDir, infoHash.String(), langx.DerefOrZero(info).Name, filepath.Join(langx.DerefOrZero(fi).Path...))
 }
 
@@ -69,7 +70,7 @@ func (me *fileClientImpl) Close() error {
 	return nil
 }
 
-func (fs *fileClientImpl) OpenTorrent(info *metainfo.Info, infoHash metainfo.Hash) (TorrentImpl, error) {
+func (fs *fileClientImpl) OpenTorrent(info *metainfo.Info, infoHash int160.T) (TorrentImpl, error) {
 	upverted := info.UpvertedFiles()
 	entries := make([]fileEntry, len(upverted))
 	begin := int64(0)
@@ -119,7 +120,7 @@ func createAllDirectories(entries []fileEntry) error {
 type fileTorrentImpl struct {
 	closed      atomic.Bool
 	info        *metainfo.Info
-	infoHash    metainfo.Hash
+	infoHash    int160.T
 	pathMaker   FilePathMaker
 	files       []fileEntry
 	totalLength int64
@@ -149,7 +150,7 @@ func (fs *fileTorrentImpl) Close() error {
 // Creates natives files for any zero-length file entries in the info. This is
 // a helper for file-based storages, which don't address or write to zero-
 // length files because they have no corresponding pieces.
-func CreateNativeZeroLengthFiles(dir string, infohash metainfo.Hash, info *metainfo.Info, pathMaker FilePathMaker) (err error) {
+func CreateNativeZeroLengthFiles(dir string, infohash int160.T, info *metainfo.Info, pathMaker FilePathMaker) (err error) {
 	for _, fi := range info.UpvertedFiles() {
 		if fi.Length != 0 {
 			continue
