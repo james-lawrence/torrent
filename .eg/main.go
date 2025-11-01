@@ -3,20 +3,12 @@ package main
 import (
 	"context"
 	"log"
-	"os"
 
 	"github.com/egdaemon/eg/runtime/wasi/eg"
 	"github.com/egdaemon/eg/runtime/wasi/egenv"
 	"github.com/egdaemon/eg/runtime/wasi/eggit"
-	"github.com/egdaemon/eg/runtime/wasi/env"
+	"github.com/egdaemon/eg/runtime/x/wasi/eggolang"
 )
-
-func HelloWorld(ctx context.Context, op eg.Op) error {
-	log.Println("debug initiated")
-	defer log.Println("debug completed")
-	env.Debug(os.Environ()...)
-	return nil
-}
 
 func main() {
 	ctx, done := context.WithTimeout(context.Background(), egenv.TTL())
@@ -25,7 +17,8 @@ func main() {
 	err := eg.Perform(
 		ctx,
 		eggit.AutoClone,
-		HelloWorld,
+		eggolang.AutoTest(),
+		eggolang.RecordCoverage,
 	)
 
 	if err != nil {

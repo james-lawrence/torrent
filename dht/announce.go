@@ -10,9 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anacrolix/chansync"
-	"github.com/anacrolix/chansync/events"
-
 	"github.com/james-lawrence/torrent/dht/int160"
 	dhtutil "github.com/james-lawrence/torrent/dht/k-nearest-nodes"
 	"github.com/james-lawrence/torrent/dht/krpc"
@@ -29,11 +26,13 @@ type Announce struct {
 
 	announcePeerOpts *AnnouncePeerOpts
 	scrape           bool
-	peerAnnounced    chansync.SetOnce
 
 	traversal *traversal.Operation
 
-	closed chansync.SetOnce
+	peerAnnounced chan struct{}
+	closed        chan struct{}
+	closer        *sync.Once
+	endtranversal *sync.Once
 }
 
 func (a *Announce) String() string {
@@ -85,9 +84,13 @@ func AnnouncePeer(implied bool, port int) AnnounceOpt {
 // caller.
 func (s *Server) AnnounceTraversal(ctx context.Context, infoHash [20]byte, opts ...AnnounceOpt) (_ *Announce, err error) {
 	a := &Announce{
-		Peers:    make(chan PeersValues),
-		server:   s,
-		infoHash: int160.FromByteArray(infoHash),
+		Peers:         make(chan PeersValues),
+		server:        s,
+		infoHash:      int160.FromByteArray(infoHash),
+		peerAnnounced: make(chan struct{}),
+		closed:        make(chan struct{}),
+		closer:        &sync.Once{},
+		endtranversal: &sync.Once{},
 	}
 	for _, opt := range opts {
 		opt(a)
@@ -120,8 +123,11 @@ func (s *Server) AnnounceTraversal(ctx context.Context, infoHash [20]byte, opts 
 		if a.announcePeerOpts != nil {
 			a.announceClosest(ctx)
 		}
-		a.peerAnnounced.Set()
-		close(a.Peers)
+
+		a.endtranversal.Do(func() {
+			close(a.peerAnnounced)
+			close(a.Peers)
+		})
 	}()
 
 	return a, nil
@@ -145,7 +151,7 @@ func (a *Announce) announcePeer(ctx context.Context, peer dhtutil.Elem) error {
 
 	go func() {
 		select {
-		case <-a.closed.Done():
+		case <-a.closed:
 		case <-ctx.Done():
 		}
 	}()
@@ -190,8 +196,10 @@ type PeersValues struct {
 // Stop the announce.
 func (a *Announce) Close() {
 	a.StopTraversing()
-	// This will prevent peer announces from proceeding.
-	a.closed.Set()
+	a.closer.Do(func() {
+		// This will prevent peer announces from proceeding.
+		close(a.closed)
+	})
 }
 
 func (a *Announce) logger() *log.Logger {
@@ -204,7 +212,7 @@ func (a *Announce) StopTraversing() {
 }
 
 // Traversal and peer announcing steps are done.
-func (a *Announce) Finished() events.Done {
+func (a *Announce) Finished() <-chan struct{} {
 	// This is the last step in an announce.
-	return a.peerAnnounced.Done()
+	return a.peerAnnounced
 }

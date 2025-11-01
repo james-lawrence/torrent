@@ -90,6 +90,7 @@ func TestRandomEncode(t *testing.T) {
 		assert.EqualValues(t, test.expected, string(data))
 	}
 }
+
 func BenchmarkGetEncodeFields(b *testing.B) {
 	type TestStruct struct {
 		Field1 string `bencode:"field1"`

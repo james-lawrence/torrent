@@ -7,14 +7,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anacrolix/chansync"
-	"github.com/anacrolix/chansync/events"
-
 	"github.com/james-lawrence/torrent/dht/containers"
 	"github.com/james-lawrence/torrent/dht/int160"
 	k_nearest_nodes "github.com/james-lawrence/torrent/dht/k-nearest-nodes"
 	"github.com/james-lawrence/torrent/dht/krpc"
 	"github.com/james-lawrence/torrent/dht/types"
+	"github.com/james-lawrence/torrent/internal/chansync"
 )
 
 type QueryResult struct {
@@ -115,11 +113,11 @@ func (op *Operation) Stop() {
 	}
 }
 
-func (op *Operation) Stopped() events.Done {
+func (op *Operation) Stopped() chansync.Done {
 	return op.stopped.Done()
 }
 
-func (op *Operation) Stalled() events.Active {
+func (op *Operation) Stalled() chansync.Active {
 	return op.stalled.Active()
 }
 
@@ -196,7 +194,7 @@ func (op *Operation) run() {
 		for op.outstanding < op.input.Alpha && op.haveQuery() {
 			op.startQuery()
 		}
-		var stalled events.Signal
+		var stalled chansync.Signal
 		if (!op.haveQuery() || op.input.Alpha == 0) && op.outstanding == 0 {
 			stalled = op.stalled.Signal()
 		}

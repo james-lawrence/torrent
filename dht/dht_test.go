@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anacrolix/missinggo/inproc"
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -278,7 +277,7 @@ func TestBootstrapRace(t *testing.T) {
 	ctx, done := testx.Context(t)
 	defer done()
 
-	remotePc, err := inproc.ListenPacket("", "localhost:0")
+	remotePc, err := net.ListenPacket("udp", "localhost:0")
 	require.NoError(t, err)
 	defer remotePc.Close()
 	serverPc := bootstrapRacePacketConn{

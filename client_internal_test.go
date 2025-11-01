@@ -1,7 +1,6 @@
 package torrent
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -10,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anacrolix/utp"
 	"github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/dht"
@@ -34,29 +32,20 @@ func TestingConfig(t testing.TB, dir string, options ...ClientConfigOption) *Cli
 		ClientConfigCacheDirectory(dir),
 		ClientConfigPeerID(krpc.RandomID().String()),
 		ClientConfigPortForward(false),
-		ClientConfigInfoLogger(log.New(os.Stderr, "[info] ", log.Flags())),
-		ClientConfigDebugLogger(log.New(os.Stderr, "[debug] ", log.Flags())),
+		// ClientConfigInfoLogger(log.New(os.Stderr, "[info] ", log.Flags())),
+		// ClientConfigDebugLogger(log.New(os.Stderr, "[debug] ", log.Flags())),
 		ClientConfigCompose(options...),
 	)
 }
 
 func Autosocket(t *testing.T) Binder {
 	var (
-		err      error
 		bindings []sockets.Socket
-		tsocket  *utp.Socket
 	)
 
-	tsocket, err = utp.NewSocket("udp", "localhost:0")
+	s, err := net.Listen("tcp", "localhost:")
 	require.NoError(t, err)
-
-	bindings = append(bindings, sockets.New(tsocket, tsocket))
-
-	if addr, ok := tsocket.Addr().(*net.UDPAddr); ok {
-		s, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", addr.Port))
-		require.NoError(t, err)
-		bindings = append(bindings, sockets.New(s, &net.Dialer{}))
-	}
+	bindings = append(bindings, sockets.New(s, &net.Dialer{}))
 
 	return NewSocketsBind(bindings...)
 }

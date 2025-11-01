@@ -6,9 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anacrolix/chansync"
-
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/internal/chansync"
 )
 
 type bucket struct {

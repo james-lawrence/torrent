@@ -2,11 +2,11 @@ package dht
 
 import (
 	"context"
-	"crypto/rand"
 	"net"
 	"testing"
 	"time"
 
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
@@ -25,11 +25,6 @@ func TestAnnounceNoStartingNodes(t *testing.T) {
 	require.ErrorIs(t, err, ErrDHTNoInitialNodes)
 }
 
-func randomInfohash() (ih [20]byte) {
-	rand.Read(ih[:])
-	return
-}
-
 func TestAnnounceStopsNoPending(t *testing.T) {
 	s, err := NewServer(&ServerConfig{
 		Conn: mustListen(":0"),
@@ -37,8 +32,9 @@ func TestAnnounceStopsNoPending(t *testing.T) {
 			return []Addr{NewAddr(&net.TCPAddr{})}, nil
 		},
 	})
+
 	require.NoError(t, err)
-	a, err := s.AnnounceTraversal(t.Context(), randomInfohash(), AnnouncePeer(true, 0))
+	a, err := s.AnnounceTraversal(t.Context(), int160.Random().AsByteArray(), AnnouncePeer(true, 0))
 	require.NoError(t, err)
 	defer a.Close()
 	<-a.Peers

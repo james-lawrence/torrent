@@ -4,7 +4,6 @@
 package autobind
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"os"
@@ -16,10 +15,8 @@ import (
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/netx"
-	"github.com/james-lawrence/torrent/internal/utpx"
 	"github.com/james-lawrence/torrent/sockets"
 	"github.com/james-lawrence/torrent/storage"
-	"golang.org/x/net/proxy"
 )
 
 // NewDefaultClient setup a client and connect a using defaults settings.
@@ -37,7 +34,7 @@ type Option func(*Autobind)
 
 // DisableUTP disable UTP sockets
 func DisableUTP(a *Autobind) {
-	a.DisableUTP = true
+	a.utpListen = nil
 }
 
 // DisableTCP disable TCP sockets
@@ -59,6 +56,12 @@ func EnableDHT(a *Autobind) {
 	a.EnableDHT = true
 }
 
+func UTPListener(fn func(network string, address string) (s sockets.Socket, err error)) func(*Autobind) {
+	return func(a *Autobind) {
+		a.utpListen = fn
+	}
+}
+
 // Autobind manages automatically binding a client to available networks.
 type Autobind struct {
 	// The address to listen for new uTP and TCP bittorrent protocol
@@ -69,8 +72,9 @@ type Autobind struct {
 	DisableIPv4 bool
 	DisableIPv6 bool
 	DisableTCP  bool
-	DisableUTP  bool
 	EnableDHT   bool
+	utpListen   func(network string, address string) (s sockets.Socket, err error)
+	tcpListen   func(network string, address string) (s sockets.Socket, err error)
 }
 
 // New used to automatically listen to available networks
@@ -80,6 +84,7 @@ func New(options ...Option) Autobind {
 	autobind := Autobind{
 		ListenHost: func(string) string { return "" },
 		ListenPort: 0,
+		tcpListen:  listenTCP,
 	}
 
 	for _, opt := range options {
@@ -121,10 +126,10 @@ func NewSpecified(dst string) Autobind {
 		panic(err)
 	}
 
-	return Autobind{
-		ListenHost: func(string) string { return host },
-		ListenPort: port,
-	}
+	return New(func(a *Autobind) {
+		a.ListenHost = func(string) string { return host }
+		a.ListenPort = port
+	})
 }
 
 // Bind the client to available networks. consumes the result of NewClient.
@@ -166,6 +171,9 @@ func (t Autobind) Close() error {
 func (t Autobind) listenNetworks() (ns []network) {
 	for _, n := range allPeerNetworks {
 		if t.listenOnNetwork(n) {
+			n.UTPListen = t.utpListen
+			n.TCPListen = t.tcpListen
+			n.UDP = t.utpListen != nil
 			ns = append(ns, n)
 		}
 	}
@@ -185,7 +193,11 @@ func (t Autobind) listenOnNetwork(n network) (b bool) {
 		return false
 	}
 
-	if n.UDP && t.DisableUTP && !t.EnableDHT {
+	if n.UDP && !t.EnableDHT && t.utpListen == nil {
+		return false
+	}
+
+	if n.UDP && !t.EnableDHT && t.utpListen == nil {
 		return false
 	}
 
@@ -193,7 +205,7 @@ func (t Autobind) listenOnNetwork(n network) (b bool) {
 }
 
 func (t Autobind) peerNetworkEnabled(n network) bool {
-	if t.DisableUTP && n.UDP {
+	if t.utpListen == nil && n.UDP {
 		return false
 	}
 	if t.DisableTCP && n.TCP {
@@ -208,8 +220,15 @@ func (t Autobind) peerNetworkEnabled(n network) bool {
 	return true
 }
 
-func getProxyDialer() proxy.ContextDialer {
-	return proxyContextDialer(proxy.FromEnvironment())
+func listen(n network, addr string) (sockets.Socket, error) {
+	switch {
+	case n.TCP:
+		return n.TCPListen(n.String(), addr)
+	case n.UDP:
+		return n.UTPListen(n.String(), addr)
+	default:
+		panic(n)
+	}
 }
 
 func listenAll(networks []network, getHost func(string) string, port int) ([]sockets.Socket, error) {
@@ -258,17 +277,6 @@ func listenAllRetry(nahs []networkAndHost, port int) (ss []sockets.Socket, retry
 	return
 }
 
-func listen(n network, addr string) (sockets.Socket, error) {
-	switch {
-	case n.TCP:
-		return listenTCP(n.String(), addr)
-	case n.UDP:
-		return listenUtp(n.String(), addr)
-	default:
-		panic(n)
-	}
-}
-
 func listenTCP(network, address string) (s sockets.Socket, err error) {
 	l, err := net.Listen(network, address)
 	if err != nil {
@@ -281,52 +289,8 @@ func listenTCP(network, address string) (s sockets.Socket, err error) {
 		}
 	}()
 
-	dialer := getProxyDialer()
+	dialer := netx.ProxyDialer()
 	return sockets.New(l, dialer), nil
-}
-
-func listenUtp(network, addr string) (s sockets.Socket, err error) {
-	us, err := utpx.New(network, addr)
-	if err != nil {
-		return
-	}
-
-	return sockets.New(us, us), nil
-}
-
-func proxyContextDialer(d proxy.Dialer) proxy.ContextDialer {
-	if d, ok := d.(proxy.ContextDialer); ok {
-		return d
-	}
-
-	return fakecontextdialer{d: d}
-}
-
-type fakecontextdialer struct {
-	d proxy.Dialer
-}
-
-// WARNING: this can leak a goroutine for as long as the underlying Dialer implementation takes to timeout
-// A Conn returned from a successful Dial after the context has been cancelled will be immediately closed.
-func (t fakecontextdialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	var (
-		conn net.Conn
-		done = make(chan struct{}, 1)
-		err  error
-	)
-	go func() {
-		conn, err = t.d.Dial(network, address)
-		close(done)
-		if conn != nil && ctx.Err() != nil {
-			conn.Close()
-		}
-	}()
-	select {
-	case <-ctx.Done():
-		err = ctx.Err()
-	case <-done:
-	}
-	return conn, err
 }
 
 type networkAndHost struct {

@@ -25,11 +25,11 @@ var trackers = []string{
 	"udp://tracker.leechers-paradise.org:6969",
 }
 
-func read(r io.Reader, data interface{}) error {
+func read(r io.Reader, data any) error {
 	return binary.Read(r, binary.BigEndian, data)
 }
 
-func write(w io.Writer, data interface{}) error {
+func write(w io.Writer, data any) error {
 	return binary.Write(w, binary.BigEndian, data)
 }
 

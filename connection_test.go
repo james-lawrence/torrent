@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anacrolix/utp"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
 
@@ -78,7 +77,7 @@ func genconnection(t *testing.T, seed string, n uint64, pbits, sbits pp.Extensio
 		apnetip atomic.Pointer[netip.AddrPort]
 	)
 
-	l, err := utp.Listen(":0")
+	l, err := net.Listen("tcp", ":0")
 	require.NoError(t, err)
 	cfgs := TestingConfig(t, t.TempDir(), ClientConfigSeed(true))
 	sclient, err := NewClient(cfgs)
@@ -96,7 +95,8 @@ func genconnection(t *testing.T, seed string, n uint64, pbits, sbits pp.Extensio
 		var (
 			___pconn net.Conn
 		)
-		___pconn, _perr = utp.DialContext(t.Context(), l.Addr().String())
+
+		___pconn, _perr = net.Dial(l.Addr().Network(), l.Addr().String())
 		__pconn <- ___pconn
 	}()
 

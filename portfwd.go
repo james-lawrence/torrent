@@ -7,18 +7,20 @@ import (
 	"net/netip"
 	"time"
 
-	alog "github.com/anacrolix/log"
-	"github.com/anacrolix/upnp"
 	"github.com/james-lawrence/torrent/internal/errorsx"
+	"github.com/james-lawrence/torrent/upnp"
 )
 
 func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort int, upnpID string) (_zero netip.AddrPort, err error) {
-	ip, err := d.GetExternalIPAddress()
+	ctx, done := context.WithTimeout(context.Background(), time.Minute)
+	defer done()
+
+	ip, err := d.GetExternalIPv4Address(ctx)
 	if err != nil {
 		return _zero, errorsx.Wrapf(err, "error adding %s port mapping unable to determined external ip", proto)
 	}
 
-	externalPort, err := d.AddPortMapping(proto, internalPort, internalPort, upnpID, 0)
+	externalPort, err := d.AddPortMapping(ctx, proto, internalPort, internalPort, upnpID, time.Hour)
 	if err != nil {
 		return _zero, errorsx.Wrapf(err, "error adding %s port mapping", proto)
 	}
@@ -45,7 +47,7 @@ func (cl *Client) forwardPort() {
 
 func UPnPPortForward(ctx context.Context, c *Client) (iter.Seq[netip.AddrPort], error) {
 	return func(yield func(netip.AddrPort) bool) {
-		ds := upnp.Discover(0, 2*time.Second, alog.Default.WithValues(c).WithValues("upnp-discover"))
+		ds := upnp.Discover(ctx, 0, 2*time.Second)
 		c.config.debug().Printf("discovered %d upnp devices\n", len(ds))
 		c.lock()
 		port := c.LocalPort()

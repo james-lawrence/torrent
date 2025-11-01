@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 
-	"github.com/anacrolix/utp"
 	"github.com/james-lawrence/torrent"
 	"github.com/james-lawrence/torrent/autobind"
 	"github.com/james-lawrence/torrent/sockets"
@@ -48,7 +47,7 @@ func Example_customNetworkProtocols() {
 		metadata torrent.Metadata
 	)
 
-	l, err := utp.NewSocket("udp", "0.0.0.0:0")
+	l, err := net.Listen("unix", "")
 	if err != nil {
 		log.Fatalln(err)
 		return

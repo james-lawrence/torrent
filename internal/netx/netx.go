@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/james-lawrence/torrent/internal/errorsx"
+	"golang.org/x/net/proxy"
 )
 
 // Dialer missing interface from the net package.
@@ -164,4 +165,43 @@ func DefaultPort(hostport string, fallback int) string {
 	}
 
 	return fmt.Sprintf("%s:%d", host, fallback)
+}
+
+func ProxyDialer() proxy.ContextDialer {
+	return proxyContextDialer(proxy.FromEnvironment())
+}
+
+func proxyContextDialer(d proxy.Dialer) proxy.ContextDialer {
+	if d, ok := d.(proxy.ContextDialer); ok {
+		return d
+	}
+
+	return fakecontextdialer{d: d}
+}
+
+type fakecontextdialer struct {
+	d proxy.Dialer
+}
+
+// WARNING: this can leak a goroutine for as long as the underlying Dialer implementation takes to timeout
+// A Conn returned from a successful Dial after the context has been cancelled will be immediately closed.
+func (t fakecontextdialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	var (
+		conn net.Conn
+		done = make(chan struct{}, 1)
+		err  error
+	)
+	go func() {
+		conn, err = t.d.Dial(network, address)
+		close(done)
+		if conn != nil && ctx.Err() != nil {
+			conn.Close()
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		err = ctx.Err()
+	case <-done:
+	}
+	return conn, err
 }

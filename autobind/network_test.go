@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/james-lawrence/torrent/internal/netx"
-	"github.com/james-lawrence/torrent/internal/utpx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,11 +20,6 @@ func testListenerNetwork(
 	assert.EqualValues(t, expectedNet, l.Addr().Network())
 	ip := netx.NetIPOrNil(l.Addr())
 	assert.Equal(t, validIP4, ip.To4() != nil, ip)
-}
-
-func listenUtpListener(net, addr string) (l net.Listener, err error) {
-	l, err = utpx.New(net, addr)
-	return
 }
 
 func testAcceptedConnAddr(
@@ -67,9 +61,5 @@ func dialClosure(f func(net, addr string) (net.Conn, error), network string) fun
 func TestListenLocalhostNetwork(t *testing.T) {
 	testListenerNetwork(t, net.Listen, "tcp", "tcp", "0.0.0.0:0", false)
 	testListenerNetwork(t, net.Listen, "tcp", "tcp", "[::1]:0", false)
-	testListenerNetwork(t, listenUtpListener, "udp", "udp6", "[::1]:0", false)
-	testListenerNetwork(t, listenUtpListener, "udp", "udp6", "[::]:0", false)
-	testListenerNetwork(t, listenUtpListener, "udp", "udp4", "localhost:0", true)
-
 	testAcceptedConnAddr(t, "tcp", false, dialClosure(net.Dial, "tcp"), listenClosure(net.Listen, "tcp6", ":0"))
 }
