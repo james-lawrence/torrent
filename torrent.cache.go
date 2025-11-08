@@ -111,7 +111,7 @@ func (t *memoryseeding) Insert(md Metadata, fn func(md Metadata, options ...Tune
 	return dlt, nil
 }
 
-func (t *memoryseeding) Load(id int160.T, fn func(md Metadata, options ...Tuner) *torrent, options ...Tuner) (_ *torrent, cached bool, _ error) {
+func (t *memoryseeding) Load(id int160.T, fn func(md Metadata, options ...Tuner) *torrent, options ...Tuner) (dlt *torrent, cached bool, _ error) {
 	t._mu.RLock()
 	x, ok := t.torrents[id]
 	t._mu.RUnlock()
@@ -130,17 +130,25 @@ func (t *memoryseeding) Load(id int160.T, fn func(md Metadata, options ...Tuner)
 		return nil, false, err
 	}
 
-	t._mu.Lock()
-	defer t._mu.Unlock()
+	buildfn := func(id int160.T) (*torrent, bool, error) {
+		t._mu.Lock()
+		defer t._mu.Unlock()
 
-	if x, ok := t.torrents[id]; ok {
-		return x, true, x.Tune(options...)
+		if x, ok := t.torrents[id]; ok {
+			return x, true, x.Tune(options...)
+		}
+
+		x := fn(md, options...)
+		t.torrents[id] = x
+
+		return x, false, nil
 	}
 
-	dlt := fn(md, tuneVerifySample(unverified, 8), langx.Compose(options...))
-	t.torrents[id] = dlt
+	if dlt, cached, err = buildfn(id); err != nil {
+		return dlt, false, err
+	}
 
-	return dlt, false, nil
+	return dlt, cached, dlt.Tune(tuneVerifySample(unverified, 8))
 }
 
 func (t *memoryseeding) Metadata(id int160.T) (md Metadata, err error) {
