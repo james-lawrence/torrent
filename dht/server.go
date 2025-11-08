@@ -248,7 +248,7 @@ func NewServer(c *ServerConfig) (s *Server, err error) {
 func (s *Server) isClosed() bool {
 	select {
 	case _, ok := <-s.closed:
-		return ok
+		return !ok
 	default:
 		return false
 	}
