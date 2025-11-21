@@ -334,7 +334,7 @@ func TuneVerifySample(n uint64) Tuner {
 func tuneVerifySample(unverified *roaring.Bitmap, n uint64) Tuner {
 	return func(t *torrent) {
 		t.chunks.InitFromUnverified(unverified)
-		t.Tune(TuneVerifySample(8))
+		t.Tune(TuneVerifySample(n))
 	}
 }
 
@@ -466,7 +466,8 @@ func VerifyStored(ctx context.Context, md *metainfo.MetaInfo, t io.ReaderAt) (mi
 
 func zeroTorrent(md Metadata, options ...Tuner) *torrent {
 	mu := &sync.RWMutex{}
-	return &torrent{
+	chunkcond := sync.NewCond(&sync.Mutex{})
+	tmp := &torrent{
 		_mu: mu,
 		md:  md,
 		peers: newPeerPool(32, func(p Peer) peerPriority {
@@ -483,7 +484,12 @@ func zeroTorrent(md Metadata, options ...Tuner) *torrent {
 		closed:                  make(chan struct{}),
 		lastConnection:          atomicx.Pointer(time.Now()),
 		event:                   &sync.Cond{L: mu},
+		chunks:                  newChunks(defaultChunkSize, metainfo.NewInfo(), chunkoptCond(chunkcond)),
 	}
+
+	*tmp.digests = newDigestsFromTorrent(tmp)
+
+	return tmp
 }
 
 func newTorrent(cl *Client, src Metadata, options ...Tuner) *torrent {
@@ -510,8 +516,8 @@ func newTorrent(cl *Client, src Metadata, options ...Tuner) *torrent {
 		wantPeersEvent:          make(chan struct{}, 1),
 		closed:                  make(chan struct{}),
 		lastConnection:          atomicx.Pointer(time.Now()),
+		event:                   &sync.Cond{L: m},
 	}
-	t.event = &sync.Cond{L: tlocker{torrent: t}}
 	*t.digests = newDigestsFromTorrent(t)
 	if err := t.setInfoBytes(src.InfoBytes); err != nil {
 		log.Println("encountered an error setting info bytes", len(src.InfoBytes), err)
@@ -752,7 +758,7 @@ func (t *torrent) setChunkSize(size uint64) {
 	t.md.ChunkSize = size
 	// potential bug here use to be '*t.chunks = *newChunks(...)' change to straight assignment to deal with
 	// Unlock called on a non-locked mutex.
-	*t.chunks = *newChunks(size, langx.DefaultIfZero(metainfo.NewInfo(), t.info), chunkoptMutex(t.chunks.mu), chunkoptCond(t.chunks.cond), chunkoptCompleted(t.chunks.completed))
+	*t.chunks = *newChunks(size, langx.FirstNonZero(t.info, metainfo.NewInfo()), chunkoptMutex(t.chunks.mu), chunkoptCond(t.chunks.cond), chunkoptCompleted(t.chunks.completed))
 }
 
 // There's a connection to that address already.
@@ -857,8 +863,8 @@ func (t *torrent) setInfo(info *metainfo.Info) (err error) {
 
 	t.nameMu.Lock()
 	t.info = info
-	t.setChunkSize(langx.DefaultIfZero(defaultChunkSize, t.md.ChunkSize))
 	t.md.InfoBytes = t.metadataBytes
+	t.setChunkSize(langx.FirstNonZero(t.md.ChunkSize, defaultChunkSize))
 	t.nameMu.Unlock()
 
 	t.initFiles()
@@ -989,6 +995,8 @@ func (t *torrent) usualPieceSize() int {
 }
 
 func (t *torrent) close() (err error) {
+	defer t.event.Broadcast()
+
 	t.lock()
 	defer t.unlock()
 
@@ -1009,8 +1017,6 @@ func (t *torrent) close() (err error) {
 
 		t.storage.Close()
 	}()
-
-	t.event.Broadcast()
 
 	return err
 }
@@ -1080,7 +1086,6 @@ func (t *torrent) incrementReceivedConns(c *connection, delta int64) {
 
 func (t *torrent) maybeNewConns() {
 	// Tickle the accept routine.
-	t.cln.event.Broadcast()
 	t.openNewConns()
 }
 
@@ -1670,16 +1675,4 @@ func (t *torrent) gotMetadataExtensionMsg(payload []byte, c *connection) error {
 	default:
 		return errorsx.New("unknown msg_type value")
 	}
-}
-
-type tlocker struct {
-	*torrent
-}
-
-func (t tlocker) Lock() {
-	t._lock(4)
-}
-
-func (t tlocker) Unlock() {
-	t._unlock(4)
 }

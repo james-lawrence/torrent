@@ -33,7 +33,6 @@ func RunHandshookConn(c *connection, t *torrent) error {
 	t.lastConnection.Store(langx.Autoptr(time.Now()))
 	completedHandshakeConnectionFlags.Add(c.connectionFlags(), 1)
 
-	defer t.event.Broadcast()
 	defer t.dropConnection(c)
 
 	if err := t.addConnection(c); err != nil {

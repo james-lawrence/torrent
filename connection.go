@@ -279,7 +279,6 @@ func (cn *connection) utp() bool {
 func (cn *connection) Close() {
 	// cn.cfg.debug().Output(2, fmt.Sprintf("c(%p) seed(%t) Close initiated\n", cn, cn.t.seeding()))
 	// defer cn.cfg.debug().Output(2, fmt.Sprintf("c(%p) seed(%t) Close initiated\n", cn, cn.t.seeding()))
-	defer cn.t.cln.event.Broadcast()
 	defer cn.deleteAllRequests()
 	cn.cmu().Lock()
 	defer cn.cmu().Unlock()
