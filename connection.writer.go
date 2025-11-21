@@ -88,7 +88,7 @@ func connflush(cn *connection, n cstate.T) cstate.T {
 	return cstate.Fn(func(context.Context, *cstate.Shared) cstate.T {
 		_, err := cn.Flush()
 		if err != nil {
-			return cstate.Failure(errorsx.Wrap(err, "failed to send requests"))
+			return cstate.Failure(errorsx.Wrap(err, "failed to flush requests"))
 		}
 		return n
 	})
