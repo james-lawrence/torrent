@@ -24,8 +24,6 @@ func newDigestsFromTorrent(t *torrent) digests {
 			// log.Printf("hashed %p %d / %d - %v", t.chunks, idx+1, t.chunks.pieces, cause)
 			t.chunks.Hashed(uint64(idx), cause)
 
-			t.event.Broadcast()
-			t.cln.event.Broadcast() // cause the client to detect completed torrents.
 			t.pieceStateChanges.Publish(idx)
 
 			return func() {

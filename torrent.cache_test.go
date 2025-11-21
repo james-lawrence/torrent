@@ -96,7 +96,7 @@ func TestTorrentCache(t *testing.T) {
 	t.Run("drop non-existent torrent", func(t *testing.T) {
 		tmpdir := t.TempDir()
 		c := NewCache(NewMetadataCache(tmpdir), NewBitmapCache(tmpdir))
-		id := int160.FromBytes([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20})
+		id := int160.Random()
 		require.NoError(t, c.Drop(id))
 		require.NoError(t, c.Close())
 	})
@@ -120,7 +120,7 @@ func TestTorrentCache(t *testing.T) {
 	t.Run("sync non-existent torrent", func(t *testing.T) {
 		tmpdir := t.TempDir()
 		c := NewCache(NewMetadataCache(tmpdir), NewBitmapCache(tmpdir))
-		id := int160.FromBytes([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20})
+		id := int160.Random()
 		require.NoError(t, c.Sync(id))
 		require.NoError(t, c.Close())
 	})
@@ -225,6 +225,8 @@ func TestTorrentCache(t *testing.T) {
 		blocked := make(chan struct{})
 
 		go func() {
+			defer wg.Done()
+
 			<-start
 			tor, err := c.Insert(md, func(md Metadata, options ...Tuner) *torrent {
 				<-blocked
@@ -232,10 +234,11 @@ func TestTorrentCache(t *testing.T) {
 			})
 			require.NoError(t, err)
 			torrents <- tor
-			wg.Done()
 		}()
 
 		go func() {
+			defer wg.Done()
+
 			<-start
 			tor, _, err := c.Load(md.ID, func(md Metadata, options ...Tuner) *torrent {
 				<-blocked
@@ -243,7 +246,7 @@ func TestTorrentCache(t *testing.T) {
 			})
 			require.NoError(t, err)
 			torrents <- tor
-			wg.Done()
+
 		}()
 
 		// wake all the insert routines.
@@ -252,6 +255,7 @@ func TestTorrentCache(t *testing.T) {
 		close(blocked)
 
 		wg.Wait()
+
 		close(torrents)
 
 		var firstTor *torrent

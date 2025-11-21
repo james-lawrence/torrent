@@ -58,17 +58,14 @@ func (t *memoryseeding) Sync(id int160.T) error {
 
 // clear torrent from memory
 func (t *memoryseeding) Drop(id int160.T) error {
-	t._mu.RLock()
+	t._mu.Lock()
 	c, ok := t.torrents[id]
-	t._mu.RUnlock()
+	delete(t.torrents, id)
+	t._mu.Unlock()
 
 	if !ok {
 		return nil
 	}
-
-	t._mu.Lock()
-	delete(t.torrents, id)
-	t._mu.Unlock()
 
 	// only record if the info is there.
 	if c.haveInfo() {
@@ -92,6 +89,11 @@ func (t *memoryseeding) Insert(md Metadata, fn func(md Metadata, options ...Tune
 
 	t._mu.Lock()
 	defer t._mu.Unlock()
+
+	if x, ok := t.torrents[id]; ok {
+		return x, x.Tune(options...)
+	}
+
 	// only record if the info is there.
 	if len(md.InfoBytes) > 0 {
 		if err := t.MetadataStore.Write(md); err != nil {
@@ -120,16 +122,6 @@ func (t *memoryseeding) Load(id int160.T, fn func(md Metadata, options ...Tuner)
 		return x, true, x.Tune(options...)
 	}
 
-	md, err := t.MetadataStore.Read(id)
-	if err != nil {
-		return nil, false, err
-	}
-
-	unverified, err := t.bm.Read(id)
-	if err != nil {
-		return nil, false, err
-	}
-
 	buildfn := func(id int160.T) (*torrent, bool, error) {
 		t._mu.Lock()
 		defer t._mu.Unlock()
@@ -138,14 +130,28 @@ func (t *memoryseeding) Load(id int160.T, fn func(md Metadata, options ...Tuner)
 			return x, true, x.Tune(options...)
 		}
 
+		md, err := t.MetadataStore.Read(id)
+		if err != nil {
+			return nil, false, err
+		}
+
 		x := fn(md, options...)
 		t.torrents[id] = x
 
 		return x, false, nil
 	}
 
+	var (
+		err error
+	)
+
 	if dlt, cached, err = buildfn(id); err != nil {
 		return dlt, false, err
+	}
+
+	unverified, err := t.bm.Read(id)
+	if err != nil {
+		return nil, false, err
 	}
 
 	return dlt, cached, dlt.Tune(tuneVerifySample(unverified, 8))

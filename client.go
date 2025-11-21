@@ -57,7 +57,6 @@ type Client struct {
 
 	dynamicaddr atomic.Pointer[netip.AddrPort]
 	_mu         *sync.RWMutex
-	event       sync.Cond
 	closed      chan struct{}
 
 	config *ClientConfig
@@ -151,9 +150,6 @@ func (cl *Client) start(md Metadata, options ...Tuner) (dlt *torrent, added bool
 
 	dlt.updateWantPeersEvent()
 
-	// Tickle Client.waitAccept, new torrent may want conns.
-	cl.event.Broadcast()
-
 	return dlt, true, nil
 }
 
@@ -217,7 +213,6 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 		_mu:      &sync.RWMutex{},
 		dialing:  netx.NewRacing(cfg.dialPoolSize), // four concurrent dials per cpu seems a reasonable starting point.
 	}
-	cl.event.L = cl.locker()
 
 	defer func() {
 		if err != nil {
@@ -366,7 +361,6 @@ func (cl *Client) Close() error {
 	for _, f := range cl.onClose {
 		f()
 	}
-	cl.event.Broadcast()
 
 	return nil
 }
@@ -543,8 +537,6 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (e
 	}
 
 	defer t.deleteConnection(c)
-	defer t.event.Broadcast()
-	defer cl.event.Broadcast()
 
 	return RunHandshookConn(c, t)
 }
@@ -835,28 +827,6 @@ func (cl *Client) unlock() {
 	// l2.Output(2, fmt.Sprintf("%p unlock completed - %d", cl, updated))
 }
 
-func (cl *Client) locker() sync.Locker {
-	return clientLocker{cl}
-}
-
 func (cl *Client) String() string {
 	return fmt.Sprintf("<%[1]T %[1]p>", cl)
-}
-
-type clientLocker struct {
-	*Client
-}
-
-func (cl clientLocker) Lock() {
-	// updated := atomic.AddUint64(&cl.lcount, 1)
-	// l2.Output(2, fmt.Sprintf("%p lock initiated - %d", cl.Client, updated))
-	cl._mu.Lock()
-	// l2.Output(2, fmt.Sprintf("%p lock completed - %d", cl.Client, updated))
-}
-
-func (cl clientLocker) Unlock() {
-	// updated := atomic.AddUint64(&cl.ucount, 1)
-	// l2.Output(2, fmt.Sprintf("%p unlock initiated - %d", cl.Client, updated))
-	cl._mu.Unlock()
-	// l2.Output(2, fmt.Sprintf("%p unlock completed - %d", cl.Client, updated))
 }

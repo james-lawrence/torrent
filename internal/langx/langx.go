@@ -23,6 +23,22 @@ func DerefOrZero[T any](a *T) (zero T) {
 	return *a
 }
 
+func FirstNonZero[T comparable](s ...T) T {
+	var (
+		x T
+	)
+
+	for _, v := range s {
+		if v == x {
+			continue
+		}
+
+		return v
+	}
+
+	return x
+}
+
 func DefaultIfZero[T comparable](fallback T, v T) T {
 	var (
 		x T
