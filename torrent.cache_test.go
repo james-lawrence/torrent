@@ -225,6 +225,8 @@ func TestTorrentCache(t *testing.T) {
 		blocked := make(chan struct{})
 
 		go func() {
+			defer wg.Done()
+
 			<-start
 			tor, err := c.Insert(md, func(md Metadata, options ...Tuner) *torrent {
 				<-blocked
@@ -232,10 +234,11 @@ func TestTorrentCache(t *testing.T) {
 			})
 			require.NoError(t, err)
 			torrents <- tor
-			wg.Done()
 		}()
 
 		go func() {
+			defer wg.Done()
+
 			<-start
 			tor, _, err := c.Load(md.ID, func(md Metadata, options ...Tuner) *torrent {
 				<-blocked
@@ -243,7 +246,7 @@ func TestTorrentCache(t *testing.T) {
 			})
 			require.NoError(t, err)
 			torrents <- tor
-			wg.Done()
+
 		}()
 
 		// wake all the insert routines.
@@ -252,6 +255,7 @@ func TestTorrentCache(t *testing.T) {
 		close(blocked)
 
 		wg.Wait()
+
 		close(torrents)
 
 		var firstTor *torrent

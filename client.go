@@ -827,28 +827,6 @@ func (cl *Client) unlock() {
 	// l2.Output(2, fmt.Sprintf("%p unlock completed - %d", cl, updated))
 }
 
-func (cl *Client) locker() sync.Locker {
-	return clientLocker{cl}
-}
-
 func (cl *Client) String() string {
 	return fmt.Sprintf("<%[1]T %[1]p>", cl)
-}
-
-type clientLocker struct {
-	*Client
-}
-
-func (cl clientLocker) Lock() {
-	// updated := atomic.AddUint64(&cl.lcount, 1)
-	// l2.Output(2, fmt.Sprintf("%p lock initiated - %d", cl.Client, updated))
-	cl._mu.Lock()
-	// l2.Output(2, fmt.Sprintf("%p lock completed - %d", cl.Client, updated))
-}
-
-func (cl clientLocker) Unlock() {
-	// updated := atomic.AddUint64(&cl.ucount, 1)
-	// l2.Output(2, fmt.Sprintf("%p unlock initiated - %d", cl.Client, updated))
-	cl._mu.Unlock()
-	// l2.Output(2, fmt.Sprintf("%p unlock completed - %d", cl.Client, updated))
 }

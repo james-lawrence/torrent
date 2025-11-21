@@ -94,18 +94,26 @@ func RandomMulti(dir string, n int, min int64, max int64, options ...metainfo.Op
 	return info, nil
 }
 
-// RandomDataTorrent generates a torrent from the provided io.Reader
+// IOTorrent generates a torrent from the provided io.Reader
 func IOTorrent(dir string, src io.Reader, n uint64) (d *os.File, err error) {
 	if d, err = os.CreateTemp(dir, "random.torrent.*.bin"); err != nil {
 		return d, err
 	}
 	defer func() {
-		if err != nil {
-			os.Remove(d.Name())
+		if err == nil {
+			return
 		}
+
+		// cleanup failed creation.
+		os.Remove(d.Name())
 	}()
 
 	if _, err = io.CopyN(d, src, int64(n)); err != nil {
+		return d, err
+	}
+
+	// important without this we corrupt the torrent on disk during rename?
+	if err = d.Sync(); err != nil {
 		return d, err
 	}
 
