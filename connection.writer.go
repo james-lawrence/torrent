@@ -116,7 +116,7 @@ func connexinit(cn *connection, n cstate.T) cstate.T {
 			Ipv6:         cn.cfg.publicIP6.To16(),
 		}
 
-		// cn.cfg.debug().Printf("c(%p) seed(%t) extended handshake: %s\n", cn, cn.t.seeding(), spew.Sdump(msg))
+		// cn.cfg.debug().Printf("%s extended handshake: %s\n", cn, spew.Sdump(msg))
 
 		encoded, err := bencode.Marshal(msg)
 		if err != nil {
@@ -370,7 +370,6 @@ type _connWriterInterested struct {
 
 func (t _connWriterInterested) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {
 	ws := t.writerstate
-
 	if ws.t.chunks.Incomplete() {
 		return t.next
 	}

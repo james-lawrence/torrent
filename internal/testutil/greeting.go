@@ -35,7 +35,9 @@ func CreateDummyTorrentData(dirName string) string {
 	f, err := os.Create(filepath.Join(dirName))
 	errorsx.Panic(err)
 	defer f.Close()
-	f.WriteString(GreetingFileContents)
+	_, err = f.WriteString(GreetingFileContents)
+	errorsx.Panic(err)
+
 	return f.Name()
 }
 

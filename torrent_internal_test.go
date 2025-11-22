@@ -1,15 +1,16 @@
 package torrent
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/james-lawrence/torrent/bencode"
 	pp "github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/testutil"
-	"github.com/james-lawrence/torrent/torrenttest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -103,11 +104,6 @@ func TestPieceHashFailed(t *testing.T) {
 // Check the behaviour of Torrent.Metainfo when metadata is not completed.
 func TestTorrentMetainfoIncompleteMetadata(t *testing.T) {
 	cfg := TestingConfig(t, t.TempDir())
-	// cfg.HeaderObfuscationPolicy = HeaderObfuscationPolicy{
-	// 	Preferred:        false,
-	// 	RequirePreferred: false,
-	// }
-	// cfg.Debug = log.New(os.Stderr, "[debug] ", log.Flags())
 	cl, err := Autosocket(t).Bind(NewClient(cfg))
 	require.NoError(t, err)
 	defer cl.Close()
@@ -124,6 +120,7 @@ func TestTorrentMetainfoIncompleteMetadata(t *testing.T) {
 	nc, err := net.Dial("tcp", fmt.Sprintf(":%d", cl.LocalPort()))
 	require.NoError(t, err)
 	defer nc.Close()
+	defer cl.Stop(ts)
 
 	var pex pp.ExtensionBits
 	pex.SetBit(pp.ExtensionBitExtended)
@@ -139,38 +136,27 @@ func TestTorrentMetainfoIncompleteMetadata(t *testing.T) {
 	assert.EqualValues(t, ih, info.Hash)
 	assert.EqualValues(t, 0, tt.(*torrent).metadatalen())
 
-	func() {
-		tt.(*torrent).lock()
-		defer tt.(*torrent).unlock()
-		go func() {
-			_, err = nc.Write(pp.Message{
-				Type:       pp.Extended,
-				ExtendedID: pp.HandshakeExtendedID,
-				ExtendedPayload: func() []byte {
-					d := map[string]interface{}{
-						"metadata_size": len(mi.InfoBytes),
-					}
-					b, err := bencode.Marshal(d)
-					if err != nil {
-						panic(err)
-					}
-					return b
-				}(),
-			}.MustMarshalBinary())
-			require.NoError(t, err)
-		}()
+	d := pp.ExtendedHandshakeMessage{
+		M: map[pp.ExtensionName]pp.ExtensionNumber{
+			pp.ExtensionNameMetadata: pp.MetadataExtendedID,
+		},
+		MetadataSize: len(mi.InfoBytes),
+	}
 
-		c := tt.(*torrent).conns.list()[0]
-		d := pp.NewDecoder(c.r, c.t.chunks.pool)
+	b, err := bencode.Marshal(d)
+	require.NoError(t, err)
+	_, err = nc.Write(pp.Message{
+		Type:            pp.Extended,
+		ExtendedID:      pp.HandshakeExtendedID,
+		ExtendedPayload: b,
+	}.MustMarshalBinary())
+	require.NoError(t, err)
 
-		// receive the metadata payload.
-		msg, err := c.ReadOne(t.Context(), d)
-		require.NoError(t, err)
-		torrenttest.RequireMessageType(t, pp.Extended, msg.Type)
-		require.Equal(t, 23, len(msg.ExtendedPayload))
-	}()
-
-	assert.Equal(t, make([]byte, len(mi.InfoBytes)), tt.(*torrent).metadataBytes)
+	// waits for the torrent to receive the metadata extension message
+	assert.Eventually(t, func() bool {
+		return bytes.Equal(make([]byte, len(mi.InfoBytes)), tt.(*torrent).metadataBytes)
+	}, time.Minute, 10*time.Millisecond)
+	assert.EqualValues(t, 119, tt.(*torrent).metadatalen())
 	assert.False(t, tt.(*torrent).haveAllMetadataPieces())
 	assert.Nil(t, tt.(*torrent).Metadata().InfoBytes)
 }

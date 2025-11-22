@@ -374,7 +374,7 @@ func ClientConfigPEX(b bool) ClientConfigOption {
 func ClientConfigMetadata(b bool) ClientConfigOption {
 	return func(cc *ClientConfig) {
 		if b {
-			cc.extensions[pp.ExtensionNameMetadata] = pp.PEXExtendedID
+			cc.extensions[pp.ExtensionNameMetadata] = pp.MetadataExtendedID
 		} else {
 			delete(cc.extensions, pp.ExtensionNameMetadata)
 		}
