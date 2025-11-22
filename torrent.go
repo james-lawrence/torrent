@@ -994,7 +994,7 @@ func (t *torrent) usualPieceSize() int {
 	return int(t.info.PieceLength)
 }
 
-func (t *torrent) close() (err error) {
+func (t *torrent) close() error {
 	defer t.event.Broadcast()
 
 	t.lock()
@@ -1002,6 +1002,7 @@ func (t *torrent) close() (err error) {
 
 	select {
 	case <-t.closed:
+		return nil
 	default:
 		close(t.closed)
 	}
@@ -1018,7 +1019,7 @@ func (t *torrent) close() (err error) {
 		t.storage.Close()
 	}()
 
-	return err
+	return nil
 }
 
 func (t *torrent) writeChunk(piece int, begin int64, data []byte) (err error) {
