@@ -607,7 +607,7 @@ func (cn *connection) requestPendingMetadata() {
 		return
 	}
 
-	cn.cfg.debug().Println("metadata ex: requesting metadata")
+	cn.cfg.debug().Printf("%s metadata ext: requesting metadata\n", cn)
 
 	// Request metadata pieces that we don't have in a random order.
 	var pending []int
