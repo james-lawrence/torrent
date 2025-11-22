@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"net"
 	"net/netip"
 	"path/filepath"
@@ -34,9 +35,15 @@ type ClientOperation func(*Client) error
 
 func ClientOperationClearIdleTorrents(idle func(Stats) bool) ClientOperation {
 	return func(c *Client) error {
+		log.Println("clearing idle torrents initiated")
+		defer log.Println("clearing idle torrents completed")
+
 		c.torrents._mu.Lock()
-		defer c.torrents._mu.Unlock()
-		for id, t := range c.torrents.torrents {
+		cpy := make(map[int160.T]*torrent, len(c.torrents.torrents))
+		maps.Copy(cpy, c.torrents.torrents)
+		c.torrents._mu.Unlock()
+
+		for id, t := range cpy {
 			if !idle(t.Stats()) {
 				continue
 			}
