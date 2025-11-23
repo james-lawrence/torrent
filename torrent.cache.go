@@ -1,7 +1,6 @@
 package torrent
 
 import (
-	"log"
 	"sync"
 
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -24,8 +23,6 @@ type memoryseeding struct {
 }
 
 func (t *memoryseeding) Close() error {
-	log.Println("Close initiated")
-	defer log.Println("Close completed")
 	t._mu.Lock()
 	defer t._mu.Unlock()
 
@@ -40,8 +37,6 @@ func (t *memoryseeding) Close() error {
 
 // sync bitmap to disk
 func (t *memoryseeding) Sync(id int160.T) error {
-	log.Println("Sync initiated", id)
-	defer log.Println("Sync completed", id)
 	t._mu.Lock()
 	defer t._mu.Unlock()
 	c, ok := t.torrents[id]
@@ -61,8 +56,6 @@ func (t *memoryseeding) Sync(id int160.T) error {
 
 // clear torrent from memory
 func (t *memoryseeding) Drop(id int160.T) error {
-	log.Printf("Drop initiated %s\n", id)
-	defer log.Printf("Drop completed %s\n", id)
 	if err := t.Sync(id); err != nil {
 		return err
 	}
@@ -87,9 +80,6 @@ func (t *memoryseeding) Insert(md Metadata, fn func(md Metadata, options ...Tune
 	if ok {
 		return x, x.Tune(options...)
 	}
-
-	log.Println("Insert initiated", id)
-	defer log.Println("Insert completed", id)
 
 	buildfn := func(id int160.T) (*torrent, error) {
 		t._mu.Lock()
@@ -122,7 +112,7 @@ func (t *memoryseeding) Insert(md Metadata, fn func(md Metadata, options ...Tune
 	if err != nil {
 		return nil, err
 	}
-	log.Println("verifying", id)
+
 	return dlt, dlt.Tune(tuneVerifySample(unverified, 8))
 }
 
@@ -134,9 +124,6 @@ func (t *memoryseeding) Load(id int160.T, fn func(md Metadata, options ...Tuner)
 	if ok {
 		return x, true, x.Tune(options...)
 	}
-
-	log.Println("Load initiated", id)
-	defer log.Println("Load completed", id)
 
 	buildfn := func(id int160.T) (*torrent, bool, error) {
 		t._mu.Lock()
@@ -170,13 +157,10 @@ func (t *memoryseeding) Load(id int160.T, fn func(md Metadata, options ...Tuner)
 		return nil, false, err
 	}
 
-	log.Println("verifying", id)
 	return dlt, cached, dlt.Tune(tuneVerifySample(unverified, 8))
 }
 
 func (t *memoryseeding) Metadata(id int160.T) (md Metadata, err error) {
-	log.Println("Metadata initiated", id)
-	defer log.Println("Metadata completed", id)
 	t._mu.RLock()
 	defer t._mu.RUnlock()
 
