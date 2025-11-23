@@ -253,7 +253,7 @@ func (cl *Client) newDhtServer(conn net.PacketConn) (s *dht.Server, err error) {
 			return res, err
 		},
 		OnQuery:     cl.config.DHTOnQuery,
-		Logger:      newlogger(cl.config.Logger, "dht", log.Flags()),
+		Logger:      newlogger(cl.config.Debug, "dht", log.Flags()),
 		BucketLimit: cl.config.bucketLimit,
 	}
 

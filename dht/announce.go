@@ -146,7 +146,7 @@ func (a *Announce) announceClosest(ctx context.Context) {
 }
 
 func (a *Announce) announcePeer(ctx context.Context, peer dhtutil.Elem) error {
-	ctx, done := context.WithTimeout(ctx, 5*time.Second)
+	ctx, done := context.WithTimeout(ctx, 30*time.Second)
 	defer done()
 
 	go func() {
