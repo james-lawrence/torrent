@@ -833,9 +833,9 @@ func (s *Server) Query(ctx context.Context, addr Addr, input QueryInput) (ret Qu
 }
 
 // Sends a ping query to the address given.
-func (s *Server) PingQueryInput(node net.Addr, qi QueryInput) QueryResult {
+func (s *Server) PingQueryInput(ctx context.Context, node net.Addr, qi QueryInput) QueryResult {
 	addr := NewAddr(node)
-	res := Ping3S(context.Background(), s, addr, s.ID())
+	res := PingDuration(ctx, 30*time.Second, s, addr, s.ID())
 	if res.Err == nil {
 		id := res.Reply.SenderID()
 		if id != nil {
@@ -848,7 +848,7 @@ func (s *Server) PingQueryInput(node net.Addr, qi QueryInput) QueryResult {
 
 // Sends a ping query to the address given.
 func (s *Server) Ping(node net.Addr) QueryResult {
-	return s.PingQueryInput(node, QueryInput{})
+	return s.PingQueryInput(context.Background(), node, QueryInput{})
 }
 
 // Put adds a new item to node. You need to call Get first for a write token.

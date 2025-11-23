@@ -77,11 +77,20 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 	trackers := t.md.Trackers
 
 	for {
+		var (
+			totalpeers       = 0
+			failed     error = nil
+		)
+
 		for _, uri := range trackers {
 			t.cln.config.debug().Println("announced initiated", t.md.DisplayName, t.Metadata().DisplayName, len(trackers), uri)
 			ctx, done := context.WithTimeout(context.Background(), time.Minute)
 			d, peers, err := TrackerAnnounceOnce(ctx, t, uri, options...)
 			done()
+
+			totalpeers += len(peers)
+			failed = langx.FirstNonZero(failed, errorsx.Ignore(err, ErrNoPeers))
+
 			t.cln.config.debug().Println("announced completed", t.md.DisplayName, t.Metadata().DisplayName, len(trackers), uri)
 
 			if errorsx.Is(err, context.DeadlineExceeded) {
@@ -109,11 +118,15 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 			}
 
 			if err == ErrNoPeers {
-				log.Println("announce succeeded, but there are no peers")
 				continue
 			}
 
 			t.cln.config.debug().Println("announce failed", t.info == nil, err)
+		}
+
+		if totalpeers > 0 && failed == nil {
+			log.Println("announce succeeded, but there are no peers", t.Metadata().ID.String(), len(trackers))
+			continue
 		}
 
 		t.cln.config.debug().Println("announce sleeping for maximum delay", t.Metadata().ID.String(), delay)

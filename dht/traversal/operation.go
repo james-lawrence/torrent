@@ -241,7 +241,7 @@ func (op *Operation) startQuery() {
 		}()
 		// log.Printf("traversal querying %v", a)
 		atomic.AddUint32(&op.stats.NumAddrsTried, 1)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		go func() {
 			select {
 			case <-ctx.Done():

@@ -25,7 +25,11 @@ func Ping(ctx context.Context, q Queryer, to Addr, from krpc.ID) QueryResult {
 }
 
 func Ping3S(ctx context.Context, q Queryer, to Addr, from krpc.ID) QueryResult {
-	ctx, done := context.WithTimeout(ctx, 3*time.Second)
+	return PingDuration(ctx, 3*time.Second, q, to, from)
+}
+
+func PingDuration(ctx context.Context, d time.Duration, q Queryer, to Addr, from krpc.ID) QueryResult {
+	ctx, done := context.WithTimeout(ctx, d)
 	defer done()
 	return Ping(ctx, q, to, from)
 }
