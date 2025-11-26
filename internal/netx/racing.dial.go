@@ -73,23 +73,23 @@ type RacingDialer struct {
 	arena *asynccompute.Pool[racingdialworkload]
 }
 
-func (t RacingDialer) Dial(_ctx context.Context, timeout time.Duration, address string, networks ...DialableNetwork) (net.Conn, error) {
-	_ctx, done := context.WithTimeout(_ctx, timeout)
+func (t RacingDialer) Dial(ctx context.Context, timeout time.Duration, address string, networks ...DialableNetwork) (net.Conn, error) {
+	_ctx, done := context.WithTimeout(ctx, timeout)
 	defer done()
-	_ctx, cancel := context.WithCancelCause(_ctx)
+	__ctx, cancel := context.WithCancelCause(_ctx)
 	defer cancel(nil)
 
 	w := initRacingDial(address, timeout, uint64(len(networks)), cancel)
 
-	queue := func(__ctx context.Context, _w racingdialworkload) error {
-		return t.arena.Run(__ctx, _w)
+	queue := func(___ctx context.Context, _w racingdialworkload) error {
+		return t.arena.Run(___ctx, _w)
 	}
 
 	for _, n := range networks {
 		dup := w
 		dup.network = n
 
-		if err := queue(_ctx, dup); err != nil {
+		if err := queue(__ctx, dup); err != nil {
 			cancel(errorsx.Wrapf(err, "timeout: %d", timeout))
 			return nil, err
 		}
@@ -105,9 +105,9 @@ func (t RacingDialer) Dial(_ctx context.Context, timeout time.Duration, address 
 	failure := langx.Autoderef(w.failure.Load())
 
 	if fastest == nil {
-		return nil, errorsx.Compact(failure, context.Cause(_ctx))
+		return nil, errorsx.Compact(failure, context.Cause(__ctx))
 	}
 
-	failure = errorsx.Compact(failure, context.Cause(_ctx))
+	failure = errorsx.Compact(failure, context.Cause(__ctx))
 	return fastest, errorsx.Ignore(failure, context.Canceled)
 }
