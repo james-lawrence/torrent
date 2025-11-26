@@ -513,7 +513,10 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (e
 		err = errorsx.StdlibTimeout(err, 300*time.Millisecond, syscall.ECONNRESET)
 	}()
 
-	if err = cl.config.dialRateLimiter.Wait(ctx); err != nil {
+	dctx, done := context.WithTimeout(ctx, time.Second)
+	err = cl.config.dialRateLimiter.Wait(dctx)
+	done()
+	if err != nil {
 		t.peers.Attempted(p, nil)
 		return errorsx.Wrap(err, "dial rate limit failed")
 	}
