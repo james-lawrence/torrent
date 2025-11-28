@@ -4,10 +4,31 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"sync"
 
 	"github.com/RoaringBitmap/roaring/v2"
 	"github.com/james-lawrence/torrent/internal/bitmapx"
 )
+
+var (
+	bufferPool = sync.Pool{
+		New: func() any {
+			return bytes.NewBuffer(make([]byte, 0, 32*1024))
+		},
+	}
+	msgLenPlaceholder = []byte{0, 0, 0, 0}
+)
+
+// AcquireBuffer returns a pooled bytes.Buffer for use with MarshalBinaryPooled.
+func AcquireBuffer() *bytes.Buffer {
+	return bufferPool.Get().(*bytes.Buffer)
+}
+
+// ReleaseBuffer returns a buffer to the pool.
+func ReleaseBuffer(buf *bytes.Buffer) {
+	buf.Reset()
+	bufferPool.Put(buf)
+}
 
 // This is a lazy union representing all the possible fields for messages. Go doesn't have ADTs, and
 // I didn't choose to use type-assertions.
@@ -107,6 +128,64 @@ func (msg Message) MarshalBinary() (data []byte, err error) {
 		panic("bad copy")
 	}
 	return
+}
+
+// MarshalBinaryPooled writes the message to the provided buffer and returns the encoded bytes.
+// The returned slice references the buffer's underlying array; copy it if needed beyond the buffer's lifetime.
+func (msg Message) MarshalBinaryPooled(buf *bytes.Buffer) (data []byte, err error) {
+	buf.Reset()
+	buf.Write(msgLenPlaceholder)
+
+	if !msg.Keepalive {
+		err = buf.WriteByte(byte(msg.Type))
+		if err != nil {
+			return nil, err
+		}
+		switch msg.Type {
+		case Choke, Unchoke, Interested, NotInterested, HaveAll, HaveNone:
+		case Have, AllowedFast, Suggest:
+			if err = binary.Write(buf, binary.BigEndian, msg.Index); err != nil {
+				return nil, err
+			}
+		case Request, Cancel, Reject:
+			for _, i := range []Integer{msg.Index, msg.Begin, msg.Length} {
+				err = binary.Write(buf, binary.BigEndian, i)
+				if err != nil {
+					break
+				}
+			}
+		case Bitfield:
+			_, err = buf.Write(marshalBitfield(msg.Bitfield))
+		case Piece:
+			for _, i := range []Integer{msg.Index, msg.Begin} {
+				err = binary.Write(buf, binary.BigEndian, i)
+				if err != nil {
+					return
+				}
+			}
+			n, err := buf.Write(msg.Piece)
+			if err != nil {
+				break
+			}
+			if n != len(msg.Piece) {
+				panic(n)
+			}
+		case Extended:
+			err = buf.WriteByte(byte(msg.ExtendedID))
+			if err != nil {
+				return
+			}
+			_, err = buf.Write(msg.ExtendedPayload)
+		case Port:
+			err = binary.Write(buf, binary.BigEndian, msg.Port)
+		default:
+			err = fmt.Errorf("unknown message type: %v", msg.Type)
+		}
+	}
+
+	data = buf.Bytes()
+	binary.BigEndian.PutUint32(data, uint32(len(data)-4))
+	return data, err
 }
 
 func marshalBitfield(bf []bool) (b []byte) {

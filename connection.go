@@ -222,7 +222,7 @@ func (cn *connection) requestbatch(limit int) []request {
 	reqs := make([]request, 0, n)
 	for r := range cn.PeerRequests {
 		reqs = append(reqs, r)
-		if len(reqs) >= limit {
+		if len(reqs) == n {
 			break
 		}
 	}
