@@ -211,6 +211,25 @@ func (cn *connection) requestseq() iter.Seq[request] {
 	}
 }
 
+// requestbatch returns a slice of pending peer requests with a single lock acquisition.
+func (cn *connection) requestbatch(limit int) []request {
+	cn._mu.RLock()
+	n := min(len(cn.PeerRequests), limit)
+	if n == 0 {
+		cn._mu.RUnlock()
+		return nil
+	}
+	reqs := make([]request, 0, n)
+	for r := range cn.PeerRequests {
+		reqs = append(reqs, r)
+		if len(reqs) >= limit {
+			break
+		}
+	}
+	cn._mu.RUnlock()
+	return reqs
+}
+
 // Returns true if the connection is over IPv6.
 func (cn *connection) ipv6() bool {
 	return cn.remoteAddr.Addr().Unmap().Is6()

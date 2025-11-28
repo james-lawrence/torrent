@@ -149,7 +149,8 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 		return time.Minute, nil
 	}
 
-	if len(t.PeerRequests) == 0 {
+	reqs := t.requestbatch(t.PendingMaxRequests)
+	if len(reqs) == 0 {
 		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) req(%d) upload restricted - no outstanding requests\n", t.connection, t.seed, t.Choked, t.peerSentHaveAll, len(t.PeerRequests))
 		return time.Minute, nil
 	}
@@ -159,7 +160,7 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 
 	// oreqs := len(t.PeerRequests)
 	uploaded := 0
-	for r := range t.requestseq() {
+	for _, r := range reqs {
 		res := t.cfg.UploadRateLimiter.ReserveN(time.Now(), int(r.Length))
 		if !res.OK() {
 			t.cfg.debug().Printf("upload rate limiter burst size < %d\n", r.Length)

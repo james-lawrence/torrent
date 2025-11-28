@@ -569,3 +569,126 @@ func TestPexPeerFlags(t *testing.T) {
 		require.EqualValues(t, tc.f, f, i)
 	}
 }
+
+func TestRequestBatch(t *testing.T) {
+	mkconn := func(n int) *connection {
+		cn := &connection{
+			_mu:          &sync.RWMutex{},
+			PeerRequests: make(map[request]struct{}, n),
+		}
+		for i := 0; i < n; i++ {
+			r := newRequest(pp.Integer(i/8), pp.Integer((i%8)*16384), 16384)
+			cn.PeerRequests[r] = struct{}{}
+		}
+		return cn
+	}
+
+	t.Run("empty requests", func(t *testing.T) {
+		cn := mkconn(0)
+		reqs := cn.requestbatch(10)
+		require.Len(t, reqs, 0)
+	})
+
+	t.Run("fewer requests than limit", func(t *testing.T) {
+		cn := mkconn(5)
+		reqs := cn.requestbatch(10)
+		require.Len(t, reqs, 5)
+	})
+
+	t.Run("more requests than limit", func(t *testing.T) {
+		cn := mkconn(100)
+		reqs := cn.requestbatch(10)
+		require.Len(t, reqs, 10)
+	})
+
+	t.Run("exact limit", func(t *testing.T) {
+		cn := mkconn(10)
+		reqs := cn.requestbatch(10)
+		require.Len(t, reqs, 10)
+	})
+}
+
+func BenchmarkRequestIteration(b *testing.B) {
+	populateRequests := func(cn *connection, n int) {
+		cn._mu.Lock()
+		for i := 0; i < n; i++ {
+			r := newRequest(pp.Integer(i/8), pp.Integer((i%8)*16384), 16384)
+			cn.PeerRequests[r] = struct{}{}
+		}
+		cn._mu.Unlock()
+	}
+
+	b.Run("requestseq/64", func(b *testing.B) {
+		cn := &connection{
+			_mu:          &sync.RWMutex{},
+			PeerRequests: make(map[request]struct{}, 64),
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			populateRequests(cn, 64)
+			b.StartTimer()
+			for r := range cn.requestseq() {
+				cn._mu.Lock()
+				delete(cn.PeerRequests, r)
+				cn._mu.Unlock()
+			}
+		}
+	})
+
+	b.Run("requestbatch/64", func(b *testing.B) {
+		cn := &connection{
+			_mu:          &sync.RWMutex{},
+			PeerRequests: make(map[request]struct{}, 64),
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			populateRequests(cn, 64)
+			b.StartTimer()
+			reqs := cn.requestbatch(64)
+			cn._mu.Lock()
+			for _, r := range reqs {
+				delete(cn.PeerRequests, r)
+			}
+			cn._mu.Unlock()
+		}
+	})
+
+	b.Run("requestseq/256", func(b *testing.B) {
+		cn := &connection{
+			_mu:          &sync.RWMutex{},
+			PeerRequests: make(map[request]struct{}, 256),
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			populateRequests(cn, 256)
+			b.StartTimer()
+			for r := range cn.requestseq() {
+				cn._mu.Lock()
+				delete(cn.PeerRequests, r)
+				cn._mu.Unlock()
+			}
+		}
+	})
+
+	b.Run("requestbatch/256", func(b *testing.B) {
+		cn := &connection{
+			_mu:          &sync.RWMutex{},
+			PeerRequests: make(map[request]struct{}, 256),
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			populateRequests(cn, 256)
+			b.StartTimer()
+			reqs := cn.requestbatch(256)
+			cn._mu.Lock()
+			for _, r := range reqs {
+				delete(cn.PeerRequests, r)
+			}
+			cn._mu.Unlock()
+		}
+	})
+}
