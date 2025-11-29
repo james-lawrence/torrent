@@ -10,12 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type dialerfn func(ctx context.Context, addr string) (net.Conn, error)
-
-func (n dialerfn) Dial(ctx context.Context, addr string) (net.Conn, error) {
-	return n(ctx, addr)
-}
-
 func TestRacingDialer_Dial(t *testing.T) {
 	t.Run("immediate success from first network wins", func(t *testing.T) {
 		dialer := NewRacing(10)
@@ -28,15 +22,15 @@ func TestRacingDialer_Dial(t *testing.T) {
 			Timeout: 5 * time.Second,
 		}
 
-		winnerNetwork := dialerfn(func(ctx context.Context, addr string) (net.Conn, error) {
+		winnerNetwork := DialerFn(func(ctx context.Context, addr string) (net.Conn, error) {
 			return d.DialContext(ctx, l.Addr().Network(), l.Addr().String())
 		})
 
-		loserNetwork := dialerfn(func(ctx context.Context, addr string) (net.Conn, error) {
+		loserNetwork := DialerFn(func(ctx context.Context, addr string) (net.Conn, error) {
 			return nil, errorsx.Errorf("failed connection")
 		})
 
-		conn, err := dialer.Dial(context.Background(), timeout, l.Addr().String(), winnerNetwork, loserNetwork)
+		conn, err := dialer.Dial(t.Context(), timeout, l.Addr().String(), winnerNetwork, loserNetwork)
 		require.NoError(t, err)
 		require.NotNil(t, conn)
 
@@ -51,14 +45,14 @@ func TestRacingDialer_Dial(t *testing.T) {
 		timeout := 100 * time.Millisecond
 		expectedErr := errorsx.Errorf("dial error")
 
-		network1 := dialerfn(func(ctx context.Context, addr string) (net.Conn, error) {
+		network1 := DialerFn(func(ctx context.Context, addr string) (net.Conn, error) {
 			return nil, expectedErr
 		})
-		network2 := dialerfn(func(ctx context.Context, addr string) (net.Conn, error) {
+		network2 := DialerFn(func(ctx context.Context, addr string) (net.Conn, error) {
 			return nil, expectedErr
 		})
 
-		conn, err := dialer.Dial(context.Background(), timeout, address, network1, network2)
+		conn, err := dialer.Dial(t.Context(), timeout, address, network1, network2)
 		require.Nil(t, conn)
 		require.Error(t, err)
 		require.ErrorIs(t, err, expectedErr)
@@ -69,7 +63,7 @@ func TestRacingDialer_Dial(t *testing.T) {
 		address := "127.0.0.1:8083"
 		timeout := 10 * time.Millisecond
 
-		slowNetwork := dialerfn(func(ctx context.Context, addr string) (net.Conn, error) {
+		slowNetwork := DialerFn(func(ctx context.Context, addr string) (net.Conn, error) {
 			select {
 			case <-ctx.Done():
 				return nil, context.Cause(ctx)
@@ -78,24 +72,49 @@ func TestRacingDialer_Dial(t *testing.T) {
 			}
 		})
 
-		conn, err := dialer.Dial(context.Background(), timeout, address, slowNetwork, slowNetwork)
+		conn, err := dialer.Dial(t.Context(), timeout, address, slowNetwork, slowNetwork)
 		require.Nil(t, conn)
 		require.Error(t, err)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("context cancelled before immediately", func(t *testing.T) {
+		dialer := NewRacing(10)
+		address := "127.0.0.1:8085"
+		timeout := 100 * time.Millisecond
+
+		stallingNetwork := DialerFn(func(ctx context.Context, addr string) (net.Conn, error) {
+			<-ctx.Done()
+			return nil, context.Cause(ctx)
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		conn, err := dialer.Dial(ctx, timeout, address, stallingNetwork, stallingNetwork)
+		require.Nil(t, conn)
+		require.ErrorIs(t, err, context.Canceled)
 	})
 
 	t.Run("context cancelled before any success", func(t *testing.T) {
 		dialer := NewRacing(10)
 		address := "127.0.0.1:8085"
 		timeout := 100 * time.Millisecond
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer l.Close()
 
-		stallingNetwork := dialerfn(func(ctx context.Context, addr string) (net.Conn, error) {
+		d := net.Dialer{
+			Timeout: 5 * time.Second,
+		}
+
+		stallingNetwork := DialerFn(func(ctx context.Context, addr string) (net.Conn, error) {
 			<-ctx.Done()
-			return nil, context.Cause(ctx)
+			return d.DialContext(ctx, l.Addr().Network(), l.Addr().String())
 		})
 
-		ctx, cancel := context.WithCancel(context.Background())
-		time.AfterFunc(5*time.Millisecond, cancel)
+		ctx, cancel := context.WithCancel(t.Context())
+		time.AfterFunc(50*time.Millisecond, cancel)
 
 		conn, err := dialer.Dial(ctx, timeout, address, stallingNetwork, stallingNetwork)
 		require.Nil(t, conn)
@@ -106,8 +125,8 @@ func TestRacingDialer_Dial(t *testing.T) {
 		dialer := NewRacing(10)
 		timeout := 100 * time.Millisecond
 
-		conn, err := dialer.Dial(context.Background(), timeout, "127.0.0.1:8088")
+		conn, err := dialer.Dial(t.Context(), timeout, "127.0.0.1:8088")
 		require.Nil(t, conn)
-		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.ErrorIs(t, err, errorsx.String("no networks to dial"))
 	})
 }

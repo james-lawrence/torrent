@@ -28,7 +28,11 @@ func NewRacing(n uint16) *RacingDialer {
 				case w.fastest <- c:
 					w.done(nil)
 				}
-				w.outstanding.Add(^uint32(0))
+
+				if w.outstanding.Add(^uint32(0)) == 0 {
+					w.done(err)
+					close(w.fastest)
+				}
 
 				return nil
 			}
@@ -74,6 +78,10 @@ type RacingDialer struct {
 }
 
 func (t RacingDialer) Dial(ctx context.Context, timeout time.Duration, address string, networks ...DialableNetwork) (net.Conn, error) {
+	if len(networks) == 0 {
+		return nil, errorsx.String("no networks to dial")
+	}
+
 	_ctx, done := context.WithTimeout(ctx, timeout)
 	defer done()
 	__ctx, cancel := context.WithCancelCause(_ctx)
@@ -81,15 +89,11 @@ func (t RacingDialer) Dial(ctx context.Context, timeout time.Duration, address s
 
 	w := initRacingDial(address, timeout, uint64(len(networks)), cancel)
 
-	queue := func(___ctx context.Context, _w racingdialworkload) error {
-		return t.arena.Run(___ctx, _w)
-	}
-
 	for _, n := range networks {
 		dup := w
 		dup.network = n
 
-		if err := queue(__ctx, dup); err != nil {
+		if err := t.arena.Run(__ctx, dup); err != nil {
 			cancel(errorsx.Wrapf(err, "timeout: %d", timeout))
 			return nil, err
 		}
@@ -105,9 +109,9 @@ func (t RacingDialer) Dial(ctx context.Context, timeout time.Duration, address s
 	failure := langx.Autoderef(w.failure.Load())
 
 	if fastest == nil {
-		return nil, errorsx.Compact(failure, context.Cause(__ctx))
+		return nil, errorsx.Compact(failure, context.Cause(__ctx), context.Cause(_ctx))
 	}
 
-	failure = errorsx.Compact(failure, context.Cause(__ctx))
+	failure = errorsx.Compact(failure, context.Cause(__ctx), context.Cause(_ctx))
 	return fastest, errorsx.Ignore(failure, context.Canceled)
 }

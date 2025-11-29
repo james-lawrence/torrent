@@ -18,6 +18,12 @@ type Dialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
 
+type DialerFn func(ctx context.Context, addr string) (net.Conn, error)
+
+func (n DialerFn) Dial(ctx context.Context, addr string) (net.Conn, error) {
+	return n(ctx, addr)
+}
+
 // NetPort returns the port of the network address,
 func NetPort(addr net.Addr) (port int, err error) {
 	if addr == nil {
