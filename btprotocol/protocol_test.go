@@ -152,32 +152,3 @@ func TestUnmarshalPortMsg(t *testing.T) {
 		t.FailNow()
 	}
 }
-
-func BenchmarkMarshalBinary(b *testing.B) {
-	b.Run("piece/16KB", func(b *testing.B) {
-		msg := NewPiece(1, 0, make([]byte, 16384))
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			_, _ = msg.MarshalBinary()
-		}
-	})
-
-	b.Run("request", func(b *testing.B) {
-		msg := Message{Type: Request, Index: 5, Begin: 0, Length: 16384}
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			_, _ = msg.MarshalBinary()
-		}
-	})
-
-	b.Run("have", func(b *testing.B) {
-		msg := NewHavePiece(42)
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			_, _ = msg.MarshalBinary()
-		}
-	})
-}
