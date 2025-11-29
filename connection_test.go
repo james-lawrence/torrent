@@ -570,7 +570,7 @@ func TestPexPeerFlags(t *testing.T) {
 	}
 }
 
-func TestRequestBatch(t *testing.T) {
+func TestRequestSeq(t *testing.T) {
 	mkconn := func(n int) *connection {
 		cn := &connection{
 			_mu:          &sync.RWMutex{},
@@ -585,26 +585,20 @@ func TestRequestBatch(t *testing.T) {
 
 	t.Run("empty requests", func(t *testing.T) {
 		cn := mkconn(0)
-		reqs := cn.requestbatch(10)
+		reqs := cn.requestseq()
 		require.Len(t, reqs, 0)
 	})
 
-	t.Run("fewer requests than limit", func(t *testing.T) {
+	t.Run("returns all requests", func(t *testing.T) {
 		cn := mkconn(5)
-		reqs := cn.requestbatch(10)
+		reqs := cn.requestseq()
 		require.Len(t, reqs, 5)
 	})
 
-	t.Run("more requests than limit", func(t *testing.T) {
+	t.Run("large request set", func(t *testing.T) {
 		cn := mkconn(100)
-		reqs := cn.requestbatch(10)
-		require.Len(t, reqs, 10)
-	})
-
-	t.Run("exact limit", func(t *testing.T) {
-		cn := mkconn(10)
-		reqs := cn.requestbatch(10)
-		require.Len(t, reqs, 10)
+		reqs := cn.requestseq()
+		require.Len(t, reqs, 100)
 	})
 }
 
@@ -628,25 +622,7 @@ func BenchmarkRequestIteration(b *testing.B) {
 			b.StopTimer()
 			populateRequests(cn, 64)
 			b.StartTimer()
-			for r := range cn.requestseq() {
-				cn._mu.Lock()
-				delete(cn.PeerRequests, r)
-				cn._mu.Unlock()
-			}
-		}
-	})
-
-	b.Run("requestbatch/64", func(b *testing.B) {
-		cn := &connection{
-			_mu:          &sync.RWMutex{},
-			PeerRequests: make(map[request]struct{}, 64),
-		}
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			b.StopTimer()
-			populateRequests(cn, 64)
-			b.StartTimer()
-			reqs := cn.requestbatch(64)
+			reqs := cn.requestseq()
 			cn._mu.Lock()
 			for _, r := range reqs {
 				delete(cn.PeerRequests, r)
@@ -665,25 +641,7 @@ func BenchmarkRequestIteration(b *testing.B) {
 			b.StopTimer()
 			populateRequests(cn, 256)
 			b.StartTimer()
-			for r := range cn.requestseq() {
-				cn._mu.Lock()
-				delete(cn.PeerRequests, r)
-				cn._mu.Unlock()
-			}
-		}
-	})
-
-	b.Run("requestbatch/256", func(b *testing.B) {
-		cn := &connection{
-			_mu:          &sync.RWMutex{},
-			PeerRequests: make(map[request]struct{}, 256),
-		}
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			b.StopTimer()
-			populateRequests(cn, 256)
-			b.StartTimer()
-			reqs := cn.requestbatch(256)
+			reqs := cn.requestseq()
 			cn._mu.Lock()
 			for _, r := range reqs {
 				delete(cn.PeerRequests, r)

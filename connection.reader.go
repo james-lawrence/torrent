@@ -149,7 +149,7 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 		return time.Minute, nil
 	}
 
-	reqs := t.requestbatch(t.PendingMaxRequests)
+	reqs := t.requestseq()
 	if len(reqs) == 0 {
 		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) req(%d) upload restricted - no outstanding requests\n", t.connection, t.seed, t.Choked, t.peerSentHaveAll, len(t.PeerRequests))
 		return time.Minute, nil
