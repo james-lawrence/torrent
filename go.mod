@@ -28,6 +28,7 @@ require (
 	golang.org/x/net v0.47.0
 	golang.org/x/time v0.14.0
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da
+	github.com/anacrolix/generics v0.1.0
 )
 
 require (
@@ -41,7 +42,6 @@ require (
 	github.com/alecthomas/assert/v2 v2.11.0 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/alexflint/go-scalar v1.2.0 // indirect
-	github.com/anacrolix/generics v0.1.0
 	github.com/anacrolix/missinggo/v2 v2.10.0 // indirect
 	github.com/bits-and-blooms/bitset v1.24.3 // indirect
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
