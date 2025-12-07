@@ -227,8 +227,10 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 		}
 	}()
 
-	if cfg.localID, err = int160.RandomPrefixed(stringsx.Default(cfg.PeerID, cfg.Bep20)); err != nil {
-		return nil, errorsx.Wrap(err, "error generating peer id")
+	if cfg.localID.IsZero() {
+		if cfg.localID, err = int160.RandomPrefixed(stringsx.Default(cfg.PeerID, cfg.Bep20)); err != nil {
+			return nil, errorsx.Wrap(err, "error generating peer id")
+		}
 	}
 
 	return cl, nil
