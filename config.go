@@ -301,6 +301,12 @@ func ClientConfigPeerID(s string) ClientConfigOption {
 	}
 }
 
+func ClientConfigFixedLocalID(id int160.T) ClientConfigOption {
+	return func(c *ClientConfig) {
+		c.localID = id
+	}
+}
+
 // resets the set of bootstrap functions to an empty set.
 func ClientConfigBootstrapNone(c *ClientConfig) {
 	c.dhtStartingNodes = nil
@@ -378,6 +384,20 @@ func ClientConfigMetadata(b bool) ClientConfigOption {
 		} else {
 			delete(cc.extensions, pp.ExtensionNameMetadata)
 		}
+	}
+}
+
+func ClientConfigExtension(name pp.ExtensionName) ClientConfigOption {
+	return func(cc *ClientConfig) {
+		var (
+			maxid pp.ExtensionNumber = pp.ExtendedIdMax - 1
+		)
+
+		for _, id := range cc.extensions {
+			maxid = max(maxid, id)
+		}
+
+		cc.extensions[name] = maxid + 1
 	}
 }
 

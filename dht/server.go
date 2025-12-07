@@ -656,6 +656,14 @@ func (s *Server) nodeErr(n *node) error {
 	return nil
 }
 
+func (s *Server) SendMessageToNode(ctx context.Context, m any, node Addr, maximum int) (wrote bool, err error) {
+	b, err := bencode.Marshal(m)
+	if err != nil {
+		return false, err
+	}
+	return s.SendToNode(ctx, b, node, maximum)
+}
+
 func (s *Server) SendToNode(ctx context.Context, b []byte, node Addr, maximum int) (wrote bool, err error) {
 	func() {
 		// This is a pain. It would be better if the blocklist returned an error if it was closed

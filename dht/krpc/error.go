@@ -25,6 +25,17 @@ var ErrorMethodUnknown = Error{
 	Msg:  "Method Unknown",
 }
 
+func NewErrorMsg(tid string, code int, msg string) Msg {
+	return Msg{
+		T: tid,
+		Y: "e",
+		E: &Error{
+			Code: code,
+			Msg:  msg,
+		},
+	}
+}
+
 // Represented as a string or list in bencode.
 type Error struct {
 	Code int

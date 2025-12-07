@@ -39,9 +39,10 @@ const (
 )
 
 const (
-	HandshakeExtendedID = 0
-	MetadataExtendedID  = 1
-	PEXExtendedID       = 2
+	HandshakeExtendedID = iota
+	MetadataExtendedID
+	PEXExtendedID
+	ExtendedIdMax
 )
 
 const (
