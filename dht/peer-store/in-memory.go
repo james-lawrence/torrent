@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -91,10 +92,12 @@ func (me *InMemory) WriteDebug(w io.Writer) {
 		allSlice = append(allSlice, sliceElem{ih, addrs})
 	}
 	fmt.Fprintf(w, "total count: %v\n\n", totalCount)
-	sort.Slice(allSlice, func(i, j int) bool {
-		return int160.Distance(int160.FromByteArray(allSlice[i].InfoHash), me.RootId).Cmp(
-			int160.Distance(int160.FromByteArray(allSlice[j].InfoHash), me.RootId)) < 0
+	slices.SortStableFunc(allSlice, func(a, b sliceElem) int {
+		da := int160.FromByteArray(a.InfoHash).Distance(me.RootId)
+		db := int160.FromByteArray(b.InfoHash).Distance(me.RootId)
+		return da.Cmp(db)
 	})
+
 	for _, elem := range allSlice {
 		addrs := elem.addrs
 		fmt.Fprintf(w, "%v (count %v):\n", elem.InfoHash, len(addrs))

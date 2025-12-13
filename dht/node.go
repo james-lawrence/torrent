@@ -46,6 +46,12 @@ func (n *node) NodeInfo() (ret krpc.NodeInfo) {
 	return
 }
 
+func nodeclosest(target int160.T) func(a, b *node) int {
+	return func(a, b *node) int {
+		return int160.CmpTo(target, a.Id, b.Id)
+	}
+}
+
 // Per the spec in BEP 5.
 func (s *Server) IsGood(n *node) bool {
 	if s.nodeIsBad(n) {

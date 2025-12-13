@@ -45,6 +45,71 @@ func Zero() (id T) {
 	return id
 }
 
+func Max() (id T) {
+	id.bits = [20]byte{
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+		math.MaxUint8,
+	}
+	return id
+}
+
+func Not(a T) (ret T) {
+	const mask byte = 0xFF
+	for i := range len(ret.bits) {
+		ret.bits[i] = a.bits[i] ^ mask
+	}
+
+	return ret
+}
+
+func Closest(target T, values ...T) (ret T) {
+	farthest := Not(target)
+	closest := Not(target)
+	for _, v := range values {
+		var (
+			a, b T
+		)
+		a.Xor(&target, &v)
+		b.Xor(&target, &closest)
+
+		if a.Cmp(b) < 0 {
+			closest = v
+		}
+	}
+
+	if closest.Equal(farthest) {
+		return Zero()
+	}
+
+	return closest
+}
+
+// compare a and b using the target.
+// returns -1 is a is closer to target.
+// return 0 if they are equal distance.
+// return 1 if b is closer to target.
+func CmpTo(target T, a T, b T) int {
+	return target.Distance(a).Cmp(target.Distance(b))
+}
+
 type T struct {
 	bits [20]uint8
 }
@@ -99,25 +164,26 @@ func (l T) Equal(r T) bool {
 	return l.Cmp(r) == 0
 }
 
-func (me *T) SetMax() {
-	for i := range me.bits {
-		me.bits[i] = math.MaxUint8
-	}
-}
-
-func (me *T) Xor(a, b *T) {
-	for i := range me.bits {
-		me.bits[i] = a.bits[i] ^ b.bits[i]
-	}
-}
-
-func (me *T) IsZero() bool {
+func (me T) IsZero() bool {
 	for _, b := range me.bits {
 		if b != 0 {
 			return false
 		}
 	}
 	return true
+}
+
+func (me *T) Xor(a, b *T) *T {
+	for i := range me.bits {
+		me.bits[i] = a.bits[i] ^ b.bits[i]
+	}
+
+	return me
+}
+
+func (a T) Distance(b T) (ret T) {
+	ret.Xor(&a, &b)
+	return
 }
 
 func FromHashedBytes(b []byte) (ret T) {
@@ -160,14 +226,4 @@ func FromHexEncodedString(s string) (ret T, err error) {
 		return ret, err
 	}
 	return FromBytes(b), nil
-}
-
-func Distance(a, b T) (ret T) {
-	ret.Xor(&a, &b)
-	return
-}
-
-func (a T) Distance(b T) (ret T) {
-	ret.Xor(&a, &b)
-	return
 }

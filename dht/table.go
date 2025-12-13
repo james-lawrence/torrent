@@ -3,6 +3,7 @@ package dht
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -104,11 +105,11 @@ func (tbl *table) closestNodes(k int, target int160.T, filter func(*node) bool) 
 			}
 		}
 	}
-	// TODO: Keep only the closest.
-	if len(ret) > k {
-		ret = ret[:k]
-	}
-	return
+
+	// sort by distance to target
+	slices.SortStableFunc(ret, nodeclosest(target))
+	// keep only the closest k.
+	return ret[:min(len(ret), k)]
 }
 
 func (tbl *table) addNode(n *node) error {

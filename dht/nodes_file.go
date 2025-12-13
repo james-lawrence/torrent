@@ -1,7 +1,7 @@
 package dht
 
 import (
-	"io/ioutil"
+	"io"
 	"os"
 
 	"github.com/james-lawrence/torrent/dht/krpc"
@@ -32,7 +32,7 @@ func ReadNodesFromFile(fileName string) (ns []krpc.NodeInfo, err error) {
 		return
 	}
 	defer f.Close()
-	b, err := ioutil.ReadAll(f)
+	b, err := io.ReadAll(f)
 	if err != nil {
 		return
 	}

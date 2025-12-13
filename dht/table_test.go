@@ -12,9 +12,7 @@ import (
 
 func TestTable(t *testing.T) {
 	tbl := newTable(8)
-	var maxFar int160.T
-	maxFar.SetMax()
-	assert.Equal(t, 0, tbl.bucketIndex(maxFar))
+	assert.Equal(t, 0, tbl.bucketIndex(int160.Max()))
 	assert.Panics(t, func() { tbl.bucketIndex(tbl.rootID) })
 
 	assert.Error(t, tbl.addNode(&node{}))

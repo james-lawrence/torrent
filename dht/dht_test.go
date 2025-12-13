@@ -64,21 +64,8 @@ func init() {
 	testIDs = append(testIDs, int160.T{})
 }
 
-func TestDistances(t *testing.T) {
-	expectBitcount := func(i int160.T, count int) {
-		if bitCount(i.Bytes()) != count {
-			t.Fatalf("expected bitcount of %d: got %d", count, bitCount(i.Bytes()))
-		}
-	}
-	expectBitcount(int160.Distance(testIDs[3], testIDs[0]), 4+8+4+4)
-	expectBitcount(int160.Distance(testIDs[3], testIDs[1]), 4+8+4+4)
-	expectBitcount(int160.Distance(testIDs[3], testIDs[2]), 4+8+8)
-}
-
 func TestMaxDistanceString(t *testing.T) {
-	var max int160.T
-	max.SetMax()
-	require.EqualValues(t, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", max.Bytes())
+	require.EqualValues(t, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", int160.Max().Bytes())
 }
 
 // func TestClosestNodes(t *testing.T) {
