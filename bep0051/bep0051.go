@@ -3,11 +3,13 @@ package bep0051
 
 import (
 	"context"
+	"time"
 
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
+	"github.com/james-lawrence/torrent/internal/errorsx"
 )
 
 const (
@@ -107,4 +109,32 @@ func (t Endpoint) Handle(ctx context.Context, source dht.Addr, s *dht.Server, ra
 
 	_, err = s.SendToNode(ctx, b, source, 1)
 	return err
+}
+
+func LatestSampleForNodeInfo(ctx context.Context, s *dht.Server, n krpc.NodeInfo) (*Sample, error) {
+	var (
+		resp Response
+	)
+
+	qi, err := NewRequest(s.ID(), n.ID)
+	if err != nil {
+		return nil, errorsx.Wrapf(err, "unable to generate sample request: %s", n.ID)
+	}
+	dst := dht.NewAddr(n.Addr.UDP())
+
+	dctx, done := context.WithTimeout(ctx, 30*time.Second)
+	defer done()
+
+	ret := s.Query(dctx, dst, qi)
+	if ret.Err != nil {
+		return nil, errorsx.Wrap(err, "sample query failed")
+	}
+
+	if err := bencode.Unmarshal(ret.Raw, &resp); err != nil {
+		if _, ok := err.(bencode.ErrUnusedTrailingBytes); !ok {
+			return nil, errorsx.Wrapf(err, "unable to deserialize sample response: %T %s", err, n.ID)
+		}
+	}
+
+	return &resp.R, nil
 }
