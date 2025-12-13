@@ -13,6 +13,7 @@ import (
 	"github.com/james-lawrence/torrent/dht/krpc"
 	"github.com/james-lawrence/torrent/dht/types"
 	"github.com/james-lawrence/torrent/internal/chansync"
+	"github.com/james-lawrence/torrent/internal/langx"
 )
 
 type QueryResult struct {
@@ -44,22 +45,14 @@ type defaultsAppliedOperationInput OperationInput
 
 func Start(input OperationInput) *Operation {
 	herp := defaultsAppliedOperationInput(input)
-	if herp.Alpha == 0 {
-		herp.Alpha = 3
-	}
-	if herp.K == 0 {
-		herp.K = 8
-	}
-	if herp.NodeFilter == nil {
-		herp.NodeFilter = func(types.AddrMaybeId) bool {
-			return true
-		}
-	}
-	if herp.DataFilter == nil {
-		herp.DataFilter = func(_ any) bool {
-			return true
-		}
-	}
+	herp.Alpha = langx.FirstNonZero(herp.Alpha, 3)
+	herp.K = langx.FirstNonZero(herp.K, 8)
+	herp.NodeFilter = langx.FirstNonNil(herp.NodeFilter, func(types.AddrMaybeId) bool {
+		return true
+	})
+	herp.DataFilter = langx.FirstNonNil(herp.DataFilter, func(_ any) bool {
+		return true
+	})
 	targetInt160 := herp.Target.Int160()
 	op := &Operation{
 		targetInt160: targetInt160,

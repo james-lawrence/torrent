@@ -4,7 +4,6 @@ import (
 	"net"
 	"testing"
 
-	qt "github.com/frankban/quicktest"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -57,6 +56,6 @@ func TestRandomIdInBucket(t *testing.T) {
 	for i := range tbl.buckets {
 		id := tbl.randomIdForBucket(i)
 		t.Logf("%v: random id for bucket index %v", id, i)
-		qt.Assert(t, tbl.bucketIndex(id), qt.Equals, i)
+		assert.Equal(t, tbl.bucketIndex(id), i)
 	}
 }
