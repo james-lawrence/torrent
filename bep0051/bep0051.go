@@ -126,7 +126,7 @@ func LatestSampleForNodeInfo(ctx context.Context, s *dht.Server, n krpc.NodeInfo
 	defer done()
 
 	ret := s.Query(dctx, dst, qi)
-	if ret.Err != nil {
+	if err := ret.Err; err != nil {
 		return nil, errorsx.Wrap(err, "sample query failed")
 	}
 
