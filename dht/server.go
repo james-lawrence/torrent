@@ -520,7 +520,12 @@ func (s *Server) handleQuery(ctx context.Context, source Addr, raw []byte, m krp
 	}
 
 	if err := fn.Handle(ctx, source, s, raw, &m); err != nil {
-		log.Println("query failed", source.String(), err)
+		log.Printf("query failed %s - %T - %v\n", source.String(), err, err)
+		if cause, ok := err.(krpc.Error); ok {
+			if err := s.sendError(ctx, source, m.T, cause); err != nil {
+				log.Println("unable to return an error", err)
+			}
+		}
 		if cause, ok := err.(*krpc.Error); ok {
 			if err := s.sendError(ctx, source, m.T, *cause); err != nil {
 				log.Println("unable to return an error", err)
