@@ -16,6 +16,13 @@ type NodeInfo struct {
 	Addr NodeAddr
 }
 
+func NewInfo(id ID, addr NodeAddr) NodeInfo {
+	return NodeInfo{
+		ID:   id,
+		Addr: addr,
+	}
+}
+
 func RandomNodeInfo(ipLen int) (ni NodeInfo) {
 	tmp := make(net.IP, ipLen)
 	crand.Read(ni.ID[:])
