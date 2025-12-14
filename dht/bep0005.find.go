@@ -31,13 +31,6 @@ func FindNode(ctx context.Context, q Queryer, to Addr, from krpc.ID, id int160.T
 type BEP0005FindNode struct{}
 
 func (t BEP0005FindNode) Handle(ctx context.Context, source Addr, s *Server, raw []byte, m *krpc.Msg) error {
-	// case "find_node":
-	// 	var r krpc.Return
-	// 	if err := s.setReturnNodes(&r, m, source); err != nil {
-	// 		s.sendError(source, m.T, *err)
-	// 		break
-	// 	}
-	// 	s.reply(source, m.T, r)
 	var r krpc.Return
 	if err := s.setReturnNodes(&r, *m, source); err != nil {
 		return s.sendError(ctx, source, m.T, *err)
