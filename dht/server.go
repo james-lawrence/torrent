@@ -21,6 +21,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/iplist"
 	"github.com/james-lawrence/torrent/logonce"
+	"golang.org/x/time/rate"
 
 	"github.com/james-lawrence/torrent/dht/bep44"
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -969,15 +970,8 @@ func (s *Server) GetPeers(
 	// Be advised that if you set this, you might not get any "Return.values" back. That wasn't my
 	// reading of BEP 33 but there you go.
 	scrape bool,
-	rl QueryRateLimiting,
 ) (ret QueryResult) {
-	qi, err := NewPeersRequest(s.ID(), infoHash.AsByteArray(), scrape)
-	if err != nil {
-		return NewQueryResultErr(err)
-	}
-
-	ret = s.Query(ctx, addr, qi)
-	return ret
+	return FindPeers(ctx, s, addr, s.ID(), infoHash.AsByteArray(), scrape)
 }
 
 // Get gets item information from a specific target ID. If seq is set to a specific value,
@@ -1182,21 +1176,25 @@ func (s *Server) pingQuestionableNodesInBucket(bucketIndex int) {
 // having set it up. It is not necessary to explicitly Bootstrap the Server once this routine has
 // started.
 func (s *Server) TableMaintainer() {
+	freq := rate.NewLimiter(rate.Every(5*time.Minute), 1)
 	logger := s.logger()
 	for {
+		if err := freq.Wait(context.Background()); err != nil {
+			log.Println("table maintenance failed", err)
+			return
+		}
+
 		if s.shouldBootstrapUnlocked() {
 			stats, err := s.Bootstrap(context.Background())
 			if err != nil {
-				logger.Printf("error bootstrapping during bucket refresh: %v\n", err)
+				log.Printf("error bootstrapping during bucket refresh: %v\n", err)
+				continue
 			}
 			logger.Printf("bucket refresh bootstrap stats: %v\n", stats)
 		}
 		s.mu.RLock()
 		for i := range s.table.buckets {
 			s.pingQuestionableNodesInBucket(i)
-			// if time.Since(b.lastChanged) < 15*time.Minute {
-			//	continue
-			// }
 			if s.shouldStopRefreshingBucket(i) {
 				continue
 			}

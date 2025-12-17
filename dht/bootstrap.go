@@ -54,7 +54,7 @@ func (s *Server) Bootstrap(ctx context.Context) (_zero TraversalStats, err error
 	if err != nil {
 		// Could test for Stopped and return stats here but the interface doesn't tell the caller if
 		// we were successful in taking the stats. We could also take a snapshot instead.
-		return
+		return _zero, err
 	}
 	<-t.Stopped()
 	return *t.Stats(), nil
