@@ -493,7 +493,6 @@ func zeroTorrent(md Metadata, options ...Tuner) *torrent {
 }
 
 func newTorrent(cl *Client, src Metadata, options ...Tuner) *torrent {
-
 	m := &sync.RWMutex{}
 	chunkcond := sync.NewCond(&sync.Mutex{})
 
@@ -1549,11 +1548,19 @@ func (t *torrent) GotInfo() <-chan struct{} {
 	m := make(chan struct{})
 	go func() {
 		t.event.L.Lock()
+		defer func() {
+			t.event.L.Unlock()
+			close(m)
+		}()
+
 		for !t.metainfoAvailable.Load() {
 			t.event.Wait()
+			select {
+			case <-t.closed:
+				return
+			default:
+			}
 		}
-		t.event.L.Unlock()
-		close(m)
 	}()
 	return m
 }
