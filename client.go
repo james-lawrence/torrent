@@ -439,6 +439,13 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 		return nil, errorsx.Errorf("unable to dial due to no servers")
 	}
 
+	dctx, done := context.WithTimeout(ctx, time.Second)
+	err = cl.config.dialRateLimiter.Wait(dctx)
+	done()
+	if err != nil {
+		return nil, errorsx.Wrap(err, "dial rate limit failed")
+	}
+
 	if nc, err = cl.dialing.Dial(ctx, t.dialTimeout(), addr.String(), conns...); err != nil {
 		cl.config.debug().Println("dialing failed", t.md.ID, cl.dynamicaddr.Load(), "->", addr, err)
 		return nil, err
@@ -507,14 +514,6 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (e
 	defer func() {
 		err = errorsx.StdlibTimeout(err, 300*time.Millisecond, syscall.ECONNRESET)
 	}()
-
-	dctx, done := context.WithTimeout(ctx, time.Second)
-	err = cl.config.dialRateLimiter.Wait(dctx)
-	done()
-	if err != nil {
-		t.peers.Attempted(p, nil)
-		return errorsx.Wrap(err, "dial rate limit failed")
-	}
 
 	if c, err = cl.establishOutgoingConn(ctx, t, p.AddrPort); err != nil {
 		t.peers.Attempted(p, nil)
