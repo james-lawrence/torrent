@@ -207,14 +207,14 @@ func TunePublicTrackers(trackers ...string) Tuner {
 			defer t.unlock()
 
 			t.md.Trackers = append(t.md.Trackers, trackers...)
-			t.maybeNewConns()
+			t.openNewConns()
 		}()
 	}
 }
 
 // force new connections to be found
 func TuneNewConns(t *torrent) {
-	t.maybeNewConns()
+	t.openNewConns()
 }
 
 // used after info has been received to mark all chunks missing.
@@ -1101,11 +1101,6 @@ func (t *torrent) incrementReceivedConns(c *connection, delta int64) {
 	}
 }
 
-func (t *torrent) maybeNewConns() {
-	// Tickle the accept routine.
-	t.openNewConns()
-}
-
 func (t *torrent) openNewConns() {
 	var (
 		ok     bool
@@ -1219,6 +1214,7 @@ func (t *torrent) wantPeers() bool {
 	if t.peers.Len() > t.cln.config.TorrentPeersLowWater {
 		return false
 	}
+
 	return t.needData() || t.seeding()
 }
 
@@ -1323,7 +1319,7 @@ func (t *torrent) dhtAnnouncer(s *dht.Server) {
 		if err := t.announceToDht(true, s); err == nil {
 			errdelay = time.Minute // when we succeeded wait unless a wantPeersEvent comes in.
 			t.cln.config.debug().Println("dht ancouncing completed", int160.FromByteArray(s.ID()), t.md.ID)
-			t.maybeNewConns()
+			t.openNewConns()
 			continue
 		} else if errors.Is(err, dht.ErrDHTNoInitialNodes) {
 			t.cln.config.errors().Println(t, err)
@@ -1469,6 +1465,10 @@ func (t *torrent) wantConns() bool {
 	}
 
 	if !t.seeding() && !t.needData() {
+		return false
+	}
+
+	if _, half := t.peers.Stats(); half >= t.cln.config.HalfOpenConnsPerTorrent {
 		return false
 	}
 
