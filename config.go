@@ -495,7 +495,7 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		maximumOutstandingRequests:     64,
 		NominalDialTimeout:             16 * time.Second,
 		MinDialTimeout:                 4 * time.Second,
-		HalfOpenConnsPerTorrent:        32,
+		HalfOpenConnsPerTorrent:        8,
 		TorrentPeersHighWater:          64,
 		TorrentPeersLowWater:           16,
 		handshakesTimeout:              4 * time.Second,
