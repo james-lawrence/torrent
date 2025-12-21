@@ -112,6 +112,12 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 			failed     error = nil
 		)
 
+		if !t.wantPeers() {
+			log.Println("skipping announce, peers not wanted", mindelay)
+			time.Sleep(mindelay)
+			continue
+		}
+
 		for res := range trackers.Peers(ctx, t, options...) {
 			totalpeers += len(res.Peers)
 

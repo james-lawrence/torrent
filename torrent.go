@@ -44,9 +44,19 @@ type Tuner func(*torrent)
 func TuneNoop(t *torrent) {}
 
 // TuneMaxConnections adjust the maximum connections allowed for a torrent.
-func TuneMaxConnections(m int) Tuner {
+func TuneMaxConnections(max int) Tuner {
 	return func(t *torrent) {
-		t.SetMaxEstablishedConns(m)
+		t.maxEstablishedConns = max
+
+		cset := t.conns.list()
+		wcs := slices.HeapInterface(cset, worseConn)
+		for drop := len(cset) - t.maxEstablishedConns; drop > -1 && wcs.Len() > 0; drop-- {
+			t.cln.config.debug().Println("dropping connection", drop, wcs.Len())
+			t.dropConnection(wcs.Pop().(*connection))
+			t.cln.config.debug().Println("dropped connection", drop, wcs.Len())
+		}
+
+		t.openNewConns()
 	}
 }
 
@@ -1467,22 +1477,6 @@ func (t *torrent) wantConns() bool {
 	}
 
 	return true
-}
-
-func (t *torrent) SetMaxEstablishedConns(max int) (oldMax int) {
-	oldMax = t.maxEstablishedConns
-	t.maxEstablishedConns = max
-
-	cset := t.conns.list()
-	wcs := slices.HeapInterface(cset, worseConn)
-	for drop := len(cset) - t.maxEstablishedConns; drop > -1 && wcs.Len() > 0; drop-- {
-		t.cln.config.debug().Println("dropping connection", drop, wcs.Len())
-		t.dropConnection(wcs.Pop().(*connection))
-		t.cln.config.debug().Println("dropped connection", drop, wcs.Len())
-	}
-
-	t.openNewConns()
-	return oldMax
 }
 
 // Start the process of connecting to the given peer for the given torrent if
