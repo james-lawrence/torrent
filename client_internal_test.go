@@ -1,6 +1,8 @@
 package torrent
 
 import (
+	"context"
+	"crypto/md5"
 	"fmt"
 	"io"
 	"log"
@@ -303,4 +305,36 @@ func TestAddMetainfoWithNodes(t *testing.T) {
 	for sum() != int64(6*len(cl.dhtServers)) {
 		time.Sleep(time.Millisecond)
 	}
+}
+
+func TestTuneRecordMetadata(t *testing.T) {
+	// ensure we dont panic when shutting down a torrent with record metadata.
+	dir := t.TempDir()
+	c, err := NewClient(TestingConfig(
+		t,
+		dir,
+		ClientConfigSeed(true),
+	))
+	require.NoError(t, err)
+	defer c.Close()
+	metadata, err := NewFromMagnet("magnet:?xt=urn:btih:ZOCMZQIPFFW7OLLMIC5HUB6BPCSDEOQU")
+	require.NoError(t, err)
+
+	digestdl := md5.New()
+	dl1, added, err := c.Start(metadata)
+	require.NoError(t, err)
+	require.True(t, added)
+	dctx, done := context.WithCancel(t.Context())
+	pending := make(chan error, 1)
+	go func() {
+		pending <- nil
+		dln, err := DownloadInto(dctx, digestdl, dl1)
+		require.ErrorIs(t, err, context.Canceled)
+		require.EqualValues(t, 0, dln)
+		pending <- err
+	}()
+	require.NoError(t, <-pending)
+	require.NoError(t, c.Stop(metadata))
+	require.ErrorIs(t, <-pending, context.Canceled)
+	done()
 }
