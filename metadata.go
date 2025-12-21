@@ -4,12 +4,14 @@ import (
 	"io"
 	"math/rand/v2"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
+	"github.com/james-lawrence/torrent/internal/slicesx"
 	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/james-lawrence/torrent/storage"
 	"golang.org/x/exp/constraints"
@@ -254,6 +256,11 @@ func NewFromMetaInfo(mi *metainfo.MetaInfo, options ...Option) (t Metadata, err 
 	for _, add := range mi.UpvertedAnnounceList() {
 		trackers = append(trackers, add...)
 	}
+
+	// handles weird bugs where info files have duplicate trackers.
+	// this isnt a bug in the library but in applications.
+	trackers = slicesx.Unique(strings.Compare, trackers...)
+
 	options = append([]Option{
 		OptionInfo(mi.InfoBytes),
 		OptionDisplayName(info.Name),

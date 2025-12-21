@@ -7,6 +7,7 @@ import (
 
 	"github.com/anacrolix/multiless"
 	"github.com/google/btree"
+	"github.com/james-lawrence/torrent/internal/fnvx"
 )
 
 // Peers are stored with their priority at insertion. Their priority may
@@ -21,6 +22,10 @@ func priorityPeerCmp(a, b prioritizedPeer) bool {
 		a.p.Trusted, b.p.Trusted,
 	).Uint32(
 		a.prio, b.prio,
+	).Uint32(
+		fnvx.Uint32(a.p.AddrPort.String()), fnvx.Uint32(b.p.AddrPort.String()),
+	).Uint32(
+		uint32(a.p.Port()), uint32(b.p.Port()),
 	).Less()
 }
 
@@ -28,6 +33,7 @@ func newPeerPool(n int, prio func(Peer) peerPriority) peerPool {
 	return peerPool{
 		m:         &sync.RWMutex{},
 		om:        btree.NewG(n, priorityPeerCmp),
+		pool:      btree.NewG(n, priorityPeerCmp),
 		attempted: btree.NewG(n, priorityPeerCmp),
 		loaned:    make(map[netip.AddrPort]Peer, 32),
 		getPrio:   prio,
@@ -38,6 +44,7 @@ func newPeerPool(n int, prio func(Peer) peerPriority) peerPool {
 type peerPool struct {
 	m         *sync.RWMutex
 	om        *btree.BTreeG[prioritizedPeer]
+	pool      *btree.BTreeG[prioritizedPeer]
 	attempted *btree.BTreeG[prioritizedPeer]
 	loaned    map[netip.AddrPort]Peer
 	getPrio   func(Peer) peerPriority
@@ -87,15 +94,11 @@ func (t *peerPool) Connecting(p Peer) bool {
 }
 
 // Peer is returned to the pool
-func (t *peerPool) Attempted(p Peer, err error) {
+func (t *peerPool) Attempted(p Peer) {
 	t.m.Lock()
 	defer t.m.Unlock()
 
 	delete(t.loaned, p.AddrPort)
-
-	if err != nil {
-		return
-	}
 
 	t.attempted.ReplaceOrInsert(t.prioritized(p))
 }
@@ -111,14 +114,27 @@ func (t *peerPool) Loaned(p Peer) {
 func (t *peerPool) Add(p Peer) bool {
 	t.m.Lock()
 	defer t.m.Unlock()
-	_, replaced := t.om.ReplaceOrInsert(t.prioritized(p))
-	return replaced
+
+	prio := t.prioritized(p)
+
+	if _, replaced := t.pool.ReplaceOrInsert(prio); replaced {
+		return replaced
+	}
+
+	if _, replaced := t.om.ReplaceOrInsert(prio); replaced {
+		return replaced
+	}
+
+	return false
 }
 
 func (t *peerPool) DeleteMin() (ret prioritizedPeer, ok bool) {
 	t.m.Lock()
 	defer t.m.Unlock()
-	return t.om.DeleteMin()
+
+	deleted, ok := t.om.DeleteMin()
+	_, _ = t.pool.Delete(deleted)
+	return deleted, ok
 }
 
 func (t *peerPool) PopMax() (p prioritizedPeer, ok bool) {

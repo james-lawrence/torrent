@@ -483,6 +483,14 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 // Returns nil connection and nil error if no connection could be established
 // for valid reasons.
 func (cl *Client) establishOutgoingConn(ctx context.Context, t *torrent, addr netip.AddrPort) (c *connection, err error) {
+	defer func() {
+		if err == nil {
+			return
+		}
+
+		err = errorsx.Wrapf(err, "outgoing conn failed %s - %s - %v - %v", t.md.ID, t.md.DisplayName, cl.dynamicaddr.Load(), addr)
+	}()
+
 	obfuscatedHeaderFirst := cl.config.HeaderObfuscationPolicy.Preferred
 	if c, err = cl.establishOutgoingConnEx(ctx, t, addr, obfuscatedHeaderFirst); err == nil {
 		return c, nil
@@ -516,11 +524,11 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (e
 	}()
 
 	if c, err = cl.establishOutgoingConn(ctx, t, p.AddrPort); err != nil {
-		t.peers.Attempted(p, nil)
+		t.peers.Attempted(p)
 		return errorsx.Wrapf(err, "error establishing connection to %v", p.AddrPort)
 	}
 
-	t.peers.Attempted(p, nil)
+	t.peers.Attempted(p)
 
 	c.Discovery = ps
 	c.trusted = trusted
@@ -749,12 +757,14 @@ func (cl *Client) publicIP(peer netip.Addr) netip.Addr {
 		return netx.FirstAddrOrZero(
 			netx.AddrFromIP(cl.config.publicIP4),
 			cl.findListenerIP(func(ip netip.Addr) bool { return ip.Is4() && ip.IsValid() }),
+			langx.Autoderef(cl.dynamicaddr.Load()).Addr(),
 		)
 	}
 
 	return netx.FirstAddrOrZero(
 		netx.AddrFromIP(cl.config.publicIP6),
 		cl.findListenerIP(func(ip netip.Addr) bool { return ip.Is6() && ip.IsValid() }),
+		langx.Autoderef(cl.dynamicaddr.Load()).Addr(),
 	)
 }
 

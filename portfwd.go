@@ -2,6 +2,7 @@ package torrent
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"log"
 	"net/netip"
@@ -20,12 +21,21 @@ func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort int, upnpID
 		return _zero, errorsx.Wrapf(err, "error adding %s port mapping unable to determined external ip", proto)
 	}
 
-	externalPort, err := d.AddPortMapping(ctx, proto, internalPort, internalPort, upnpID, time.Hour)
-	if err != nil {
+	for i := internalPort; ; i++ {
+		var (
+			derp upnp.ErrUPnP
+		)
+		externalPort, err := d.AddPortMapping(ctx, proto, internalPort, i, upnpID, time.Hour)
+		if err == nil {
+			return netip.AddrPortFrom(netip.AddrFrom16([16]byte(ip.To16())), uint16(externalPort)), nil
+		}
+
+		if errors.As(err, &derp) && derp.Code == 718 { // conflict in port mapping
+			continue
+		}
+
 		return _zero, errorsx.Wrapf(err, "error adding %s port mapping", proto)
 	}
-
-	return netip.AddrPortFrom(netip.AddrFrom16([16]byte(ip.To16())), uint16(externalPort)), nil
 }
 
 func (cl *Client) forwardPort() {

@@ -124,10 +124,7 @@ func TuneReadBytesRemaining(v *int64) Tuner {
 		t.rLock()
 		defer t.rUnlock()
 
-		*v = t.bytesLeft()
-		if *v < 0 {
-			*v = 0
-		}
+		*v = max(t.bytesLeft(), 0)
 	}
 }
 
@@ -779,31 +776,27 @@ func (t *torrent) unclosedConnsAsSlice() (ret []*connection) {
 	return t.conns.filtered(func(c *connection) bool { return c.closed.Load() })
 }
 
-func (t *torrent) AddPeer(p Peer) {
-	t.lock()
-	defer t.unlock()
-	t.addPeer(p)
-}
-
-func (t *torrent) addPeer(p Peer) {
+func (t *torrent) addPeer(p Peer) int {
 	select {
 	case <-t.closed:
 		t.cln.config.debug().Printf("torrent.addPeer closed")
-		return
+		return 0
 	default:
 	}
 
 	if t.peers.Add(p) {
-		metrics.Add("peers replaced", 1)
+		return 0
 	}
 
-	t.openNewConns()
+	defer t.openNewConns()
 
 	for t.peers.Len() > t.cln.config.TorrentPeersHighWater {
 		if _, ok := t.peers.DeleteMin(); ok {
 			metrics.Add("excess reserve peers discarded", 1)
 		}
 	}
+
+	return 1
 }
 
 func (t *torrent) invalidateMetadata() {
@@ -1319,10 +1312,12 @@ func (t *torrent) dhtAnnouncer(s *dht.Server) {
 	}
 }
 
-func (t *torrent) addPeers(peers ...Peer) {
+func (t *torrent) addPeers(peers ...Peer) (total int) {
 	for _, p := range peers {
-		t.addPeer(p)
+		total += t.addPeer(p)
 	}
+
+	return total
 }
 
 func (t *torrent) Stats() Stats {

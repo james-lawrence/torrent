@@ -3,11 +3,13 @@ package torrent
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"hash/crc32"
 	"net"
 	"net/netip"
+
+	"github.com/davecgh/go-spew/spew"
+	"github.com/james-lawrence/torrent/internal/errorsx"
 )
 
 var table = crc32.MakeTable(crc32.Castagnoli)
@@ -72,7 +74,7 @@ func bep40PriorityBytes(a, b netip.AddrPort) ([]byte, error) {
 		return append(net.IP(aip[:]).Mask(m), net.IP(bip[:]).Mask(m)...), nil
 	}
 
-	return nil, errors.New("incomparable IPs")
+	return nil, fmt.Errorf("incomparable IPs: %v vs %v", spew.Sdump(a), spew.Sdump(b))
 }
 
 func bep40Priority(a, b netip.AddrPort) (peerPriority, error) {
@@ -90,6 +92,7 @@ func bep40Priority(a, b netip.AddrPort) (peerPriority, error) {
 }
 
 func bep40PriorityIgnoreError(a, b netip.AddrPort) peerPriority {
-	prio, _ := bep40Priority(a, b)
+	prio, err := bep40Priority(a, b)
+	errorsx.Log(errorsx.Wrap(err, "failed to calculate priority"))
 	return prio
 }

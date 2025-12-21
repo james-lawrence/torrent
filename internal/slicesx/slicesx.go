@@ -1,6 +1,15 @@
 package slicesx
 
-import "iter"
+import (
+	"iter"
+	"slices"
+)
+
+// Remove elements from the slice where the predicate returns true.
+func Unique[T comparable](cmp func(T, T) int, items ...T) []T {
+	slices.SortStableFunc(items, cmp)
+	return slices.Compact(items)
+}
 
 // Remove elements from the slice where the predicate returns true.
 func Remove[T any](remove func(T) bool, items ...T) []T {
