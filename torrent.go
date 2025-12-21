@@ -1121,8 +1121,7 @@ func (t *torrent) openNewConns() {
 			return
 		}
 
-		// t.cln.config.debug().Printf("initiating connection to peer %p %s\n", t, popped.p.AddrPort)
-		log.Printf("initiating connection to peer %p %s\n", t, popped.p.AddrPort)
+		t.cln.config.debug().Printf("%p initiating connection to peer %s\n", t, popped.p.AddrPort)
 		t.initiateConn(context.Background(), popped.p)
 	}
 }
@@ -1488,7 +1487,7 @@ func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
 	}
 
 	// ignore connections to self.
-	if pubaddr := t.cln.publicAddr(peer.AddrPort); pubaddr.Compare(peer.AddrPort) == 0 {
+	if pubaddr := t.cln.publicAddr(peer.AddrPort); netx.CmpAddrPort(pubaddr, peer.AddrPort) == 0 {
 		t.cln.config.debug().Println("skipping connection to self based on address", pubaddr, peer.AddrPort)
 		return
 	}

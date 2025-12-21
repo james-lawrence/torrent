@@ -24,6 +24,12 @@ func (n DialerFn) Dial(ctx context.Context, addr string) (net.Conn, error) {
 	return n(ctx, addr)
 }
 
+func CmpAddrPort(a, b netip.AddrPort) int {
+	ap := netip.AddrPortFrom(netip.AddrFrom16(a.Addr().As16()), a.Port())
+	bp := netip.AddrPortFrom(netip.AddrFrom16(b.Addr().As16()), b.Port())
+	return ap.Compare(bp)
+}
+
 // NetPort returns the port of the network address,
 func NetPort(addr net.Addr) (port int, err error) {
 	if addr == nil {
