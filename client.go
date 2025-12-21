@@ -133,7 +133,7 @@ func (cl *Client) newTorrent(md Metadata, options ...Tuner) *torrent {
 }
 
 func (cl *Client) start(md Metadata, options ...Tuner) (dlt *torrent, added bool, err error) {
-	dlt, cached, err := cl.torrents.Load(md.ID, cl.newTorrent, tuneMerge(md), langx.Compose(options...))
+	dlt, cached, err := cl.torrents.Load(md.ID, cl.newTorrent, tuneMerge(md), langx.ComposeErr(options...))
 	if errorsx.Ignore(err, fs.ErrNotExist) != nil {
 		return nil, false, err
 	}
@@ -142,7 +142,7 @@ func (cl *Client) start(md Metadata, options ...Tuner) (dlt *torrent, added bool
 		return dlt, false, nil
 	}
 
-	if dlt, err = cl.torrents.Insert(md, cl.newTorrent, tuneMerge(md), langx.Compose(options...)); err != nil {
+	if dlt, err = cl.torrents.Insert(md, cl.newTorrent, tuneMerge(md), langx.ComposeErr(options...)); err != nil {
 		return nil, false, err
 	}
 

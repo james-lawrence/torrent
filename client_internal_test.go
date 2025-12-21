@@ -329,12 +329,12 @@ func TestTuneRecordMetadata(t *testing.T) {
 	go func() {
 		pending <- nil
 		dln, err := DownloadInto(dctx, digestdl, dl1)
-		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, err, ErrTorrentAttemptedToPersistNilMetadata)
 		require.EqualValues(t, 0, dln)
 		pending <- err
 	}()
 	require.NoError(t, <-pending)
 	require.NoError(t, c.Stop(metadata))
-	require.ErrorIs(t, <-pending, context.Canceled)
+	require.ErrorIs(t, <-pending, ErrTorrentAttemptedToPersistNilMetadata)
 	done()
 }

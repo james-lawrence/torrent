@@ -9,5 +9,6 @@ func ErrTorrentClosed() error {
 }
 
 const (
-	ErrTorrentNotActive = errorsx.String("torrent not active")
+	ErrTorrentNotActive                     = errorsx.String("torrent not active")
+	ErrTorrentAttemptedToPersistNilMetadata = errorsx.String("cannot persist torrent metadata when missing info")
 )

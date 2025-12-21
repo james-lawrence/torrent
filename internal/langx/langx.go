@@ -89,6 +89,18 @@ func Compose[T any, Y ~func(*T)](options ...Y) Y {
 	}
 }
 
+func ComposeErr[T any, Y ~func(*T) error](options ...Y) Y {
+	return func(v *T) error {
+		for _, opt := range options {
+			if err := opt(v); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+}
+
 // It uses reflection to safely check for nilable types (pointers, interfaces, slices, maps, etc.)
 // and safely handles non-nilable types (int, string, struct, etc.).
 func FirstNonNil[T any](s ...T) T {

@@ -39,13 +39,13 @@ import (
 )
 
 // Tuner runtime tuning of an actively running torrent.
-type Tuner func(*torrent)
+type Tuner func(*torrent) error
 
 func TuneNoop(t *torrent) {}
 
 // TuneMaxConnections adjust the maximum connections allowed for a torrent.
 func TuneMaxConnections(max int) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.maxEstablishedConns = max
 
 		cset := t.conns.list()
@@ -57,108 +57,121 @@ func TuneMaxConnections(max int) Tuner {
 		}
 
 		t.openNewConns()
+
+		return nil
 	}
 }
 
 // TunePeers add peers to the torrent.
 func TunePeers(peers ...Peer) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.addPeersLocked(peers)
+		return nil
 	}
 }
 
 // Reset tracking data for tracker events
 func TuneResetTrackingStats(s *Stats) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.rLock()
 		defer t.rUnlock()
 		*s = t.Stats()
 		t.stats = t.stats.ResetTransferMetrics()
+		return nil
 	}
 }
 
 // Extract the peer id from the torrent
 func TuneReadPeerID(id *int160.T) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.rLock()
 		defer t.rUnlock()
 		*id = t.cln.config.localID
+		return nil
 	}
 }
 
 func TuneReadHashID(id *int160.T) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.rLock()
 		defer t.rUnlock()
 		*id = t.md.ID
+		return nil
 	}
 }
 
 func TuneReadUserAgent(v *string) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.rLock()
 		defer t.rUnlock()
 		*v = t.cln.config.HTTPUserAgent
+		return nil
 	}
 }
 
 func TuneReadPublicIPv4(v net.IP) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.rLock()
 		defer t.rUnlock()
 
 		copy(v, t.cln.config.publicIP4)
+		return nil
 	}
 }
 
 func TuneReadPublicIPv6(v net.IP) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.rLock()
 		defer t.rUnlock()
 
 		copy(v, t.cln.config.publicIP6)
+		return nil
 	}
 }
 
 func TuneReadPort(v *uint16) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.rLock()
 		defer t.rUnlock()
 
 		*v = t.cln.LocalPort16()
+		return nil
 	}
 }
 
 func TuneReadBytesRemaining(v *int64) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.rLock()
 		defer t.rUnlock()
 
 		*v = max(t.bytesLeft(), 0)
+		return nil
 	}
 }
 
 // The subscription emits as (int) the index of pieces as their state changes.
 // A state change is when the PieceState for a piece alters in value.
 func TuneSubscribe(sub *pubsub.Subscription) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		*sub = *t.pieceStateChanges.Subscribe()
+		return nil
 	}
 }
 
 func TuneReadAnnounce(v *tracker.Announce) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.rLock()
 		defer t.rUnlock()
 
 		*v = t.cln.config.AnnounceRequest()
+		return nil
 	}
 }
 
 // TuneClientPeer adds a trusted, pending peer for each of the Client's addresses.
 // used for tests.
 func TuneClientPeer(cl *Client) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		ps := []Peer{}
 		id := cl.PeerID()
 
@@ -176,26 +189,30 @@ func TuneClientPeer(cl *Client) Tuner {
 		}
 
 		t.addPeersLocked(ps)
+		return nil
 	}
 }
 
-func TuneDisableTrackers(t *torrent) {
+func TuneDisableTrackers(t *torrent) error {
 	t.lock()
 	defer t.unlock()
 	t.md.Trackers = nil
+
+	return nil
 }
 
 // add trackers to the torrent.
 func TuneTrackers(trackers ...string) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.lock()
 		defer t.unlock()
 		t.md.Trackers = append(t.md.Trackers, trackers...)
+		return nil
 	}
 }
 
 func TunePublicTrackers(trackers ...string) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		go func() {
 			<-t.GotInfo()
 
@@ -209,63 +226,76 @@ func TunePublicTrackers(trackers ...string) Tuner {
 			t.md.Trackers = append(t.md.Trackers, trackers...)
 			t.openNewConns()
 		}()
+
+		return nil
 	}
 }
 
 // force new connections to be found
-func TuneNewConns(t *torrent) {
+func TuneNewConns(t *torrent) error {
 	t.openNewConns()
+	return nil
 }
 
 // used after info has been received to mark all chunks missing.
 // will only happen if missing and completed are zero.
-func TuneAutoDownload(t *torrent) {
+func TuneAutoDownload(t *torrent) error {
 	if t.chunks.Cardinality(t.chunks.completed)+t.chunks.Cardinality(t.chunks.missing) > 0 {
-		return
+		return nil
 	}
 
 	t.chunks.fill(t.chunks.missing, uint64(t.chunks.cmaximum))
+
+	return nil
 }
 
 // mark missing the provided range of bytes.
 func TuneDownloadRange(offset int64, length int64) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		min := t.chunks.PIDForOffset(uint64(offset))
 		max := t.chunks.PIDForOffset(uint64(offset + length))
 		min, _ = t.chunks.Range(min)
 		_, max = t.chunks.Range(max)
 		t.chunks.zero(t.chunks.missing)
 		t.chunks.MergeInto(t.chunks.missing, bitmapx.Range(min, max))
+
+		return nil
 	}
 }
 
 // Announce to trackers looking for at least one successful request that returns peers.
 func TuneAnnounceOnce(options ...tracker.AnnounceOption) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		go TrackerAnnounceUntil(context.Background(), t, func() bool {
 			return true
 		}, options...)
+
+		return nil
 	}
 }
 
-func TuneAnnounceUntilComplete(t *torrent) {
+func TuneAnnounceUntilComplete(t *torrent) error {
 	go TrackerAnnounceUntil(context.Background(), t, func() bool {
 		return !t.chunks.Incomplete()
 	})
+
+	return nil
 }
 
 // reset all the bitmaps
-func TuneResetBitmaps(t *torrent) {
+func TuneResetBitmaps(t *torrent) error {
 	t.chunks.Locked(func() {
 		t.chunks.missing.Clear()
 		t.chunks.unverified.Clear()
 		t.chunks.failed.Clear()
 		t.chunks.completed.Clear()
 	})
+
+	return nil
 }
 
 // Verify the entirety of the torrent. will block
-func TuneVerifyFull(t *torrent) {
+func TuneVerifyFull(t *torrent) error {
 	t.digests.EnqueueBitmap(bitmapx.Fill(t.chunks.pieces))
 	t.digests.Wait()
 
@@ -274,11 +304,13 @@ func TuneVerifyFull(t *torrent) {
 		t.chunks.unverified.AndNot(t.chunks.missing)
 	})
 	t.chunks.FailuresReset()
+
+	return nil
 }
 
 // Verify the provided byte range (expanding as needed to match piece boundaries). will block.
 func TuneVerifyRange(offset, length int64) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		min := t.chunks.PIDForOffset(uint64(offset))
 		max := t.chunks.PIDForOffset(uint64(offset + length))
 		// since the Range function is a [0, n) range.
@@ -293,11 +325,13 @@ func TuneVerifyRange(offset, length int64) Tuner {
 			t.chunks.unverified.AndNot(t.chunks.missing)
 		})
 		t.chunks.FailuresReset()
+
+		return nil
 	}
 }
 
 // Verify the contents asynchronously
-func TuneVerifyAsync(t *torrent) {
+func TuneVerifyAsync(t *torrent) error {
 	t.digests.EnqueueBitmap(bitmapx.Fill(t.chunks.pieces))
 
 	go func() {
@@ -309,6 +343,8 @@ func TuneVerifyAsync(t *torrent) {
 		})
 		t.chunks.FailuresReset()
 	}()
+
+	return nil
 }
 
 // Verify a random selection of n pieces. will block until complete blocks.
@@ -318,7 +354,7 @@ func TuneVerifyAsync(t *torrent) {
 // NOTE: torrents with a low completed rate will almost always performa full verify.
 // but since there will also be a smaller amount of data on disk this is a fair trade off.
 func TuneVerifySample(n uint64) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.digests.EnqueueBitmap(bitmapx.Random(t.chunks.pieces, min(n, t.chunks.pieces)))
 		t.digests.Enqueue(0)
 		t.digests.Enqueue(min(t.chunks.pieces-1, t.chunks.pieces)) // min to handle 0 case which causes a uint wrap around.
@@ -329,37 +365,38 @@ func TuneVerifySample(n uint64) Tuner {
 			t.chunks.fill(t.chunks.completed, t.chunks.pieces)
 			t.chunks.zero(t.chunks.unverified)
 			t.chunks.zero(t.chunks.missing)
-			return
+			return nil
 		}
 
-		TuneVerifyFull(t)
+		return TuneVerifyFull(t)
 	}
 }
 
 // lets randomly verify some of the data.
 // will block until complete.
 func tuneVerifySample(unverified *roaring.Bitmap, n uint64) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.chunks.InitFromUnverified(unverified)
-		t.Tune(TuneVerifySample(n))
+		return t.Tune(TuneVerifySample(n))
 	}
 }
 
-func TuneSeeding(t *torrent) {
+func TuneSeeding(t *torrent) error {
 	t.chunks.MergeInto(t.chunks.completed, bitmapx.Fill(t.chunks.pieces))
+	return nil
 }
 
-func TuneRecordMetadata(t *torrent) {
+func TuneRecordMetadata(t *torrent) error {
 	if t.Info() == nil {
-		panic("cannot persist torrent metadata when missing info")
+		return ErrTorrentAttemptedToPersistNilMetadata
 	}
 
 	t.md.InfoBytes = t.metadataBytes
-	errorsx.Log(errorsx.Wrap(t.cln.torrents.Write(t.Metadata()), "failed to perist torrent file"))
+	return errorsx.LogErr(errorsx.Wrap(t.cln.torrents.Write(t.Metadata()), "failed to perist torrent file"))
 }
 
 func tuneMerge(md Metadata) Tuner {
-	return func(t *torrent) {
+	return func(t *torrent) error {
 		t.md.DisplayName = langx.DefaultIfZero(t.md.DisplayName, md.DisplayName)
 		t.md.Trackers = append(t.md.Trackers, md.Trackers...)
 
@@ -367,6 +404,8 @@ func tuneMerge(md Metadata) Tuner {
 			log.Println("merging set chunk size")
 			t.setChunkSize(md.ChunkSize)
 		}
+
+		return nil
 	}
 }
 
@@ -678,7 +717,9 @@ func (t *torrent) Metadata() Metadata {
 // Tune the settings of the torrent.
 func (t *torrent) Tune(tuning ...Tuner) error {
 	for _, opt := range tuning {
-		opt(t)
+		if err := opt(t); err != nil {
+			return err
+		}
 	}
 
 	return nil
