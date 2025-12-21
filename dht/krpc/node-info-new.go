@@ -27,7 +27,7 @@ func RandomNodeInfo(ipLen int) (ni NodeInfo) {
 	tmp := make(net.IP, ipLen)
 	crand.Read(ni.ID[:])
 	crand.Read(tmp)
-	ni.Addr = NewNodeAddrFromIPPort(tmp, rand.IntN(math.MaxUint16+1))
+	ni.Addr = NewNodeAddrFromIPPort(tmp, uint16(rand.IntN(math.MaxUint16+1)))
 	return
 }
 

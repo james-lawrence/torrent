@@ -40,12 +40,12 @@ type MsgArgs struct {
 	InfoHash ID `bencode:"info_hash,omitempty"` // InfoHash of the torrent
 	Target   ID `bencode:"target,omitempty"`    // ID of the node sought
 	// Token received from an earlier get_peers query. Also used in a BEP 44 put.
-	Token       string `bencode:"token,omitempty"`
-	Port        *int   `bencode:"port,omitempty"`         // Sender's torrent port
-	ImpliedPort bool   `bencode:"implied_port,omitempty"` // Use senders apparent DHT port
-	Want        []Want `bencode:"want,omitempty"`         // Contains strings like "n4" and "n6" from BEP 32.
-	NoSeed      int    `bencode:"noseed,omitempty"`       // BEP 33
-	Scrape      int    `bencode:"scrape,omitempty"`       // BEP 33
+	Token       string  `bencode:"token,omitempty"`
+	Port        *uint16 `bencode:"port,omitempty"`         // Sender's torrent port
+	ImpliedPort bool    `bencode:"implied_port,omitempty"` // Use senders apparent DHT port
+	Want        []Want  `bencode:"want,omitempty"`         // Contains strings like "n4" and "n6" from BEP 32.
+	NoSeed      int     `bencode:"noseed,omitempty"`       // BEP 33
+	Scrape      int     `bencode:"scrape,omitempty"`       // BEP 33
 
 	// BEP 44
 

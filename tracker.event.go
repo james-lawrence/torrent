@@ -109,7 +109,6 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 
 			if err == nil {
 				t.addPeers(peers...)
-				go t.maybeNewConns()
 				continue
 			}
 

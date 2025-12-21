@@ -16,11 +16,11 @@ func NewNodeAddrFromAddrPort(ap netip.AddrPort) NodeAddr {
 	}
 }
 
-func NewNodeAddrFromIPPort(ip net.IP, port int) NodeAddr {
+func NewNodeAddrFromIPPort(ip net.IP, port uint16) NodeAddr {
 	if ip == nil {
 		addr, _ := netip.AddrFromSlice(ip)
 		return NodeAddr{
-			AddrPort: netip.AddrPortFrom(addr, uint16(port)),
+			AddrPort: netip.AddrPortFrom(addr, port),
 		}
 	}
 
@@ -30,7 +30,7 @@ func NewNodeAddrFromIPPort(ip net.IP, port int) NodeAddr {
 	}
 
 	return NodeAddr{
-		AddrPort: netip.AddrPortFrom(ipaddr, uint16(port)),
+		AddrPort: netip.AddrPortFrom(ipaddr, port),
 	}
 }
 
@@ -71,7 +71,7 @@ func (me NodeAddr) Equal(r NodeAddr) bool {
 func (ni NodeAddr) MarshalBinary() ([]byte, error) {
 	var encoded serialized = serialized{
 		IP:   ni.IP(),
-		Port: int(ni.Port()),
+		Port: ni.Port(),
 	}
 
 	return encoded.MarshalBinary()
@@ -103,7 +103,7 @@ func (ni *NodeAddr) UnmarshalBencode(b []byte) (err error) {
 func (ni NodeAddr) MarshalBencode() ([]byte, error) {
 	var encoded serialized = serialized{
 		IP:   ni.IP(),
-		Port: int(ni.Port()),
+		Port: ni.Port(),
 	}
 
 	return encoded.MarshalBencode()
@@ -111,13 +111,13 @@ func (ni NodeAddr) MarshalBencode() ([]byte, error) {
 
 type serialized struct {
 	IP   net.IP
-	Port int
+	Port uint16
 }
 
 func (me *serialized) UnmarshalBinary(b []byte) error {
 	me.IP = make(net.IP, len(b)-2)
 	copy(me.IP, b[:len(b)-2])
-	me.Port = int(binary.BigEndian.Uint16(b[len(b)-2:]))
+	me.Port = binary.BigEndian.Uint16(b[len(b)-2:])
 	return nil
 }
 

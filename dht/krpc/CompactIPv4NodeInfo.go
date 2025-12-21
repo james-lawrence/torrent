@@ -12,7 +12,7 @@ func (CompactIPv4NodeInfo) ElemSize() int {
 
 func (me CompactIPv4NodeInfo) MarshalBinary() ([]byte, error) {
 	return marshalBinarySlice(slices.Map(func(ni NodeInfo) NodeInfo {
-		ni.Addr = NewNodeAddrFromIPPort(ni.Addr.IP().To4(), int(ni.Addr.Port()))
+		ni.Addr = NewNodeAddrFromIPPort(ni.Addr.IP().To4(), ni.Addr.Port())
 		return ni
 	}, me).(CompactIPv4NodeInfo))
 }

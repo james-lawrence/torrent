@@ -774,7 +774,7 @@ func TestClientDynamicListenTCPOnly(t *testing.T) {
 	).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer cl.Close()
-	assert.NotEqual(t, 0, cl.LocalPort())
+	assert.NotEqual(t, 0, cl.LocalPort16())
 }
 
 func TestClientDynamicListenUTPOnly(t *testing.T) {
@@ -785,7 +785,7 @@ func TestClientDynamicListenUTPOnly(t *testing.T) {
 	).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer cl.Close()
-	assert.NotEqual(t, 0, cl.LocalPort())
+	assert.NotEqual(t, 0, cl.LocalPort16())
 }
 
 // Creates a file containing random data. Make a metainfo from that, adds it to the given
@@ -1004,7 +1004,7 @@ func TestDownloadRange(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, added)
 			defer to.Stop(dl1.Metadata())
-			// log.Printf("from %d -> to %d, offset %d length %d\n", from.LocalPort(), to.LocalPort(), offset, length)
+			// log.Printf("from %d -> to %d, offset %d length %d\n", from.LocalPort16(), to.LocalPort16(), offset, length)
 			dl := torrent.DownloadRange(ctx, dl1, offset, length, torrent.TuneClientPeer(from))
 
 			n, err := io.Copy(digestdl, dl)

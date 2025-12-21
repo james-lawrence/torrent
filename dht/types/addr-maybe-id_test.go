@@ -63,19 +63,20 @@ func BenchmarkDeterministicAddr(tb *testing.B) {
 	ip := net.ParseIP("1.2.3.4")
 	target := int160.Random()
 
-	for range tb.N {
+	for tb.Loop() {
 		a := AddrMaybeId{
 			Addr: krpc.NewNodeAddrFromIPPort(
 				ip,
-				rand.Int(),
+				uint16(rand.Uint32()),
 			),
 		}
 		b := AddrMaybeId{
 			Addr: krpc.NewNodeAddrFromIPPort(
 				ip,
-				rand.Int(),
+				uint16(rand.Uint32()),
 			),
 		}
+
 		if a.CloserThan(b, target) != a.CloserThan(b, target) {
 			tb.Fatal("not deterministic")
 		}

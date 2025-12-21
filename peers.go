@@ -24,7 +24,7 @@ func (me *Peers) AppendFromPex(nas []krpc.NodeAddr, fs []btprotocol.PexPeerFlags
 
 func (ret Peers) AppendFromTracker(ps []tracker.Peer) Peers {
 	for _, p := range ps {
-		ret = append(ret, NewPeerDeprecated(int160.FromBytesOrZero(p.ID), p.IP, p.Port, PeerOptionSource(peerSourceTracker)))
+		ret = append(ret, NewPeerDeprecated(int160.FromBytesOrZero(p.ID), p.IP, uint16(p.Port), PeerOptionSource(peerSourceTracker)))
 	}
 	return ret
 }

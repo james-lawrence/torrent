@@ -215,10 +215,10 @@ func TestClientDynamicListenPortAllProtocols(t *testing.T) {
 	cl, err := Autosocket(t).Bind(NewClient(TestingConfig(t, t.TempDir())))
 	require.NoError(t, err)
 	defer cl.Close()
-	port := cl.LocalPort()
-	assert.NotEqual(t, 0, port)
+	port := cl.LocalPort16()
+	assert.NotEqualValues(t, 0, port)
 	cl.eachListener(func(s sockets.Socket) bool {
-		assert.Equal(t, uint16(port), errorsx.Must(netx.AddrPort(s.Addr())).Port())
+		assert.EqualValues(t, port, errorsx.Must(netx.AddrPort(s.Addr())).Port())
 		return true
 	})
 }

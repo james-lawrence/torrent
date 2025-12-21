@@ -11,7 +11,7 @@ import (
 func DHTAnnounceOnce(ctx context.Context, cln *Client, d *dht.Server, id int160.T) (err error) {
 	// log.Println("dht announced initiated", id, cln.LocalPort16())
 	// defer log.Println("dht announced completed", id, cln.LocalPort16())
-	announced, err := d.AnnounceTraversal(ctx, id, dht.AnnouncePeer(true, cln.LocalPort()))
+	announced, err := d.AnnounceTraversal(ctx, id, dht.AnnouncePeer(true, cln.LocalPort16()))
 	if err != nil {
 		return errorsx.Wrapf(err, "dht failed to announce: %s", id)
 	}

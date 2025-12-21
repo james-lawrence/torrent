@@ -38,7 +38,7 @@ func TestMarshalCompactNodeInfo(t *testing.T) {
 	port, err := netx.NetPort(addr)
 	require.NoError(t, err)
 
-	cni[0].Addr = krpc.NewNodeAddrFromIPPort(ip.To4(), port)
+	cni[0].Addr = krpc.NewNodeAddrFromIPPort(ip.To4(), uint16(port))
 	b, err := cni.MarshalBinary()
 	require.NoError(t, err)
 	var bb [26]byte

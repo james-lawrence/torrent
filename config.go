@@ -44,8 +44,7 @@ type ClientConfig struct {
 
 	dhtStartingNodes []func(network string) dht.StartingNodesGetter
 
-	// Upload even after there's nothing in it for us. By default uploading is
-	// not altruistic, we'll only upload to encourage the peer to reciprocate.
+	// Upload even after there's nothing in it for us.
 	Seed bool `long:"seed"`
 
 	// Only applies to chunks uploaded to peers, to maintain responsiveness
@@ -132,11 +131,11 @@ type ClientConfig struct {
 
 	ConnTracker *conntrack.Instance
 
-	connections.Handshaker
+	Handshaker connections.Handshaker
 
 	// OnQuery hook func
 	DHTOnQuery      func(query *krpc.Msg, source net.Addr) (propagate bool)
-	DHTAnnouncePeer func(ih int160.T, ip net.IP, port int, portOk bool)
+	DHTAnnouncePeer func(ih int160.T, ip net.IP, port uint16, portOk bool)
 	DHTMuxer        dht.Muxer
 
 	ConnectionClosed func(ih int160.T, stats ConnStats, remaining int)
@@ -514,7 +513,7 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		Logger:           discard{},
 		Warn:             discard{},
 		Debug:            discard{},
-		DHTAnnouncePeer:  func(ih int160.T, ip net.IP, port int, portOk bool) {},
+		DHTAnnouncePeer:  func(ih int160.T, ip net.IP, port uint16, portOk bool) {},
 		DHTMuxer:         dht.DefaultMuxer(),
 		ConnectionClosed: func(t int160.T, stats ConnStats, remaining int) {},
 		Handshaker: connections.NewHandshaker(

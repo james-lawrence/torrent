@@ -117,7 +117,7 @@ func TestTorrentMetainfoIncompleteMetadata(t *testing.T) {
 	assert.Nil(t, tt.(*torrent).Metadata().InfoBytes)
 	assert.False(t, tt.(*torrent).haveAllMetadataPieces())
 
-	nc, err := net.Dial("tcp", fmt.Sprintf(":%d", cl.LocalPort()))
+	nc, err := net.Dial("tcp", fmt.Sprintf(":%d", cl.LocalPort16()))
 	require.NoError(t, err)
 	defer nc.Close()
 	defer cl.Stop(ts)

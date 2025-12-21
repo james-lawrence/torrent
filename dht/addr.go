@@ -15,7 +15,7 @@ import (
 // to any OS-level function that take net.Addr.
 type Addr interface {
 	Raw() net.Addr
-	Port() int
+	Port() uint16
 	IP() net.IP
 	String() string
 	KRPC() krpc.NodeAddr
@@ -42,8 +42,8 @@ func (ca cachedAddr) IP() net.IP {
 	return net.IP(ca.v.Addr().AsSlice())
 }
 
-func (ca cachedAddr) Port() int {
-	return int(ca.v.Port())
+func (ca cachedAddr) Port() uint16 {
+	return ca.v.Port()
 }
 
 func (ca cachedAddr) Raw() net.Addr {

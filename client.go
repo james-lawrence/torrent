@@ -716,7 +716,7 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr netip.Add
 	return c
 }
 
-func (cl *Client) onDHTAnnouncePeer(id int160.T, ip net.IP, port int, portOk bool) {
+func (cl *Client) onDHTAnnouncePeer(id int160.T, ip net.IP, port uint16, portOk bool) {
 	cl.config.DHTAnnouncePeer(id, ip, port, portOk)
 	cl.lock()
 	defer cl.unlock()

@@ -468,7 +468,7 @@ func filterPeers(querySourceIp net.IP, queryWants []krpc.Want, allPeers []krpc.N
 				return nil, false
 			}
 		}(peer.IP()); ok {
-			filtered = append(filtered, krpc.NewNodeAddrFromIPPort(ip, int(peer.Port())))
+			filtered = append(filtered, krpc.NewNodeAddrFromIPPort(ip, peer.Port()))
 		}
 	}
 	return
@@ -893,7 +893,7 @@ func (s *Server) Put(ctx context.Context, node Addr, i bep44.Put, token string, 
 
 func (s *Server) announcePeer(
 	ctx context.Context,
-	node Addr, infoHash int160.T, port int, token string, impliedPort bool,
+	node Addr, infoHash int160.T, port uint16, token string, impliedPort bool,
 ) (
 	ret QueryResult,
 ) {

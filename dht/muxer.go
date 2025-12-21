@@ -104,7 +104,7 @@ func (t HandlerAnnounce) Handle(ctx context.Context, source Addr, s *Server, raw
 		return nil
 	}
 
-	var port int
+	var port uint16
 	portOk := false
 	if m.A.Port != nil {
 		port = *m.A.Port

@@ -53,7 +53,7 @@ func TuneMaxConnections(m int) Tuner {
 // TunePeers add peers to the torrent.
 func TunePeers(peers ...Peer) Tuner {
 	return func(t *torrent) {
-		t.AddPeers(peers)
+		t.addPeersLocked(peers)
 	}
 }
 
@@ -165,7 +165,7 @@ func TuneClientPeer(cl *Client) Tuner {
 			))
 		}
 
-		t.AddPeers(ps)
+		t.addPeersLocked(ps)
 	}
 }
 
@@ -776,6 +776,26 @@ func (t *torrent) unclosedConnsAsSlice() (ret []*connection) {
 	return t.conns.filtered(func(c *connection) bool { return c.closed.Load() })
 }
 
+func (t *torrent) addPeersLocked(pp []Peer) {
+	t.lock()
+	defer t.unlock()
+	t.addPeers(pp...)
+}
+
+func (t *torrent) addPeers(peers ...Peer) (total int) {
+	for _, p := range peers {
+		total += t.addPeer(p)
+	}
+
+	return total
+}
+
+func (t *torrent) addPeerLocked(p Peer) int {
+	t.lock()
+	defer t.unlock()
+	return t.addPeer(p)
+}
+
 func (t *torrent) addPeer(p Peer) int {
 	select {
 	case <-t.closed:
@@ -1253,7 +1273,7 @@ func (t *torrent) consumeDhtAnnouncePeers(ctx context.Context, pvs <-chan dht.Pe
 			}, slicesx.Filter(func(v dht.Peer) bool { return v.Port() != 0 }, v.Peers...)...)
 
 			t.cln.config.debug().Println("adding peers", len(peers))
-			t.AddPeers(peers)
+			t.addPeersLocked(peers)
 		case <-ctx.Done():
 			return
 		}
@@ -1264,7 +1284,7 @@ func (t *torrent) announceToDht(impliedPort bool, s *dht.Server) error {
 	ctx, done := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer done()
 
-	ps, err := s.AnnounceTraversal(ctx, t.md.ID, dht.AnnouncePeer(impliedPort, t.cln.LocalPort()))
+	ps, err := s.AnnounceTraversal(ctx, t.md.ID, dht.AnnouncePeer(impliedPort, t.cln.LocalPort16()))
 	if err != nil {
 		return err
 	}
@@ -1310,14 +1330,6 @@ func (t *torrent) dhtAnnouncer(s *dht.Server) {
 			continue
 		}
 	}
-}
-
-func (t *torrent) addPeers(peers ...Peer) (total int) {
-	for _, p := range peers {
-		total += t.addPeer(p)
-	}
-
-	return total
 }
 
 func (t *torrent) Stats() Stats {
@@ -1608,12 +1620,6 @@ func (t *torrent) initFiles() {
 // available first.
 func (t *torrent) Files() []*File {
 	return t.files
-}
-
-func (t *torrent) AddPeers(pp []Peer) {
-	t.lock()
-	defer t.unlock()
-	t.addPeers(pp...)
 }
 
 func (t *torrent) String() string {

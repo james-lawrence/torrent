@@ -57,7 +57,7 @@ type ServerConfig struct {
 	// Hook received queries. Return false if you don't want to propagate to the default handlers.
 	OnQuery func(query *krpc.Msg, source net.Addr) (propagate bool)
 	// Called when a peer successfully announces to us.
-	OnAnnouncePeer func(infoHash int160.T, ip net.IP, port int, portOk bool)
+	OnAnnouncePeer func(infoHash int160.T, ip net.IP, port uint16, portOk bool)
 	// How long to wait before resending queries that haven't received a response. Defaults to 2s.
 	// After the last send, a query is aborted after this time.
 	QueryResendDelay func() time.Duration

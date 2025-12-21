@@ -61,13 +61,13 @@ func Scrape() AnnounceOpt {
 // Arguments for announce_peer from a Server.Announce.
 type AnnouncePeerOpts struct {
 	// The peer port that we're announcing.
-	Port int
+	Port uint16
 	// The peer port should be determined by the receiver to be the source port of the query packet.
 	ImpliedPort bool
 }
 
 // Finish an Announce get_peers traversal with an announce of a local peer.
-func AnnouncePeer(implied bool, port int) AnnounceOpt {
+func AnnouncePeer(implied bool, port uint16) AnnounceOpt {
 	return func(a *Announce) {
 		if port == 0 && !implied {
 			return

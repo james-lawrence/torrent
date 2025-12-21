@@ -7,7 +7,7 @@ import (
 	"github.com/james-lawrence/torrent/dht/krpc"
 )
 
-func NewAnnouncePeerRequest(from krpc.ID, id krpc.ID, port int, token string, impliedPort bool) (qi QueryInput, err error) {
+func NewAnnouncePeerRequest(from krpc.ID, id krpc.ID, port uint16, token string, impliedPort bool) (qi QueryInput, err error) {
 	if port == 0 && !impliedPort {
 		err = errors.New("no port specified")
 		return
@@ -24,7 +24,7 @@ func NewAnnouncePeerRequest(from krpc.ID, id krpc.ID, port int, token string, im
 	)
 }
 
-func AnnouncePeerQuery(ctx context.Context, q Queryer, to Addr, from krpc.ID, id krpc.ID, port int, token string, impliedPort bool) QueryResult {
+func AnnouncePeerQuery(ctx context.Context, q Queryer, to Addr, from krpc.ID, id krpc.ID, port uint16, token string, impliedPort bool) QueryResult {
 	qi, err := NewAnnouncePeerRequest(from, id, port, token, impliedPort)
 	if err != nil {
 		return NewQueryResultErr(err)

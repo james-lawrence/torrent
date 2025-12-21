@@ -31,8 +31,8 @@ func PeerOptionTrusted(b bool) PeerOption {
 	}
 }
 
-func NewPeerDeprecated(id int160.T, ip net.IP, port int, options ...PeerOption) Peer {
-	return NewPeer(id, netip.AddrPortFrom(netx.AddrFromIP(ip), uint16(port)), options...)
+func NewPeerDeprecated(id int160.T, ip net.IP, port uint16, options ...PeerOption) Peer {
+	return NewPeer(id, netip.AddrPortFrom(netx.AddrFromIP(ip), port), options...)
 }
 
 func NewPeer(id int160.T, addr netip.AddrPort, options ...PeerOption) Peer {

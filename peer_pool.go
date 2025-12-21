@@ -33,7 +33,6 @@ func newPeerPool(n int, prio func(Peer) peerPriority) peerPool {
 	return peerPool{
 		m:         &sync.RWMutex{},
 		om:        btree.NewG(n, priorityPeerCmp),
-		pool:      btree.NewG(n, priorityPeerCmp),
 		attempted: btree.NewG(n, priorityPeerCmp),
 		loaned:    make(map[netip.AddrPort]Peer, 32),
 		getPrio:   prio,
@@ -44,7 +43,6 @@ func newPeerPool(n int, prio func(Peer) peerPriority) peerPool {
 type peerPool struct {
 	m         *sync.RWMutex
 	om        *btree.BTreeG[prioritizedPeer]
-	pool      *btree.BTreeG[prioritizedPeer]
 	attempted *btree.BTreeG[prioritizedPeer]
 	loaned    map[netip.AddrPort]Peer
 	getPrio   func(Peer) peerPriority
@@ -117,9 +115,9 @@ func (t *peerPool) Add(p Peer) bool {
 
 	prio := t.prioritized(p)
 
-	if _, replaced := t.pool.ReplaceOrInsert(prio); replaced {
-		return replaced
-	}
+	// if _, replaced := t.attempted.ReplaceOrInsert(prio); replaced {
+	// 	return replaced
+	// }
 
 	if _, replaced := t.om.ReplaceOrInsert(prio); replaced {
 		return replaced
@@ -132,9 +130,7 @@ func (t *peerPool) DeleteMin() (ret prioritizedPeer, ok bool) {
 	t.m.Lock()
 	defer t.m.Unlock()
 
-	deleted, ok := t.om.DeleteMin()
-	_, _ = t.pool.Delete(deleted)
-	return deleted, ok
+	return t.om.DeleteMin()
 }
 
 func (t *peerPool) PopMax() (p prioritizedPeer, ok bool) {
@@ -147,6 +143,8 @@ func (t *peerPool) PopMax() (p prioritizedPeer, ok bool) {
 
 	if ts := time.Now(); t.nextswap.After(ts) {
 		return p, false
+	} else {
+		t.nextswap = ts.Add(time.Minute)
 	}
 
 	t.om = t.attempted.Clone()

@@ -12,7 +12,7 @@ import (
 	"github.com/james-lawrence/torrent/upnp"
 )
 
-func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort int, upnpID string) (_zero netip.AddrPort, err error) {
+func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort uint16, upnpID string) (_zero netip.AddrPort, err error) {
 	ctx, done := context.WithTimeout(context.Background(), time.Minute)
 	defer done()
 
@@ -25,7 +25,8 @@ func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort int, upnpID
 		var (
 			derp upnp.ErrUPnP
 		)
-		externalPort, err := d.AddPortMapping(ctx, proto, internalPort, i, upnpID, time.Hour)
+
+		externalPort, err := d.AddPortMapping(ctx, proto, int(internalPort), int(i), upnpID, time.Hour)
 		if err == nil {
 			return netip.AddrPortFrom(netip.AddrFrom16([16]byte(ip.To16())), uint16(externalPort)), nil
 		}
@@ -51,7 +52,7 @@ func (cl *Client) forwardPort() {
 
 	for addrport := range addrs {
 		cl.dynamicaddr.Store(&addrport)
-		log.Println("dynamic ip update", cl.LocalPort(), "->", addrport)
+		log.Println("dynamic ip update", cl.LocalPort16(), "->", addrport)
 	}
 }
 
@@ -60,7 +61,7 @@ func UPnPPortForward(ctx context.Context, c *Client) (iter.Seq[netip.AddrPort], 
 		ds := upnp.Discover(ctx, 0, 2*time.Second)
 		c.config.debug().Printf("discovered %d upnp devices\n", len(ds))
 		c.lock()
-		port := c.LocalPort()
+		port := c.LocalPort16()
 		id := c.config.UpnpID
 		c.unlock()
 
