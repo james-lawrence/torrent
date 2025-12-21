@@ -3,6 +3,7 @@ package torrent
 import (
 	"context"
 	"iter"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -82,9 +83,11 @@ type ClientConfig struct {
 	CryptoSelector mse.CryptoSelector
 
 	DisableIPv4Peers bool
-	Logger           logging // standard logging for errors, defaults to stderr
-	Warn             logging // warn logging
-	Debug            logging // debug logging, defaults to discard
+
+	Error  logging // standard logging for errors, defaults to stderr
+	Warn   logging // warn logging
+	Logger logging // informational logging
+	Debug  logging // debug logging, defaults to discard
 
 	// HTTPProxy defines proxy for HTTP requests.
 	// Format: func(*Request) (*url.URL, error),
@@ -169,7 +172,7 @@ func (cfg *ClientConfig) AnnounceRequest() tracker.Announce {
 }
 
 func (cfg *ClientConfig) errors() logging {
-	return cfg.Logger
+	return cfg.Error
 }
 
 func (cfg *ClientConfig) warn() logging {
@@ -513,6 +516,7 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		Logger:           discard{},
 		Warn:             discard{},
 		Debug:            discard{},
+		Error:            log.Default(),
 		DHTAnnouncePeer:  func(ih int160.T, ip net.IP, port uint16, portOk bool) {},
 		DHTMuxer:         dht.DefaultMuxer(),
 		ConnectionClosed: func(t int160.T, stats ConnStats, remaining int) {},

@@ -2,6 +2,7 @@ package torrent
 
 import (
 	"context"
+	"iter"
 	"log"
 	"time"
 
@@ -13,6 +14,37 @@ import (
 )
 
 const ErrNoPeers = errorsx.String("failed to locate any peers for torrent")
+
+type trackerresponse struct {
+	Peers
+	Err  error
+	Next time.Duration
+}
+type trackerseq []string
+
+func (ts trackerseq) Peers(ctx context.Context, t *torrent, options ...tracker.AnnounceOption) iter.Seq[trackerresponse] {
+	return func(yield func(trackerresponse) bool) {
+		for _, uri := range ts {
+			t.cln.config.debug().Println("announced initiated", t.md.DisplayName, t.Metadata().DisplayName, len(ts), uri)
+			ctx, done := context.WithTimeout(ctx, time.Minute)
+			d, peers, err := TrackerAnnounceOnce(ctx, t, uri, options...)
+			done()
+
+			failed := errorsx.Ignore(err, ErrNoPeers, context.DeadlineExceeded)
+
+			if !yield(trackerresponse{Peers: peers, Next: d, Err: failed}) {
+				return
+			}
+
+			if failed != nil {
+				t.cln.config.errors().Println("announce failed", t.info == nil, failed)
+				continue
+			}
+
+			t.cln.config.debug().Println("announced completed", t.md.DisplayName, t.Metadata().DisplayName, len(ts), uri)
+		}
+	}
+}
 
 func TrackerEvent(ctx context.Context, l Torrent, announceuri string, options ...tracker.AnnounceOption) (ret *tracker.AnnounceResponse, err error) {
 	var (
@@ -59,9 +91,7 @@ func TrackerAnnounceOnce(ctx context.Context, l Torrent, uri string, options ...
 		return delay, nil, err
 	}
 
-	if d := time.Duration(announced.Interval) * time.Second; delay < d {
-		delay = d
-	}
+	delay = max(delay, time.Duration(announced.Interval)*time.Second)
 
 	if len(announced.Peers) == 0 {
 		return delay, nil, ErrNoPeers
@@ -72,9 +102,9 @@ func TrackerAnnounceOnce(ctx context.Context, l Torrent, uri string, options ...
 
 func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, options ...tracker.AnnounceOption) {
 	const mindelay = 1 * time.Minute
-	var delay time.Duration = mindelay
+	var delay = mindelay
 
-	trackers := t.md.Trackers
+	trackers := trackerseq(t.md.Trackers)
 
 	for {
 		var (
@@ -82,45 +112,23 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 			failed     error = nil
 		)
 
-		for _, uri := range trackers {
-			t.cln.config.debug().Println("announced initiated", t.md.DisplayName, t.Metadata().DisplayName, len(trackers), uri)
-			ctx, done := context.WithTimeout(context.Background(), time.Minute)
-			d, peers, err := TrackerAnnounceOnce(ctx, t, uri, options...)
-			done()
+		for res := range trackers.Peers(ctx, t, options...) {
+			totalpeers += len(res.Peers)
 
-			totalpeers += len(peers)
-			failed = langx.FirstNonZero(failed, errorsx.Ignore(err, ErrNoPeers))
-
-			t.cln.config.debug().Println("announced completed", t.md.DisplayName, t.Metadata().DisplayName, len(trackers), uri)
-
-			if errorsx.Is(err, context.DeadlineExceeded) {
-				t.cln.config.errors().Println(err)
+			if res.Err == nil {
+				failed = nil
+				t.addPeers(res.Peers...)
 				continue
 			}
 
-			if errorsx.Is(err, tracker.ErrMissingInfoHash) {
-				t.cln.config.errors().Println(err)
-				if len(trackers) == 1 {
-					return
-				}
+			failed = langx.FirstNonNil(failed, res.Err)
+			delay = max(delay, res.Next)
+		}
 
-				continue
-			}
-
-			if err == nil {
-				t.addPeers(peers...)
-				continue
-			}
-
-			if delay < d {
-				delay = d
-			}
-
-			if err == ErrNoPeers {
-				continue
-			}
-
-			t.cln.config.debug().Println("announce failed", t.info == nil, err)
+		if errorsx.Is(failed, tracker.ErrMissingInfoHash) && len(trackers) == 1 {
+			t.cln.config.errors().Println(errorsx.Wrap(failed, "hard stop due to no infohash and a single tacker"))
+			t.cln.Stop(t.Metadata())
+			return
 		}
 
 		if totalpeers > 0 && failed == nil {
@@ -133,7 +141,6 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 		delay = mindelay
 
 		if donefn() {
-			// log.Println("announce completed", t.Metadata().ID.String())
 			return
 		}
 	}
