@@ -447,11 +447,14 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 		return nil, err
 	}
 
-	cl.config.debug().Println("dialing completed", t.md.ID, cl.dynamicaddr.Load(), "->", addr)
+	// cl.config.debug().Println("dialing completed", t.md.ID, cl.dynamicaddr.Load(), "->", addr)
 	defer func() {
-		if err != nil {
-			errorsx.Log(nc.Close())
+		if err == nil {
+			return
 		}
+
+		cl.config.errors().Println("dialing failed", t.md.ID, cl.dynamicaddr.Load(), "->", addr, err)
+		errorsx.Log(nc.Close())
 	}()
 
 	// This is a bit optimistic, but it looks non-trivial to thread this through the proxy code. Set
