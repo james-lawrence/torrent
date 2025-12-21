@@ -110,12 +110,12 @@ func TuneReadPublicIPv6(v net.IP) Tuner {
 	}
 }
 
-func TuneReadPort(v *int) Tuner {
+func TuneReadPort(v *uint16) Tuner {
 	return func(t *torrent) {
 		t.rLock()
 		defer t.rUnlock()
 
-		*v = t.cln.LocalPort()
+		*v = t.cln.LocalPort16()
 	}
 }
 
@@ -790,12 +790,6 @@ func (t *torrent) addPeers(peers ...Peer) (total int) {
 	return total
 }
 
-func (t *torrent) addPeerLocked(p Peer) int {
-	t.lock()
-	defer t.unlock()
-	return t.addPeer(p)
-}
-
 func (t *torrent) addPeer(p Peer) int {
 	select {
 	case <-t.closed:
@@ -1122,7 +1116,8 @@ func (t *torrent) openNewConns() {
 			return
 		}
 
-		t.cln.config.debug().Printf("initiating connection to peer %p %s\n", t, popped.p.AddrPort)
+		// t.cln.config.debug().Printf("initiating connection to peer %p %s\n", t, popped.p.AddrPort)
+		log.Printf("initiating connection to peer %p %s\n", t, popped.p.AddrPort)
 		t.initiateConn(context.Background(), popped.p)
 	}
 }

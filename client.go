@@ -198,10 +198,6 @@ func (cl *Client) LocalPort16() (port uint16) {
 	return port
 }
 
-func (cl *Client) LocalPort() (port int) {
-	return int(cl.LocalPort16())
-}
-
 // NewClient create a new client from the provided config. nil is acceptable.
 func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 	if cfg == nil {
@@ -280,7 +276,7 @@ func (cl *Client) Config() *ClientConfig {
 // Bind the socket to this client.
 func (cl *Client) Bind(s sockets.Socket) (err error) {
 	// Check for panics.
-	cl.LocalPort()
+	cl.LocalPort16()
 
 	go cl.forwardPort()
 	go cl.acceptConnections(s)
@@ -520,7 +516,7 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (e
 	)
 
 	defer func() {
-		err = errorsx.StdlibTimeout(err, 300*time.Millisecond, syscall.ECONNRESET)
+		err = errorsx.StdlibTimeout(err, 3*time.Second, syscall.ECONNRESET)
 	}()
 
 	if c, err = cl.establishOutgoingConn(ctx, t, p.AddrPort); err != nil {
@@ -796,7 +792,7 @@ func (cl *Client) findListenerIP(f func(netip.Addr) bool) netip.Addr {
 func (cl *Client) publicAddr(peer netip.AddrPort) netip.AddrPort {
 	return netip.AddrPortFrom(
 		cl.publicIP(peer.Addr()),
-		uint16(cl.LocalPort()),
+		cl.LocalPort16(),
 	)
 }
 

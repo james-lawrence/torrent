@@ -49,7 +49,7 @@ func (ts trackerseq) Peers(ctx context.Context, t *torrent, options ...tracker.A
 func TrackerEvent(ctx context.Context, l Torrent, announceuri string, options ...tracker.AnnounceOption) (ret *tracker.AnnounceResponse, err error) {
 	var (
 		announcer tracker.Announce
-		port      int
+		port      uint16
 		s         Stats
 		id        int160.T
 		infoid    int160.T

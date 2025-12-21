@@ -64,7 +64,7 @@ func AnnounceOptionSeeding(ar *AnnounceRequest) {
 	ar.Left = 0
 }
 
-func NewAccounceRequest(id int160.T, port int, hash int160.T, options ...AnnounceOption) AnnounceRequest {
+func NewAccounceRequest(id int160.T, port uint16, hash int160.T, options ...AnnounceOption) AnnounceRequest {
 	return langx.Clone(AnnounceRequest{
 		PeerId:   int160.ByteArray(id),
 		Port:     uint16(port),
