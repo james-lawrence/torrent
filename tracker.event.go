@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/internal/backoffx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
 
@@ -107,8 +108,8 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 	)
 
 	var (
-		delay     = mindelay
-		lastcheck = time.Now()
+		delay      = mindelay
+		forcecheck = time.Now().Add(maxdelay)
 	)
 
 	trackers := trackerseq(t.md.Trackers)
@@ -119,12 +120,12 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 			failed     error = nil
 		)
 
-		if ts, vs := time.Now(), lastcheck.Add(maxdelay); !t.wantPeers() && ts.Before(vs) {
-			log.Println(t.md.ID, "skipping announce, peers not wanted", mindelay, "next force", vs)
+		if ts := time.Now(); !t.wantPeers() && ts.Before(forcecheck) {
+			log.Println(t.md.ID, "skipping announce, peers not wanted", mindelay, "next force", forcecheck)
 			time.Sleep(mindelay)
 			continue
 		} else {
-			lastcheck = ts
+			forcecheck = ts.Add(maxdelay + backoffx.Random(mindelay))
 		}
 
 		for res := range trackers.Peers(ctx, t, options...) {
