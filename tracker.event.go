@@ -101,8 +101,15 @@ func TrackerAnnounceOnce(ctx context.Context, l Torrent, uri string, options ...
 }
 
 func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, options ...tracker.AnnounceOption) {
-	const mindelay = 1 * time.Minute
-	var delay = mindelay
+	const (
+		maxdelay = 1 * time.Hour
+		mindelay = 1 * time.Minute
+	)
+
+	var (
+		delay     = mindelay
+		lastcheck = time.Now()
+	)
 
 	trackers := trackerseq(t.md.Trackers)
 
@@ -112,10 +119,12 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 			failed     error = nil
 		)
 
-		if !t.wantPeers() {
-			log.Println("skipping announce, peers not wanted", mindelay)
+		if ts, vs := time.Now(), lastcheck.Add(maxdelay); !t.wantPeers() && ts.Before(vs) {
+			log.Println(t.md.ID, "skipping announce, peers not wanted", mindelay, "next foce", vs)
 			time.Sleep(mindelay)
 			continue
+		} else {
+			lastcheck = ts
 		}
 
 		for res := range trackers.Peers(ctx, t, options...) {

@@ -1253,8 +1253,10 @@ func (t *torrent) wantPeers() bool {
 	default:
 	}
 
-	if t.peers.Len() > t.cln.config.TorrentPeersLowWater {
+	if peers := t.peers.Len(); peers > t.cln.config.TorrentPeersHighWater {
 		return false
+	} else if peers <= t.cln.config.TorrentPeersLowWater {
+		return true
 	}
 
 	return t.needData() || t.seeding()
