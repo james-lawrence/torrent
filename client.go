@@ -487,7 +487,9 @@ func (cl *Client) establishOutgoingConn(ctx context.Context, t *torrent, addr ne
 		}
 
 		err = errorsx.Wrapf(err, "outgoing conn failed %s - %s - %v - %v", t.md.ID, t.md.DisplayName, cl.dynamicaddr.Load(), addr)
-		cl.config.errors().Println(err)
+		if cause := errorsx.Ignore(err, context.DeadlineExceeded); cause != nil {
+			cl.config.errors().Println(cause)
+		}
 	}()
 
 	obfuscatedHeaderFirst := cl.config.HeaderObfuscationPolicy.Preferred

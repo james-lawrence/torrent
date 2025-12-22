@@ -33,7 +33,7 @@ import (
 	"github.com/james-lawrence/torrent/tracker"
 
 	"github.com/james-lawrence/torrent/bencode"
-	pp "github.com/james-lawrence/torrent/btprotocol"
+	"github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/james-lawrence/torrent/storage"
 )
@@ -1021,7 +1021,7 @@ func (t *torrent) metadataPieceSize(piece int) int {
 	return metadataPieceSize(len(t.metadataBytes), piece)
 }
 
-func (t *torrent) newMetadataExtensionMessage(c *connection, msgType int, piece int, data []byte) pp.Message {
+func (t *torrent) newMetadataExtensionMessage(c *connection, msgType int, piece int, data []byte) btprotocol.Message {
 	d := map[string]int{
 		"msg_type": msgType,
 		"piece":    piece,
@@ -1032,7 +1032,7 @@ func (t *torrent) newMetadataExtensionMessage(c *connection, msgType int, piece 
 	}
 
 	p := append(bencode.MustMarshal(d), data...)
-	return pp.NewExtended(c.PeerExtensionIDs[pp.ExtensionNameMetadata], p)
+	return btprotocol.NewExtended(c.PeerExtensionIDs[btprotocol.ExtensionNameMetadata], p)
 }
 
 func (t *torrent) haveInfo() bool {
@@ -1097,21 +1097,21 @@ func (t *torrent) writeChunk(piece int, begin int64, data []byte) (err error) {
 	return err
 }
 
-func (t *torrent) pieceLength(piece uint64) pp.Integer {
+func (t *torrent) pieceLength(piece uint64) btprotocol.Integer {
 	if t.info.PieceLength == 0 {
 		// There will be no variance amongst pieces. Only pain.
 		return 0
 	}
 
 	if piece == t.chunks.pieces-1 {
-		ret := pp.Integer(t.info.TotalLength() % t.info.PieceLength)
+		ret := btprotocol.Integer(t.info.TotalLength() % t.info.PieceLength)
 		if ret == 0 {
-			return pp.Integer(t.info.PieceLength)
+			return btprotocol.Integer(t.info.PieceLength)
 		}
 
 		return ret
 	}
-	return pp.Integer(t.info.PieceLength)
+	return btprotocol.Integer(t.info.PieceLength)
 }
 
 // The worst connection is one that hasn't been sent, or sent anything useful
@@ -1684,17 +1684,17 @@ func (t *torrent) gotMetadataExtensionMsg(payload []byte, c *connection) error {
 	}
 
 	switch d.Type {
-	case pp.RequestMetadataExtensionMsgType:
+	case btprotocol.RequestMetadataExtensionMsgType:
 		// log.Printf("c(%p) seed(%t) SENDING METADATA %s\n", c, t.seeding(), spew.Sdump(d))
 		if !t.haveMetadataPiece(d.Index) {
-			c.Post(t.newMetadataExtensionMessage(c, pp.RejectMetadataExtensionMsgType, d.Index, nil))
+			c.Post(t.newMetadataExtensionMessage(c, btprotocol.RejectMetadataExtensionMsgType, d.Index, nil))
 			return nil
 		}
 		start := 16 * bytesx.KiB * d.Index
 		end := start + t.metadataPieceSize(d.Index)
-		c.Post(t.newMetadataExtensionMessage(c, pp.DataMetadataExtensionMsgType, d.Index, t.metadataBytes[start:end]))
+		c.Post(t.newMetadataExtensionMessage(c, btprotocol.DataMetadataExtensionMsgType, d.Index, t.metadataBytes[start:end]))
 		return nil
-	case pp.DataMetadataExtensionMsgType:
+	case btprotocol.DataMetadataExtensionMsgType:
 		// log.Printf("c(%p) seed(%t) RECEIVED METADATA %s\n", c, t.seeding(), spew.Sdump(d))
 		c.allStats(add(1, func(cs *ConnStats) *count { return &cs.MetadataChunksRead }))
 		if !c.requestedMetadataPiece(d.Index) {
@@ -1712,7 +1712,7 @@ func (t *torrent) gotMetadataExtensionMsg(payload []byte, c *connection) error {
 		t.saveMetadataPiece(d.Index, payload[begin:])
 		c.lastUsefulChunkReceived = time.Now()
 		return t.maybeCompleteMetadata(c)
-	case pp.RejectMetadataExtensionMsgType:
+	case btprotocol.RejectMetadataExtensionMsgType:
 		return nil
 	default:
 		return errorsx.New("unknown msg_type value")
