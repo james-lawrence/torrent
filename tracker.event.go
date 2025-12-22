@@ -120,7 +120,7 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 		)
 
 		if ts, vs := time.Now(), lastcheck.Add(maxdelay); !t.wantPeers() && ts.Before(vs) {
-			log.Println(t.md.ID, "skipping announce, peers not wanted", mindelay, "next foce", vs)
+			log.Println(t.md.ID, "skipping announce, peers not wanted", mindelay, "next force", vs)
 			time.Sleep(mindelay)
 			continue
 		} else {
