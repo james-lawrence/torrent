@@ -8,16 +8,8 @@ func Autoptr[T any](a T) *T {
 	return &a
 }
 
-// Autoderef safely converts a pointer to its value, uses the zero value for nil.
-func Autoderef[T any](a *T) (zero T) {
-	if a == nil {
-		return zero
-	}
-
-	return *a
-}
-
-func DerefOrZero[T any](a *T) (zero T) {
+// safely converts a pointer to its value, uses the zero value for nil.
+func Zero[T any](a *T) (zero T) {
 	if a == nil {
 		return zero
 	}

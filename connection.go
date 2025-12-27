@@ -48,7 +48,7 @@ const (
 	writebufferscapacity      = 512 * bytesx.KiB
 )
 
-func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.AddrPort, extensions *pp.ExtensionBits, localport uint16, dynamicaddr *atomic.Pointer[netip.AddrPort]) (c *connection) {
+func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.AddrPort, extensions *pp.ExtensionBits, localport uint16, connaddr netip.AddrPort) (c *connection) {
 	_mu := &sync.RWMutex{}
 
 	ts := time.Now()
@@ -65,7 +65,7 @@ func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.A
 		currentbuffer:           new(bytes.Buffer),
 		remoteAddr:              remote,
 		localport:               localport,
-		dynamicaddr:             dynamicaddr,
+		connaddr:                connaddr,
 		touched:                 roaring.NewBitmap(),
 		peerfastset:             roaring.NewBitmap(),
 		fastset:                 roaring.NewBitmap(),
@@ -90,8 +90,9 @@ type connection struct {
 	// First to ensure 64-bit alignment for atomics. See #262.
 	stats ConnStats
 
-	localport   uint16
-	dynamicaddr *atomic.Pointer[netip.AddrPort]
+	localport uint16
+	connaddr  netip.AddrPort
+	dynamicid int160.T
 
 	t *torrent
 
@@ -219,7 +220,7 @@ func (cn *connection) ipv6() bool {
 // Returns true the dialer has the lower client peer ID. TODO: Find the
 // specification for this.
 func (cn *connection) isPreferredDirection() bool {
-	return cn.cfg.localID.Cmp(cn.PeerID) < 0 == cn.outgoing
+	return cn.dynamicid.Cmp(cn.PeerID) < 0 == cn.outgoing
 }
 
 // Returns whether the left connection should be preferred over the right one,

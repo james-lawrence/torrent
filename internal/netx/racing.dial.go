@@ -106,7 +106,7 @@ func (t RacingDialer) Dial(ctx context.Context, timeout time.Duration, address s
 	case fastest = <-w.fastest:
 	}
 
-	failure := langx.Autoderef(w.failure.Load())
+	failure := langx.Zero(w.failure.Load())
 
 	if fastest == nil {
 		return nil, errorsx.Compact(failure, context.Cause(__ctx), context.Cause(_ctx))

@@ -23,6 +23,7 @@ import (
 	"github.com/james-lawrence/torrent/autobind"
 	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/torrenttestx"
 
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/internal/bitmapx"
@@ -55,7 +56,7 @@ func TestingLeechConfig(t *testing.T, dir string) *torrent.ClientConfig {
 }
 
 func TestClientDefault(t *testing.T) {
-	cl, err := autobind.NewLoopback().Bind(torrent.NewClient(torrent.TestingConfig(t, t.TempDir())))
+	cl, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(torrent.TestingConfig(t, t.TempDir())))
 	require.NoError(t, err)
 	cl.Close()
 }
@@ -71,17 +72,17 @@ func TestBoltPieceCompletionClosedWhenClientClosed(t *testing.T) {
 	// ci := storage.NewFile(cfg.DataDir)
 	// defer ci.Close()
 
-	cl, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+	cl, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	cl.Close()
 	// And again, https://github.com/anacrolix/torrent/issues/158
-	cl, err = autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+	cl, err = torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	cl.Close()
 }
 
 func TestAddDropTorrent(t *testing.T) {
-	cl, err := autobind.NewLoopback().Bind(torrent.NewClient(torrent.TestingConfig(t, t.TempDir())))
+	cl, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(torrent.TestingConfig(t, t.TempDir())))
 	require.NoError(t, err)
 	defer cl.Close()
 	dir := t.TempDir()
@@ -98,7 +99,7 @@ func TestAddDropTorrent(t *testing.T) {
 }
 
 func TestAddDropManyTorrents(t *testing.T) {
-	cl, err := autobind.NewLoopback().Bind(torrent.NewClient(torrent.TestingConfig(t, t.TempDir())))
+	cl, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(torrent.TestingConfig(t, t.TempDir())))
 	require.NoError(t, err)
 	defer cl.Close()
 	for range 1000 {
@@ -198,7 +199,7 @@ func testClientTransfer(t *testing.T, ps testClientTransferParams) {
 		storageopt = torrent.OptionStorage(store)
 	}
 
-	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 
 	md, err := torrent.NewFromMetaInfo(mi, storageopt)
@@ -236,7 +237,7 @@ func testClientTransfer(t *testing.T, ps testClientTransferParams) {
 		cfg.DownloadRateLimiter = ps.LeecherDownloadRateLimiter
 	}
 
-	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+	leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer leecher.Close()
 
@@ -319,7 +320,7 @@ func TestClientSeedWithoutAdding(t *testing.T) {
 			torrent.ClientConfigSeed(true),
 		)
 
-		seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+		seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 		require.NoError(t, err)
 		defer seeder.Close()
 
@@ -331,7 +332,7 @@ func TestClientSeedWithoutAdding(t *testing.T) {
 			torrent.ClientConfigSeed(false),
 		)
 
-		leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+		leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 		require.NoError(t, err)
 		defer leecher.Close()
 
@@ -381,7 +382,7 @@ func TestClientSeedWithoutAdding(t *testing.T) {
 			torrent.ClientConfigEnableEncryption,
 		)
 
-		seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+		seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 		require.NoError(t, err)
 		defer seeder.Close()
 
@@ -393,7 +394,7 @@ func TestClientSeedWithoutAdding(t *testing.T) {
 			torrent.ClientConfigEnableEncryption,
 		)
 
-		leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+		leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 		require.NoError(t, err)
 		defer leecher.Close()
 
@@ -429,7 +430,7 @@ func TestSeedAfterDownloading(t *testing.T) {
 		torrent.ClientConfigSeed(true),
 	)
 
-	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer seeder.Close()
 
@@ -446,7 +447,7 @@ func TestSeedAfterDownloading(t *testing.T) {
 		torrent.ClientConfigSeed(true),
 	)
 
-	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(lcfg))
+	leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(lcfg))
 	require.NoError(t, err)
 	defer leecher.Close()
 
@@ -457,7 +458,7 @@ func TestSeedAfterDownloading(t *testing.T) {
 		torrent.ClientConfigSeed(false),
 	)
 
-	leecherLeecher, _ := autobind.NewLoopback().Bind(torrent.NewClient(llcfg))
+	leecherLeecher, _ := torrenttestx.Autosocket(t).Bind(torrent.NewClient(llcfg))
 	require.NoError(t, err)
 	defer leecherLeecher.Close()
 	leecherGreeting, ok, err := leecher.MaybeStart(torrent.NewFromMetaInfo(mi, torrent.OptionChunk(2)))
@@ -501,7 +502,7 @@ func TestDownload(t *testing.T) {
 	metadata, err := torrent.NewFromMetaInfo(mi, torrent.OptionStorage(storage.NewFile(greetingTempDir)))
 	require.NoError(t, err)
 
-	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, greetingTempDir)))
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingSeedConfig(t, greetingTempDir)))
 	require.NoError(t, err)
 	defer seeder.Close()
 
@@ -512,7 +513,7 @@ func TestDownload(t *testing.T) {
 	require.NoError(t, err)
 
 	lcfg := TestingLeechConfig(t, t.TempDir())
-	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(lcfg))
+	leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(lcfg))
 	require.NoError(t, err)
 	defer leecher.Close()
 
@@ -535,7 +536,7 @@ func TestDownloadMetadataTimeout(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := torrent.TestingConfig(t, t.TempDir())
-	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+	leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer leecher.Close()
 	ctx, done := context.WithTimeout(t.Context(), 0)
@@ -549,7 +550,7 @@ func TestDownloadMetadataTimeout(t *testing.T) {
 
 func TestCompletedPieceWrongSize(t *testing.T) {
 	cfg := torrent.TestingConfig(t, t.TempDir())
-	cl, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+	cl, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer cl.Close()
 	info := metainfo.Info{
@@ -604,7 +605,7 @@ func TestResponsive(t *testing.T) {
 		torrent.ClientConfigSeed(true),
 	)
 
-	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.Nil(t, err)
 	defer seeder.Close()
 	tt, err := torrent.NewFromMetaInfo(mi)
@@ -614,7 +615,7 @@ func TestResponsive(t *testing.T) {
 	require.NoError(t, torrent.Verify(ctx, seederTorrent))
 
 	cfg = torrent.TestingConfig(t, t.TempDir())
-	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+	leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer leecher.Close()
 	tt, err = torrent.NewFromMetaInfo(mi, torrent.OptionChunk(2))
@@ -653,7 +654,7 @@ func TestTorrentDroppedDuringResponsiveRead(t *testing.T) {
 		torrent.ClientConfigSeed(true),
 	)
 
-	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer seeder.Close()
 	st, err := torrent.NewFromMetaInfo(mi)
@@ -668,7 +669,7 @@ func TestTorrentDroppedDuringResponsiveRead(t *testing.T) {
 		leecherDataDir,
 	)
 
-	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+	leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer leecher.Close()
 	lt, err := torrent.NewFromMetaInfo(mi, torrent.OptionChunk(2))
@@ -698,7 +699,7 @@ func TestTorrentDroppedDuringResponsiveRead(t *testing.T) {
 // Check that stuff is merged in subsequent Start for the same
 // infohash.
 func TestAddTorrentMerging(t *testing.T) {
-	cl, err := autobind.NewLoopback().Bind(torrent.NewClient(torrent.TestingConfig(t, t.TempDir())))
+	cl, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(torrent.TestingConfig(t, t.TempDir())))
 	require.NoError(t, err)
 	defer cl.Close()
 
@@ -723,7 +724,7 @@ func TestTorrentDroppedBeforeGotInfo(t *testing.T) {
 	dir := t.TempDir()
 	mi := testutil.GreetingTestTorrent(dir)
 	os.RemoveAll(dir)
-	cl, err := autobind.NewLoopback().Bind(torrent.NewClient(torrent.TestingConfig(t, t.TempDir())))
+	cl, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(torrent.TestingConfig(t, t.TempDir())))
 	require.NoError(t, err)
 	defer cl.Close()
 	ts, err := torrent.New(mi.HashInfoBytes())
@@ -741,11 +742,11 @@ func TestTorrentDroppedBeforeGotInfo(t *testing.T) {
 }
 
 func TestTorrentDownloadAll(t *testing.T) {
-	torrent.DownloadCancelTest(t, autobind.NewLoopback(), autobind.NewLoopback(), torrent.TestDownloadCancelParams{})
+	torrent.DownloadCancelTest(t, torrenttestx.Autosocket(t), torrenttestx.Autosocket(t), torrent.TestDownloadCancelParams{})
 }
 
 func TestTorrentDownloadAllThenCancel(t *testing.T) {
-	torrent.DownloadCancelTest(t, autobind.NewLoopback(), autobind.NewLoopback(), torrent.TestDownloadCancelParams{
+	torrent.DownloadCancelTest(t, torrenttestx.Autosocket(t), torrenttestx.Autosocket(t), torrent.TestDownloadCancelParams{
 		Cancel: true,
 	})
 }
@@ -759,7 +760,7 @@ func TestPieceCompletedInStorageButNotClient(t *testing.T) {
 		greetingTempDir,
 	)
 
-	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	ts, err := torrent.NewFromMetaInfo(greetingMetainfo, torrent.OptionStorage(storage.NewFile(greetingTempDir)))
 	require.NoError(t, err)
@@ -850,7 +851,7 @@ func testSeederLeecherPair(t *testing.T, seeder func(*torrent.ClientConfig), lee
 	)
 
 	seeder(scfg)
-	server, err := autobind.NewLoopback().Bind(torrent.NewClient(scfg))
+	server, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(scfg))
 	require.NoError(t, err)
 	defer server.Close()
 
@@ -872,7 +873,7 @@ func testSeederLeecherPair(t *testing.T, seeder func(*torrent.ClientConfig), lee
 	)
 
 	leecher(lcfg)
-	client, err := autobind.NewLoopback().Bind(torrent.NewClient(lcfg))
+	client, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(lcfg))
 	require.NoError(t, err)
 	defer client.Close()
 
@@ -921,11 +922,11 @@ func TestRandomSizedTorrents(t *testing.T) {
 	dir := t.TempDir()
 	// this should be larger than a single piece length
 	n := rand.Int64N(3 * bytesx.MiB)
-	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, dir)))
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingSeedConfig(t, dir)))
 	require.NoError(t, err)
 	defer seeder.Close()
 
-	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
+	leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
 	require.NoError(t, err)
 	defer leecher.Close()
 
@@ -934,11 +935,11 @@ func TestRandomSizedTorrents(t *testing.T) {
 
 func Test128KBTorrent(t *testing.T) {
 	dir := t.TempDir()
-	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, dir)))
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingSeedConfig(t, dir)))
 	require.NoError(t, err)
 	defer seeder.Close()
 
-	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
+	leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
 	require.NoError(t, err)
 	defer leecher.Close()
 
@@ -947,11 +948,11 @@ func Test128KBTorrent(t *testing.T) {
 
 func Test3MBPlus1Torrent(t *testing.T) {
 	dir := t.TempDir()
-	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, dir)))
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingSeedConfig(t, dir)))
 	require.NoError(t, err)
 	defer seeder.Close()
 
-	leecher, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
+	leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
 	require.NoError(t, err)
 	defer leecher.Close()
 
@@ -963,11 +964,11 @@ func TestDownloadRange(t *testing.T) {
 		return func(t *testing.T) {
 			// log.Println(t.Name(), n, offset, length)
 			datadir := t.TempDir()
-			from, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, datadir)))
+			from, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingSeedConfig(t, datadir)))
 			require.NoError(t, err)
 			defer from.Close()
 
-			to, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingLeechConfig(t, t.TempDir())))
+			to, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingLeechConfig(t, t.TempDir())))
 			require.NoError(t, err)
 			defer to.Close()
 
@@ -1025,11 +1026,11 @@ func TestTorrentPieceLengthMultipleOfTotalLength(t *testing.T) {
 	// this test is important! it checks the case where a torrent total length is a multiple of the piece length exactly.
 	// rare but possible. requires we set the amount of data equal to n * PieceLength.
 	dir := t.TempDir()
-	seeder, err := autobind.NewLoopback().Bind(torrent.NewClient(TestingSeedConfig(t, dir)))
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingSeedConfig(t, dir)))
 	require.NoError(t, err)
 	defer seeder.Close()
 
-	leecher, err := autobind.NewLoopback(autobind.DisableUTP).Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
+	leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingLeechConfig(t, testutil.Autodir(t))))
 	require.NoError(t, err)
 	defer leecher.Close()
 
@@ -1083,17 +1084,17 @@ func TestClientAddressInUse(t *testing.T) {
 	require.Nil(t, cl)
 }
 
-func TestClientHasDhtServersWhenUTPDisabled(t *testing.T) {
-	t.Skip("disabled - until we resolve the utp dependency nonsense")
-	cc := torrent.TestingConfig(t, t.TempDir())
-	cl, err := autobind.NewLoopback(
-		autobind.DisableUTP,
-		autobind.EnableDHT,
-	).Bind(torrent.NewClient(cc))
-	require.NoError(t, err)
-	defer cl.Close()
-	require.NotEmpty(t, cl.DhtServers())
-}
+// func TestClientHasDhtServersWhenUTPDisabled(t *testing.T) {
+// 	t.Skip("disabled - until we resolve the utp dependency nonsense")
+// 	cc := torrent.TestingConfig(t, t.TempDir())
+// 	cl, err := autobind.NewLoopback(
+// 		autobind.DisableUTP,
+// 		autobind.EnableDHT,
+// 	).Bind(torrent.NewClient(cc))
+// 	require.NoError(t, err)
+// 	defer cl.Close()
+// 	require.NotEmpty(t, cl.DhtServers())
+// }
 
 // func TestIssue335(t *testing.T) {
 // 	dir, mi := testutil.GreetingTestTorrent(t)
@@ -1102,7 +1103,7 @@ func TestClientHasDhtServersWhenUTPDisabled(t *testing.T) {
 // 	cfg.Seed = false
 // 	cfg.DataDir = dir
 
-// 	cl, err := autobind.NewLoopback().Bind(torrent.NewClient(cfg))
+// 	cl, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 // 	require.NoError(t, err)
 // 	defer cl.Close()
 // 	ts, err := torrent.NewFromMetaInfo(mi, torrent.OptionStorage(storage.NewMMap(dir)))
@@ -1123,7 +1124,7 @@ func TestProtocolSwarmManagement(t *testing.T) {
 
 	t.Run("should maintain a peer even in face of networking issues", func(t *testing.T) {
 		datadir := t.TempDir()
-		from, err := autobind.NewLoopback().Bind(
+		from, err := torrenttestx.Autosocket(t).Bind(
 			torrent.NewClient(
 				TestingSeedConfig(
 					t,

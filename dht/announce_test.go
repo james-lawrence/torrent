@@ -13,11 +13,9 @@ import (
 )
 
 func TestAnnounceNoStartingNodes(t *testing.T) {
-	s, err := NewServer(&ServerConfig{
-		Conn:       mustListen(":0"),
-		NoSecurity: true,
-	})
+	s, err := NewServer(&ServerConfig{})
 	require.NoError(t, err)
+	backgroundServe(t, s, mustListen(":0"))
 	defer s.Close()
 
 	_, err = s.AnnounceTraversal(t.Context(), int160.Random(), AnnouncePeer(true, 0))
@@ -26,11 +24,11 @@ func TestAnnounceNoStartingNodes(t *testing.T) {
 
 func TestAnnounceStopsNoPending(t *testing.T) {
 	s, err := NewServer(&ServerConfig{
-		Conn: mustListen(":0"),
 		StartingNodes: func() ([]Addr, error) {
 			return []Addr{NewAddr(&net.TCPAddr{})}, nil
 		},
 	})
+	backgroundServe(t, s, mustListen(":0"))
 
 	require.NoError(t, err)
 	a, err := s.AnnounceTraversal(t.Context(), int160.Random(), AnnouncePeer(true, 0))

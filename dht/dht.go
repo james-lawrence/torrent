@@ -2,11 +2,12 @@ package dht
 
 import (
 	"context"
-	"crypto"
 	_ "crypto/sha1"
 	"errors"
+	"iter"
 	"log"
 	"net"
+	"net/netip"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -16,6 +17,7 @@ import (
 	"github.com/james-lawrence/torrent/dht/krpc"
 	peer_store "github.com/james-lawrence/torrent/dht/peer-store"
 	"github.com/james-lawrence/torrent/dht/transactions"
+	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/iplist"
 )
@@ -25,17 +27,71 @@ func defaultQueryResendDelay() time.Duration {
 	return 2 * time.Second
 }
 
+type announcer struct{ PeerAnnounce }
 type transactionKey = transactions.Key
 
 type StartingNodesGetter func() ([]Addr, error)
 
+type PeerAnnounce interface {
+	Announced(peerid int160.T, ip net.IP, port uint16, portOk bool)
+}
+
+type PeerAnnounceFn func(peerid int160.T, ip net.IP, port uint16, portOk bool)
+
+func (t PeerAnnounceFn) Announced(peerid int160.T, ip net.IP, port uint16, portOk bool) {
+	t(peerid, ip, port, portOk)
+}
+
+type PublicAddrPort func(ctx context.Context, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error)
+
+func PublicAddrPortFromPacketConn(ctx context.Context, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
+	addr, err := netx.AddrPort(local.LocalAddr())
+	if err != nil {
+		return nil, err
+	}
+
+	return func(yield func(netip.AddrPort) bool) {
+		if !yield(addr) {
+			return
+		}
+
+		// block until context cancels.
+		<-ctx.Done()
+	}, nil
+}
+
+func NewDefaultServerConfig() *ServerConfig {
+	return &ServerConfig{
+		PublicAddrPort:   PublicAddrPortFromPacketConn,
+		StartingNodes:    func() ([]Addr, error) { return GlobalBootstrapAddrs("udp") },
+		DefaultWant:      []krpc.Want{krpc.WantNodes, krpc.WantNodes6},
+		Store:            bep44.NewMemory(),
+		Exp:              2 * time.Hour,
+		SendLimiter:      DefaultSendLimiter,
+		Logger:           log.Default(),
+		BucketLimit:      32,
+		mux:              DefaultMuxer(),
+		QueryResendDelay: defaultQueryResendDelay,
+	}
+}
+
+func ensureDefaultServerConfig(c *ServerConfig) *ServerConfig {
+	defaults := NewDefaultServerConfig()
+	c = langx.FirstNonNil(c, defaults)
+	c.Store = langx.FirstNonNil(c.Store, defaults.Store)
+	c.SendLimiter = langx.FirstNonNil(c.SendLimiter, defaults.SendLimiter)
+	c.Logger = langx.FirstNonNil(c.Logger, defaults.Logger)
+	c.QueryResendDelay = langx.FirstNonNil(c.QueryResendDelay, defaults.QueryResendDelay)
+	c.mux = langx.FirstNonNil(c.mux, defaults.mux)
+	c.BucketLimit = langx.FirstNonZero(c.BucketLimit, defaults.BucketLimit)
+	c.PublicAddrPort = langx.FirstNonNil(c.PublicAddrPort, defaults.PublicAddrPort)
+	return c
+}
+
 // ServerConfig allows setting up a  configuration of the `Server` instance to be created with
 // NewServer.
 type ServerConfig struct {
-	// Set NodeId Manually. Caller must ensure that if NodeId does not conform
-	// to DHT Security Extensions, that NoSecurity is also set.
-	NodeId krpc.ID
-	Conn   net.PacketConn
+	PublicAddrPort PublicAddrPort
 	// number of nodes per bucket
 	BucketLimit int
 	// Don't respond to queries from other nodes.
@@ -45,19 +101,14 @@ type ServerConfig struct {
 	// returns the resolve addresses of bootstrap or "router" nodes that are designed to kick-start
 	// a routing table.
 	StartingNodes StartingNodesGetter
-	// Disable the DHT security extension: http://www.libtorrent.org/dht_sec.html.
-	NoSecurity bool
 	// Initial IP blocklist to use. Applied before serving and bootstrapping
 	// begins.
 	IPBlocklist iplist.Ranger
-	// Used to secure the server's ID. Defaults to the Conn's LocalAddr(). Set to the IP that remote
-	// nodes will see, as that IP is what they'll use to validate our ID.
-	PublicIP net.IP
 
 	// Hook received queries. Return false if you don't want to propagate to the default handlers.
 	OnQuery func(query *krpc.Msg, source net.Addr) (propagate bool)
 	// Called when a peer successfully announces to us.
-	OnAnnouncePeer func(infoHash int160.T, ip net.IP, port uint16, portOk bool)
+	OnAnnouncePeer PeerAnnounce
 	// How long to wait before resending queries that haven't received a response. Defaults to 2s.
 	// After the last send, a query is aborted after this time.
 	QueryResendDelay func() time.Duration
@@ -77,6 +128,8 @@ type ServerConfig struct {
 	DefaultWant []krpc.Want
 
 	SendLimiter *rate.Limiter
+
+	mux Muxer
 }
 
 // ServerStats instance is returned by Server.Stats() and stores Server metrics
@@ -137,16 +190,10 @@ func ResolveHostPorts(hostPorts []string) (addrs []Addr, err error) {
 			addrs = append(addrs, NewAddr(ua))
 		}
 	}
-	if len(addrs) == 0 {
-		err = errors.New("nothing resolved")
-	}
-	return
-}
 
-func MakeDeterministicNodeID(public net.Addr) (id krpc.ID) {
-	h := crypto.SHA1.New()
-	h.Write([]byte(public.String()))
-	h.Sum(id[:0:20])
-	SecureNodeId(&id, netx.NetIPOrNil(public))
-	return
+	if len(addrs) == 0 {
+		return nil, errors.New("nothing resolved")
+	}
+
+	return addrs, nil
 }

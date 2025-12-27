@@ -4,18 +4,20 @@ import (
 	"context"
 	"time"
 
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
 )
 
-func NewPingRequest(from krpc.ID) (qi QueryInput, err error) {
+func NewPingRequest(from int160.T) (qi QueryInput, err error) {
 	return NewMessageRequest(
 		"ping",
-		from,
-		&krpc.MsgArgs{},
+		&krpc.MsgArgs{
+			ID: from.AsByteArray(),
+		},
 	)
 }
 
-func Ping(ctx context.Context, q Queryer, to Addr, from krpc.ID) QueryResult {
+func Ping(ctx context.Context, q Queryer, to Addr, from int160.T) QueryResult {
 	qi, err := NewPingRequest(from)
 	if err != nil {
 		return NewQueryResultErr(err)
@@ -24,11 +26,11 @@ func Ping(ctx context.Context, q Queryer, to Addr, from krpc.ID) QueryResult {
 	return q.Query(ctx, to, qi)
 }
 
-func Ping3S(ctx context.Context, q Queryer, to Addr, from krpc.ID) QueryResult {
+func Ping3S(ctx context.Context, q Queryer, to Addr, from int160.T) QueryResult {
 	return PingDuration(ctx, 3*time.Second, q, to, from)
 }
 
-func PingDuration(ctx context.Context, d time.Duration, q Queryer, to Addr, from krpc.ID) QueryResult {
+func PingDuration(ctx context.Context, d time.Duration, q Queryer, to Addr, from int160.T) QueryResult {
 	ctx, done := context.WithTimeout(ctx, d)
 	defer done()
 	return Ping(ctx, q, to, from)

@@ -115,8 +115,8 @@ func (t HandlerAnnounce) Handle(ctx context.Context, source Addr, s *Server, raw
 		portOk = true
 	}
 
-	if h := s.config.OnAnnouncePeer; h != nil {
-		go h(int160.FromByteArray(m.A.InfoHash), source.IP(), port, portOk)
+	for _, h := range s.announceto {
+		go h.Announced(int160.FromByteArray(m.A.InfoHash), source.IP(), port, portOk)
 	}
 
 	if ps := s.config.PeerStore; ps != nil {
@@ -198,6 +198,6 @@ func (t Bep44Put) Handle(ctx context.Context, source Addr, s *Server, raw []byte
 	}
 
 	return s.reply(ctx, source, m.T, krpc.Return{
-		ID: s.ID(),
+		ID: s.ID().AsByteArray(),
 	})
 }

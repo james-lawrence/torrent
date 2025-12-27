@@ -14,8 +14,8 @@ func NewAnnouncePeerRequest(from krpc.ID, id krpc.ID, port uint16, token string,
 	}
 	return NewMessageRequest(
 		"announce_peer",
-		from,
 		&krpc.MsgArgs{
+			ID:          from,
 			ImpliedPort: impliedPort,
 			InfoHash:    id,
 			Port:        &port,

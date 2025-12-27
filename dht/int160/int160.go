@@ -12,6 +12,11 @@ import (
 	"github.com/james-lawrence/torrent/internal/errorsx"
 )
 
+func Clone(b T) (ret T) {
+	copy(ret.bits[:], b.bits[:])
+	return
+}
+
 func New[Y string | []byte](b Y) (ret T) {
 	v := sha1.Sum([]byte(b))
 	copy(ret.bits[:], v[:])

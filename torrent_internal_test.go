@@ -132,7 +132,7 @@ func TestTorrentMetainfoIncompleteMetadata(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.True(t, ebits.GetBit(pp.ExtensionBitExtended))
-	assert.EqualValues(t, cl.PeerID(), int160.FromByteArray(info.PeerID))
+	assert.EqualValues(t, cl.dht.ID(), int160.FromByteArray(info.PeerID))
 	assert.EqualValues(t, ih, info.Hash)
 	assert.EqualValues(t, 0, tt.(*torrent).metadatalen())
 

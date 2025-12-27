@@ -112,7 +112,7 @@ type _connreaderUpload struct {
 }
 
 func (t *_connreaderUpload) writechunk(r request) (ok bool, err error) {
-	b := langx.Autoderef(t.pool.Get().(*[]byte))
+	b := langx.Zero(t.pool.Get().(*[]byte))
 	if len(b) < r.Length.Int() {
 		b = make([]byte, r.Length)
 	}
@@ -299,7 +299,7 @@ func connreaderidle(ws *readerstate) cstate.T {
 
 	mind := time.Until(timex.Min(
 		keepalive,
-		langx.Autoderef(ws.uploadavailable.Load()),
+		langx.Zero(ws.uploadavailable.Load()),
 	))
 
 	if mind <= 0 {

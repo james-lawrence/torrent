@@ -52,7 +52,6 @@ func (ca cachedAddr) Raw() net.Addr {
 
 func NewAddr(raw net.Addr) Addr {
 	v := errorsx.Zero(netx.AddrPort(raw))
-
 	return cachedAddr{
 		raw: raw,
 		v:   v,

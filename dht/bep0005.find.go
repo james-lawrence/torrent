@@ -10,8 +10,8 @@ import (
 func NewFindRequest(from krpc.ID, id int160.T, want []krpc.Want) (qi QueryInput, err error) {
 	return NewMessageRequest(
 		"find_node",
-		from,
 		&krpc.MsgArgs{
+			ID:     from,
 			Target: id.AsByteArray(),
 			Want:   want,
 		},

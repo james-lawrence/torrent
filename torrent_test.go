@@ -35,7 +35,7 @@ func testEmptyFilesAndZeroPieceLength(t *testing.T, dir string, cfg *torrent.Cli
 	ctx, done := testx.Context(t)
 	defer done()
 
-	cl, err := torrent.NewClient(cfg)
+	cl, err := torrent.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer cl.Close()
 	ib, err := bencode.Marshal(metainfo.Info{

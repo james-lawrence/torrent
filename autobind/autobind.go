@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	"github.com/james-lawrence/torrent"
+	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/netx"
@@ -26,7 +27,7 @@ func NewDefaultClient() (c *torrent.Client, err error) {
 	return New().Bind(torrent.NewClient(torrent.NewDefaultClientConfig(
 		torrent.NewMetadataCache(rdir),
 		storage.NewFile(rdir),
-		torrent.ClientConfigBootstrapGlobal,
+		// torrent.ClientConfigBootstrapGlobal,
 	)))
 }
 
@@ -47,14 +48,10 @@ func DisableIPv6(a *Autobind) {
 	a.DisableIPv6 = true
 }
 
-// DisableDHT disables DHT. this is the default.
-func DisableDHT(a *Autobind) {
-	a.EnableDHT = false
-}
-
-// EnableDHT enables DHT.
-func EnableDHT(a *Autobind) {
-	a.EnableDHT = true
+func EnableDHT(d *dht.Server) Option {
+	return func(a *Autobind) {
+		a.dht = d
+	}
 }
 
 // Autobind manages automatically binding a client to available networks.
@@ -68,7 +65,7 @@ type Autobind struct {
 	DisableIPv6 bool
 	DisableTCP  bool
 	DisableUTP  bool
-	EnableDHT   bool
+	dht         *dht.Server
 }
 
 // New used to automatically listen to available networks
@@ -145,11 +142,11 @@ func (t Autobind) Bind(cl *torrent.Client, err error) (*torrent.Client, error) {
 			if err = cl.Bind(s); err != nil {
 				return nil, err
 			}
-		}
 
-		if n.UDP && t.EnableDHT {
-			if err = cl.BindDHT(s); err != nil {
-				return nil, err
+			if t.dht != nil {
+				if err = cl.BindDHT(t.dht, s); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -183,7 +180,7 @@ func (t Autobind) listenOnNetwork(n network) (b bool) {
 		return false
 	}
 
-	if n.UDP && t.DisableUTP && !t.EnableDHT {
+	if n.UDP && t.DisableUTP && t.dht != nil {
 		return false
 	}
 

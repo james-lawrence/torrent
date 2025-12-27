@@ -38,7 +38,7 @@ func Idle(ctx context.Context, cond *sync.Cond, signals ...*sync.Cond) *Idler {
 		signals: signals,
 		stop:    done,
 		done:    make(chan struct{}),
-		running: langx.Autoderef(atomicx.Bool(false)),
+		running: langx.Zero(atomicx.Bool(false)),
 	}).monitor(_ctx)
 }
 

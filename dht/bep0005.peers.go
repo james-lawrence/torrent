@@ -13,8 +13,8 @@ func NewPeersRequest(from krpc.ID, id krpc.ID, scrape bool) (qi QueryInput, err 
 	}
 	return NewMessageRequest(
 		"get_peers",
-		from,
 		&krpc.MsgArgs{
+			ID:       from,
 			Target:   id,
 			InfoHash: id,
 			Scrape:   scrapeint,

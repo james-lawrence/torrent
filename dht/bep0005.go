@@ -9,14 +9,14 @@ import (
 
 const defaultAttempts = 3
 
-func NewMessageRequest(q string, from krpc.ID, a *krpc.MsgArgs) (qi QueryInput, err error) {
+func NewMessageRequest(q string, a *krpc.MsgArgs) (qi QueryInput, err error) {
 	var (
 		encoded []byte
 	)
 
 	t := krpc.TimestampTransactionID()
 	m := krpc.Msg{
-		Y: "q",
+		Y: krpc.YQuery,
 		T: t,
 		Q: q,
 		A: a,

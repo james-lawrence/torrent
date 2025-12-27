@@ -19,6 +19,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/bitmapx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
+	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/internal/timex"
 )
 
@@ -99,8 +100,8 @@ func connexinit(cn *connection, n cstate.T) cstate.T {
 			return n
 		}
 
-		dynamicport := langx.DefaultIfZero(cn.localport, langx.Autoderef(cn.dynamicaddr.Load()).Port())
-		defer cn.cfg.debug().Println("extended handshake extension completed", cn.localport, cn.dynamicaddr)
+		dynamicport := langx.FirstNonZero(cn.connaddr.Port(), cn.localport)
+		defer cn.cfg.debug().Println("extended handshake extension completed", cn.localport, cn.connaddr)
 
 		// TODO: We can figured the port and address out specific to the socket
 		// used.
@@ -112,10 +113,9 @@ func connexinit(cn *connection, n cstate.T) cstate.T {
 			Encryption:   cn.cfg.HeaderObfuscationPolicy.Preferred || cn.cfg.HeaderObfuscationPolicy.RequirePreferred,
 			Port:         int(dynamicport),
 			MetadataSize: cn.t.metadatalen(),
-			Ipv4:         btprotocol.CompactIp(cn.cfg.publicIP4.To4()),
-			Ipv6:         cn.cfg.publicIP6.To16(),
+			Ipv4:         btprotocol.CompactIp(netx.IP4FromAddr(cn.connaddr.Addr())),
+			Ipv6:         netx.IP6FromAddr(cn.connaddr.Addr()),
 		}
-
 		// cn.cfg.debug().Printf("%s extended handshake: %s\n", cn, spew.Sdump(msg))
 
 		encoded, err := bencode.Marshal(msg)
@@ -185,8 +185,8 @@ func connexfast(cn *connection, n cstate.T) cstate.T {
 
 func connexdht(cn *connection, n cstate.T) cstate.T {
 	return cstate.Fn(func(context.Context, *cstate.Shared) cstate.T {
-		dynamicaddr := langx.Autoderef(cn.dynamicaddr.Load())
-		port := langx.DefaultIfZero(cn.t.cln.LocalPort16(), dynamicaddr.Port())
+		connaddr := cn.connaddr
+		port := langx.DefaultIfZero(cn.t.cln.LocalPort16(), connaddr.Port())
 		if !(cn.extensions.Supported(cn.PeerExtensionBytes, btprotocol.ExtensionBitDHT) && port > 0) {
 			cn.cfg.debug().Printf("posting dht not supported extension supported(%t) - port(%d)\n", cn.extensions.Supported(cn.PeerExtensionBytes, btprotocol.ExtensionBitDHT), port)
 			return n
@@ -398,7 +398,7 @@ func (t _connwriterRequests) determineInterest(msg messageWriter) *roaring.Bitma
 		}
 	}
 
-	if ts := langx.Autoderef(t.refreshrequestable.Load()); ts.After(time.Now()) {
+	if ts := langx.Zero(t.refreshrequestable.Load()); ts.After(time.Now()) {
 		t.cfg.debug().Printf("c(%p) seed(%t) allowing cached %d - %s\n", t.connection, t.seed, t.requestable.GetCardinality(), time.Until(ts))
 		return t.requestable
 	}
@@ -571,7 +571,7 @@ func (t _connwriterKeepalive) Update(ctx context.Context, _ *cstate.Shared) csta
 
 	ws := t.writerstate
 
-	if langx.Autoderef(ws.keepaliverequired.Load()).After(time.Now()) {
+	if langx.Zero(ws.keepaliverequired.Load()).After(time.Now()) {
 		return t.next
 	}
 
@@ -652,8 +652,8 @@ func connwriteridle(ws *writerstate) cstate.T {
 		keepalive,
 		ws.nextbitmap,
 		timex.Max(ws.chokeduntil, keepalive),
-		langx.Autoderef(ws.keepaliverequired.Load()),
-		langx.Autoderef(ws.refreshrequestable.Load()),
+		langx.Zero(ws.keepaliverequired.Load()),
+		langx.Zero(ws.refreshrequestable.Load()),
 	}
 	mind := time.Until(timex.Min(ts...))
 

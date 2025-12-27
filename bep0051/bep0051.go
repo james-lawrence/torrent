@@ -45,13 +45,13 @@ type Response struct {
 	Y string `bencode:"y"` // required: type of the message: r for RESPONSE, e for ERROR
 }
 
-func NewRequest(from krpc.ID, to krpc.ID) (qi dht.QueryInput, err error) {
+func NewRequest(from int160.T, to krpc.ID) (qi dht.QueryInput, err error) {
 	req := Request{
-		Y: "q",
+		Y: krpc.YQuery,
 		T: krpc.TimestampTransactionID(),
 		Q: Query,
 		A: Args{
-			ID:     from,
+			ID:     from.AsByteArray(),
 			Target: to,
 		},
 	}
@@ -93,7 +93,7 @@ func (t Endpoint) Handle(ctx context.Context, source dht.Addr, s *dht.Server, ra
 	msg := Response{
 		T: m.T,
 		R: Sample{
-			ID:        s.ID(),
+			ID:        s.ID().AsByteArray(),
 			Interval:  ttl,
 			Available: total,
 			Sample:    sampled,

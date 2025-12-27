@@ -7,10 +7,10 @@ import (
 	"encoding"
 	"hash"
 	"io"
+	"log"
 	"net"
 	"net/netip"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,7 +22,6 @@ import (
 	"github.com/james-lawrence/torrent/internal/bitmapx"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/cryptox"
-	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/md5x"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/internal/testx"
@@ -33,9 +32,10 @@ import (
 // Ensure that no race exists between sending a bitfield, and a subsequent
 // Have that would potentially alter it.
 func TestSendBitfieldThenHave(t *testing.T) {
-	cl := &Client{
-		config: TestingConfig(t, t.TempDir()),
-	}
+	cfg := TestingConfig(t, t.TempDir(), ClientConfigSeed(true))
+	cl, err := Autosocket(t).Bind(NewClient(cfg))
+	require.NoError(t, err)
+
 	ts, err := New(metainfo.Hash{})
 	require.NoError(t, err)
 	tt := newTorrent(cl, ts)
@@ -71,10 +71,8 @@ func TestSendBitfieldThenHave(t *testing.T) {
 
 func genconnection(t *testing.T, seed string, n uint64, pbits, sbits pp.ExtensionBits) (p *connection, s *connection, _ hash.Hash, _ Metadata) {
 	var (
-		__pconn chan net.Conn = make(chan net.Conn, 1)
+		__pconn = make(chan net.Conn, 1)
 		_perr   error
-		asnetip atomic.Pointer[netip.AddrPort]
-		apnetip atomic.Pointer[netip.AddrPort]
 	)
 
 	l, err := net.Listen("tcp", ":0")
@@ -106,10 +104,11 @@ func genconnection(t *testing.T, seed string, n uint64, pbits, sbits pp.Extensio
 	require.NoError(t, _perr)
 	require.NotNil(t, _pconn)
 
-	asnetip.Store(langx.Autoptr(testx.Must(netx.AddrPort(_pconn.RemoteAddr()))(t)))
-	apnetip.Store(langx.Autoptr(testx.Must(netx.AddrPort(_pconn.LocalAddr()))(t)))
+	asnetip := testx.Must(netx.AddrPort(_pconn.RemoteAddr()))(t)
+	apnetip := testx.Must(netx.AddrPort(_pconn.LocalAddr()))(t)
 
-	pconn := newConnection(cfgl, _pconn, true, *asnetip.Load(), &pbits, apnetip.Load().Port(), &apnetip)
+	log.Println("DERP DERP", apnetip)
+	pconn := newConnection(cfgl, _pconn, true, asnetip, &pbits, apnetip.Port(), apnetip)
 	pconn.PeerExtensionBytes = sbits
 	pconn.PeerID = int160.Random()
 	pconn.completedHandshake = time.Now()
@@ -117,7 +116,7 @@ func genconnection(t *testing.T, seed string, n uint64, pbits, sbits pp.Extensio
 	pconn.t.chunks.fill(pconn.t.chunks.missing, uint64(pconn.t.chunks.cmaximum))
 	require.EqualValues(t, pconn.t.chunks.pieces, 1)
 
-	sconn := newConnection(cfgs, c, false, *apnetip.Load(), &sbits, asnetip.Load().Port(), &asnetip)
+	sconn := newConnection(cfgs, c, false, apnetip, &sbits, asnetip.Port(), asnetip)
 	sconn.PeerExtensionBytes = pbits
 	sconn.PeerID = int160.Random()
 	sconn.completedHandshake = time.Now()
@@ -174,7 +173,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		msg, err := sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
 		torrenttest.RequireMessageType(t, pp.Extended, msg.Type)
-		require.Equal(t, 131, len(msg.ExtendedPayload))
+		require.Equal(t, 156, len(msg.ExtendedPayload), string(msg.ExtendedPayload))
 
 		msg, err = sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
@@ -315,7 +314,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		msg, err := sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
 		torrenttest.RequireMessageType(t, pp.Extended, msg.Type)
-		require.Equal(t, 131, len(msg.ExtendedPayload))
+		require.Equal(t, 156, len(msg.ExtendedPayload))
 
 		// --------------------------------------- allow fast extension ----------------------------------------------
 		msg, err = sconn.ReadOne(ctx, d)
@@ -415,7 +414,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		msg, err := sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
 		torrenttest.RequireMessageType(t, pp.Extended, msg.Type)
-		require.Equal(t, 131, len(msg.ExtendedPayload))
+		require.Equal(t, 156, len(msg.ExtendedPayload))
 
 		// --------------------------------------- allow fast extension ----------------------------------------------
 		msg, err = sconn.ReadOne(ctx, d)

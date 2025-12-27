@@ -10,11 +10,12 @@ import (
 )
 
 func TestTable(t *testing.T) {
+	root := int160.Zero()
 	tbl := newTable(8)
-	assert.Equal(t, 0, tbl.bucketIndex(int160.Max()))
-	assert.Panics(t, func() { tbl.bucketIndex(tbl.rootID) })
+	assert.Equal(t, 0, tbl.bucketIndex(root, int160.Max()))
+	assert.Panics(t, func() { tbl.bucketIndex(root, int160.Zero()) }, "root node does not belong in a bucket")
 
-	assert.Error(t, tbl.addNode(&node{}))
+	assert.Error(t, tbl.addNode(root, &node{}))
 	assert.Equal(t, 0, tbl.buckets[0].Len())
 
 	id0 := int160.FromByteString("\x2f\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
@@ -28,34 +29,33 @@ func TestTable(t *testing.T) {
 		Addr: NewAddr(&net.UDPAddr{}),
 	}}
 
-	assert.NoError(t, tbl.addNode(n0))
+	assert.NoError(t, tbl.addNode(root, n0))
 	assert.Equal(t, 1, tbl.buckets[2].Len())
 
-	assert.Error(t, tbl.addNode(n0))
+	assert.Error(t, tbl.addNode(root, n0))
 	assert.Equal(t, 1, tbl.buckets[2].Len())
 	assert.Equal(t, 1, tbl.numNodes())
 
-	assert.NoError(t, tbl.addNode(n1))
+	assert.NoError(t, tbl.addNode(root, n1))
 	assert.Equal(t, 2, tbl.buckets[2].Len())
 	assert.Equal(t, 2, tbl.numNodes())
 
-	tbl.dropNode(n0)
+	tbl.dropNode(root, n0)
 	assert.Equal(t, 1, tbl.buckets[2].Len())
 	assert.Equal(t, 1, tbl.numNodes())
 
-	tbl.dropNode(n1)
+	tbl.dropNode(root, n1)
 	assert.Equal(t, 0, tbl.buckets[2].Len())
 	assert.Equal(t, 0, tbl.numNodes())
 }
 
 func TestRandomIdInBucket(t *testing.T) {
-	tbl := table{
-		rootID: int160.Random(),
-	}
-	t.Logf("%v: table root id", tbl.rootID)
+	root := int160.Random()
+	tbl := table{}
+	t.Logf("%v: table root id", root)
 	for i := range tbl.buckets {
-		id := tbl.randomIdForBucket(i)
+		id := tbl.randomIdForBucket(root, i)
 		t.Logf("%v: random id for bucket index %v", id, i)
-		assert.Equal(t, tbl.bucketIndex(id), i)
+		assert.Equal(t, tbl.bucketIndex(root, id), i)
 	}
 }

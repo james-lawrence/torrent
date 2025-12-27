@@ -31,7 +31,7 @@ func (t *Pool[T]) Run(ctx context.Context, w T) error {
 func (t *Pool[T]) Close() error {
 	close(t.queued)
 	t.shutdown.Wait()
-	return langx.Autoderef(t.failed.Load())
+	return langx.Zero(t.failed.Load())
 }
 
 func (t *Pool[T]) init() *Pool[T] {

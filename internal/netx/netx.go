@@ -154,6 +154,24 @@ func AddrFromIP(ip net.IP) netip.Addr {
 	return netip.AddrFrom16([16]byte(ip.To16())).Unmap()
 }
 
+func IP4FromAddr(a netip.Addr) net.IP {
+	if a.Is4() || a.Is4In6() {
+		tmp := a.As4()
+		return tmp[:]
+	}
+
+	return nil
+}
+
+func IP6FromAddr(a netip.Addr) net.IP {
+	if a.Is6() {
+		tmp := a.As16()
+		return tmp[:]
+	}
+
+	return nil
+}
+
 func FirstAddrOrZero(addrs ...netip.Addr) netip.Addr {
 	for _, a := range addrs {
 		if a.IsValid() && !a.IsUnspecified() {

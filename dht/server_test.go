@@ -1,8 +1,12 @@
 package dht
 
 import (
-	"log"
+	"net"
 	"testing"
+	"time"
+
+	"github.com/james-lawrence/torrent/internal/errorsx"
+	"github.com/stretchr/testify/require"
 )
 
 // func TestPutGet(t *testing.T) {
@@ -86,19 +90,27 @@ import (
 // 	require.Equal(int64(2), *qr.Reply.R.Seq)
 // }
 
-func newServer(t *testing.T, l *log.Logger) *Server {
-	cfg := NewDefaultServerConfig()
+// func newServer(t *testing.T, l *log.Logger) *Server {
+// 	cfg := NewDefaultServerConfig()
 
-	cfg.Conn = mustListen("localhost:0")
-	cfg.Logger = l
-	s, err := NewServer(cfg)
-	if err != nil {
-		panic(err)
-	}
+// 	cfg.Logger = l
+// 	s, err := NewServer(cfg)
+// 	if err != nil {
+// 		panic(err)
+// 	}
 
-	t.Cleanup(func() {
-		s.Close()
-	})
+// 	backgroundServe(t, s, mustListen("localhost:0"))
+// 	t.Cleanup(func() {
+// 		s.Close()
+// 	})
 
-	return s
+// 	return s
+// }
+
+func backgroundServe(t *testing.T, s *Server, pc net.PacketConn) {
+	orig := s.ID()
+	errorsx.Log(errorsx.Wrap(s.Serve(t.Context(), pc), "dht server shutdown"))
+	require.Eventually(t, func() bool {
+		return orig != s.ID()
+	}, time.Second, time.Millisecond)
 }

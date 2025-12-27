@@ -39,22 +39,22 @@ func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort uint16, upn
 	}
 }
 
-func (cl *Client) forwardPort() {
-	if cl.config.dynamicip == nil {
-		return
-	}
+// func (cl *Client) forwardPort() {
+// 	if cl.config.dynamicip == nil {
+// 		return
+// 	}
 
-	addrs, err := cl.config.dynamicip(context.Background(), cl)
-	if err != nil {
-		cl.config.errors().Println(err)
-		return
-	}
+// 	addrs, err := cl.config.dynamicip(context.Background(), cl)
+// 	if err != nil {
+// 		cl.config.errors().Println(err)
+// 		return
+// 	}
 
-	for addrport := range addrs {
-		cl.dynamicaddr.Store(&addrport)
-		log.Println("dynamic ip update", cl.LocalPort16(), "->", addrport)
-	}
-}
+// 	for addrport := range addrs {
+// 		cl.dynamicaddr.Store(&addrport)
+// 		log.Println("dynamic ip update", cl.LocalPort16(), "->", addrport)
+// 	}
+// }
 
 func UPnPPortForward(ctx context.Context, c *Client) (iter.Seq[netip.AddrPort], error) {
 	return func(yield func(netip.AddrPort) bool) {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/james-lawrence/torrent/dht/krpc"
 	"github.com/james-lawrence/torrent/dht/traversal"
+	"github.com/james-lawrence/torrent/internal/langx"
 )
 
 type TraversalStats = traversal.Stats
@@ -28,10 +29,10 @@ func (s *Server) Bootstrap(ctx context.Context) (_zero TraversalStats, err error
 	// Track number of responses, for STM use. (It's available via atomic in TraversalStats but that
 	// won't let wake up STM transactions that are observing the value.)
 	t := traversal.Start(traversal.OperationInput{
-		Target: s.id.AsByteArray(),
+		Target: s.id.Load().AsByteArray(),
 		K:      64,
 		DoQuery: func(ctx context.Context, addr krpc.NodeAddr) traversal.QueryResult {
-			return s.FindNode(ctx, NewAddr(addr.UDP()), s.id, QueryRateLimiting{}).TraversalQueryResult(addr)
+			return s.FindNode(ctx, NewAddr(addr.UDP()), langx.Zero(s.id.Load()), QueryRateLimiting{}).TraversalQueryResult(addr)
 		},
 		NodeFilter: s.TraversalNodeFilter,
 	})

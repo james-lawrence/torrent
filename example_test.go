@@ -58,7 +58,7 @@ func Example_customNetworkProtocols() {
 	c, _ := torrent.NewSocketsBind(s).Bind(torrent.NewClient(torrent.NewDefaultClientConfig(
 		torrent.NewMetadataCache(os.TempDir()),
 		storage.NewFile(os.TempDir()),
-		torrent.ClientConfigBootstrapGlobal,
+		// torrent.ClientConfigBootstrapGlobal,
 	)))
 	defer c.Close()
 

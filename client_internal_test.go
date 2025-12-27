@@ -15,7 +15,6 @@ import (
 	"github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/dht"
-	"github.com/james-lawrence/torrent/dht/krpc"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/internal/testutil"
@@ -34,8 +33,8 @@ func TestingConfig(t testing.TB, dir string, options ...ClientConfigOption) *Cli
 		storage.NewFile(dir),
 		ClientConfigStorageDir(dir),
 		ClientConfigCacheDirectory(dir),
-		ClientConfigPeerID(krpc.RandomID().String()),
-		ClientConfigPortForward(false),
+		// ClientConfigPortForward(false),
+		// ClientConfigPeerID(krpc.RandomID().String()),
 		// ClientConfigInfoLogger(log.New(os.Stderr, "[info] ", log.Flags())),
 		// ClientConfigDebugLogger(log.New(os.Stderr, "[debug] ", log.Flags())),
 		ClientConfigCompose(options...),
@@ -46,17 +45,22 @@ func Autosocket(t *testing.T) Binder {
 	var (
 		bindings []sockets.Socket
 	)
+	_dht, err := dht.NewServer(nil)
+	require.NoError(t, err)
 
-	s, err := utpx.New("udp", "localhost:")
+	s, err := utpx.New("udp4", "localhost:")
 	require.NoError(t, err)
 	bindings = append(bindings, sockets.New(s, s))
+
 	if addr, ok := s.Addr().(*net.UDPAddr); ok {
-		s, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", addr.Port))
+		s, err := net.Listen("tcp4", fmt.Sprintf("localhost:%d", addr.Port))
 		require.NoError(t, err)
 		bindings = append(bindings, sockets.New(s, &net.Dialer{}))
 	}
 
-	return NewSocketsBind(bindings...)
+	return NewSocketsBind(bindings...).Options(
+		BinderOptionDHT(_dht),
+	)
 }
 
 func totalConns(tts []Torrent) (ret int) {
@@ -106,7 +110,7 @@ func TestReducedDialTimeout(t *testing.T) {
 	cfg := NewDefaultClientConfig(
 		metadatafilestore{root: rdir},
 		storage.NewFile(rdir),
-		ClientConfigBootstrapGlobal,
+		// ClientConfigBootstrapGlobal,
 	)
 	for _, _case := range []struct {
 		Max             time.Duration
@@ -176,13 +180,6 @@ func DownloadCancelTest(t *testing.T, sb Binder, lb Binder, ps TestDownloadCance
 	require.NoError(t, err)
 	assert.True(t, added)
 
-	// if ps.Cancel {
-	// 	go func() {
-	// 		time.Sleep(5 * time.Millisecond)
-	// 		require.NoError(t, leecher.Stop(t2))
-	// 	}()
-	// }
-
 	_, err = DownloadInto(ctx, io.Discard, leecherGreeting, TuneClientPeer(seeder))
 	require.NoError(t, err)
 	require.Equal(t, false, leecherGreeting.(*torrent).chunks.ChunksMissing(0))
@@ -205,7 +202,7 @@ func TestPeerInvalidHave(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, _added)
 	defer cl.Stop(ts)
-	cn := newConnection(cl.config, nil, true, netip.AddrPort{}, &cl.config.extensionbits, cl.LocalPort16(), &cl.dynamicaddr)
+	cn := newConnection(cl.config, nil, true, netip.AddrPort{}, &cl.config.extensionbits, cl.LocalPort16(), cl.dht.AddrPort())
 	cn.t = tt.(*torrent)
 	assert.NoError(t, cn.peerSentHave(0))
 	assert.Error(t, cn.peerSentHave(1))
@@ -275,22 +272,15 @@ func TestSetMaxEstablishedConn(t *testing.T) {
 }
 
 func TestAddMetainfoWithNodes(t *testing.T) {
-	// ctx, done := testx.Context(t)
-	// defer done()
-
-	cfg := TestingConfig(t, t.TempDir(), ClientConfigSeed(true), ClientConfigDebugLogger(log.Default()), ClientConfigBootstrapNone)
+	cfg := TestingConfig(t, t.TempDir(), ClientConfigSeed(true), ClientConfigDebugLogger(log.Default()))
 	// For now, we want to just jam the nodes into the table, without
 	// verifying them first. Also the DHT code doesn't support mixing secure
 	// and insecure nodes if security is enabled (yet).
-	// cfg.DHTConfig.NoSecurity = true
 	cl, err := Autosocket(t).Bind(NewClient(cfg))
 	require.NoError(t, err)
 	defer cl.Close()
 	sum := func() (ret int64) {
-		cl.eachDhtServer(func(s *dht.Server) {
-			ret += s.Stats().OutboundQueriesAttempted
-		})
-		return
+		return cl.dht.Stats().OutboundQueriesAttempted
 	}
 	assert.EqualValues(t, 0, sum())
 	ts, err := NewFromMetaInfoFile("metainfo/testdata/issue_65a.torrent")
@@ -301,20 +291,22 @@ func TestAddMetainfoWithNodes(t *testing.T) {
 	// Nodes are not added or exposed in Torrent's metainfo. We just randomly
 	// check if the announce-list is here instead. TODO: Add nodes.
 	assert.Len(t, tt.Metadata().Trackers, 10)
-	// There are 6 nodes in the torrent file.
-	for sum() != int64(6*len(cl.dhtServers)) {
-		time.Sleep(time.Millisecond)
-	}
+	require.Eventually(t, func() bool {
+		// There are 6 nodes in the torrent file.
+		return sum() == 6
+	}, time.Minute, time.Millisecond)
+
 }
 
 func TestTuneRecordMetadata(t *testing.T) {
 	// ensure we dont panic when shutting down a torrent with record metadata.
 	dir := t.TempDir()
-	c, err := NewClient(TestingConfig(
+
+	c, err := Autosocket(t).Bind(NewClient(TestingConfig(
 		t,
 		dir,
 		ClientConfigSeed(true),
-	))
+	)))
 	require.NoError(t, err)
 	defer c.Close()
 	metadata, err := NewFromMagnet("magnet:?xt=urn:btih:ZOCMZQIPFFW7OLLMIC5HUB6BPCSDEOQU")

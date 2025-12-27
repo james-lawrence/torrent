@@ -1,21 +1,15 @@
 package torrent
 
 import (
-	"context"
-	"iter"
 	"log"
-	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"runtime"
 	"time"
 
 	pp "github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/connections"
-	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/dht/int160"
-	"github.com/james-lawrence/torrent/dht/krpc"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/internal/userx"
@@ -38,12 +32,7 @@ type ClientConfig struct {
 	defaultMetadata       MetadataStore
 	extensionbits         pp.ExtensionBits // Our BitTorrent protocol extension bytes, sent in the BT handshakes.
 
-	// defaultPortForwarding bool
-	dynamicip func(ctx context.Context, c *Client) (iter.Seq[netip.AddrPort], error)
-
 	UpnpID string
-
-	dhtStartingNodes []func(network string) dht.StartingNodesGetter
 
 	// Upload even after there's nothing in it for us.
 	Seed bool `long:"seed"`
@@ -70,11 +59,6 @@ type ClientConfig struct {
 
 	// rate limit for accepting connections
 	acceptRateLimiter *rate.Limiter
-
-	bucketLimit int // maximum number of peers per bucket in the DHT.
-
-	// User-provided Client peer ID. If not present, one is generated automatically.
-	PeerID string
 
 	HeaderObfuscationPolicy HeaderObfuscationPolicy
 	// The crypto methods to offer when initiating connections with header obfuscation.
@@ -123,10 +107,6 @@ type ClientConfig struct {
 	handshakesTimeout time.Duration
 
 	dialer netx.Dialer
-	// The IP addresses as our peers should see them. May differ from the
-	// local interfaces due to NAT or other network configurations.
-	publicIP4 net.IP
-	publicIP6 net.IP
 
 	// Don't add connections that have the same peer ID as an existing
 	// connection for a given Torrent.
@@ -137,13 +117,12 @@ type ClientConfig struct {
 	Handshaker connections.Handshaker
 
 	// OnQuery hook func
-	DHTOnQuery      func(query *krpc.Msg, source net.Addr) (propagate bool)
-	DHTAnnouncePeer func(ih int160.T, ip net.IP, port uint16, portOk bool)
-	DHTMuxer        dht.Muxer
+	// DHTOnQuery      func(query *krpc.Msg, source net.Addr) (propagate bool)
+	// DHTAnnouncePeer func(ih int160.T, ip net.IP, port uint16, portOk bool)
+	// DHTMuxer        dht.Muxer
 
 	ConnectionClosed func(ih int160.T, stats ConnStats, remaining int)
 	extensions       map[pp.ExtensionName]pp.ExtensionNumber
-	localID          int160.T
 }
 
 func (cfg *ClientConfig) extension(id pp.ExtensionName) pp.ExtensionNumber {
@@ -154,20 +133,12 @@ func (cfg *ClientConfig) Storage() storage.ClientImpl {
 	return cfg.defaultStorage
 }
 
-func (cfg *ClientConfig) PublicIP4() net.IP {
-	return cfg.publicIP4
-}
-
-func (cfg *ClientConfig) PublicIP6() net.IP {
-	return cfg.publicIP6
-}
-
 func (cfg *ClientConfig) AnnounceRequest() tracker.Announce {
 	return tracker.Announce{
 		UserAgent: cfg.HTTPUserAgent,
-		ClientIp4: krpc.NewNodeAddrFromIPPort(cfg.publicIP4, 0),
-		ClientIp6: krpc.NewNodeAddrFromIPPort(cfg.publicIP6, 0),
-		Dialer:    cfg.dialer,
+		// ClientIp4: krpc.NewNodeAddrFromIPPort(cfg.publicIP4, 0),
+		// ClientIp6: krpc.NewNodeAddrFromIPPort(cfg.publicIP6, 0),
+		Dialer: cfg.dialer,
 	}
 }
 
@@ -207,53 +178,27 @@ func ClientConfigDialer(d netx.Dialer) ClientConfigOption {
 	}
 }
 
-func ClientConfigPortForward(b bool) ClientConfigOption {
-	if b {
-		return ClientConfigDynamicIP(UPnPPortForward)
-	} else {
-		return ClientConfigDisableDynamicIP
-	}
-}
+// func ClientConfigPortForward(b bool) ClientConfigOption {
+// 	if b {
+// 		return ClientConfigDynamicIP(UPnPPortForward)
+// 	} else {
+// 		return ClientConfigDisableDynamicIP
+// 	}
+// }
 
-func ClientConfigDisableDynamicIP(cc *ClientConfig) {
-	cc.dynamicip = nil
-}
+// func ClientConfigDisableDynamicIP(cc *ClientConfig) {
+// 	cc.dynamicip = nil
+// }
 
-func ClientConfigDynamicIP(fn func(ctx context.Context, c *Client) (iter.Seq[netip.AddrPort], error)) ClientConfigOption {
-	return func(cc *ClientConfig) {
-		cc.dynamicip = fn
-	}
-}
-
-func ClientConfigIPv4(ip string) ClientConfigOption {
-	return func(cc *ClientConfig) {
-		if len(ip) == 0 {
-			return
-		}
-
-		cc.publicIP4 = net.ParseIP(ip)
-	}
-}
-
-func ClientConfigIPv6(ip string) ClientConfigOption {
-	return func(cc *ClientConfig) {
-		if len(ip) == 0 {
-			return
-		}
-
-		cc.publicIP6 = net.ParseIP(ip)
-	}
-}
+// func ClientConfigDynamicIP(fn func(ctx context.Context, c *Client) (iter.Seq[netip.AddrPort], error)) ClientConfigOption {
+// 	return func(cc *ClientConfig) {
+// 		cc.dynamicip = fn
+// 	}
+// }
 
 func ClientConfigDialRateLimit(l *rate.Limiter) ClientConfigOption {
 	return func(cc *ClientConfig) {
 		cc.dialRateLimiter = l
-	}
-}
-
-func ClientConfigBucketLimit(i int) ClientConfigOption {
-	return func(cc *ClientConfig) {
-		cc.bucketLimit = i
 	}
 }
 
@@ -290,59 +235,40 @@ func ClientConfigStorageDir(dir string) ClientConfigOption {
 	}
 }
 
-// configure what endpoints the dht's will support.
-func ClientConfigMuxer(m dht.Muxer) ClientConfigOption {
-	return func(c *ClientConfig) {
-		c.DHTMuxer = m
-	}
-}
+// // resets the set of bootstrap functions to an empty set.
+// func ClientConfigBootstrapNone(c *ClientConfig) {
+// 	c.dhtStartingNodes = nil
+// }
 
-func ClientConfigPeerID(s string) ClientConfigOption {
-	return func(c *ClientConfig) {
-		c.PeerID = s
-	}
-}
+// func ClientConfigBootstrapFn(fn func(n string) dht.StartingNodesGetter) ClientConfigOption {
+// 	return func(c *ClientConfig) {
+// 		c.dhtStartingNodes = append(c.dhtStartingNodes, fn)
+// 	}
+// }
 
-func ClientConfigFixedLocalID(id int160.T) ClientConfigOption {
-	return func(c *ClientConfig) {
-		c.localID = id
-	}
-}
+// func ClientConfigBootstrapGlobal(c *ClientConfig) {
+// 	c.dhtStartingNodes = append(c.dhtStartingNodes, func(network string) dht.StartingNodesGetter {
+// 		return func() ([]dht.Addr, error) { return dht.GlobalBootstrapAddrs(network) }
+// 	})
+// }
 
-// resets the set of bootstrap functions to an empty set.
-func ClientConfigBootstrapNone(c *ClientConfig) {
-	c.dhtStartingNodes = nil
-}
+// // Bootstrap from a file written by dht.WriteNodesToFile
+// func ClientConfigBootstrapPeerFile(path string) ClientConfigOption {
+// 	return ClientConfigBootstrapFn(func(n string) dht.StartingNodesGetter {
+// 		return func() (res []dht.Addr, err error) {
+// 			ps, err := dht.ReadNodesFromFile(path)
+// 			if err != nil {
+// 				return nil, err
+// 			}
 
-func ClientConfigBootstrapFn(fn func(n string) dht.StartingNodesGetter) ClientConfigOption {
-	return func(c *ClientConfig) {
-		c.dhtStartingNodes = append(c.dhtStartingNodes, fn)
-	}
-}
+// 			for _, p := range ps {
+// 				res = append(res, dht.NewAddr(p.Addr.UDP()))
+// 			}
 
-func ClientConfigBootstrapGlobal(c *ClientConfig) {
-	c.dhtStartingNodes = append(c.dhtStartingNodes, func(network string) dht.StartingNodesGetter {
-		return func() ([]dht.Addr, error) { return dht.GlobalBootstrapAddrs(network) }
-	})
-}
-
-// Bootstrap from a file written by dht.WriteNodesToFile
-func ClientConfigBootstrapPeerFile(path string) ClientConfigOption {
-	return ClientConfigBootstrapFn(func(n string) dht.StartingNodesGetter {
-		return func() (res []dht.Addr, err error) {
-			ps, err := dht.ReadNodesFromFile(path)
-			if err != nil {
-				return nil, err
-			}
-
-			for _, p := range ps {
-				res = append(res, dht.NewAddr(p.Addr.UDP()))
-			}
-
-			return res, nil
-		}
-	})
-}
+// 			return res, nil
+// 		}
+// 	})
+// }
 
 func ClientConfigHTTPUserAgent(s string) ClientConfigOption {
 	return func(cc *ClientConfig) {
@@ -499,8 +425,6 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		TorrentPeersHighWater:          64,
 		TorrentPeersLowWater:           16,
 		handshakesTimeout:              4 * time.Second,
-		dynamicip:                      UPnPPortForward,
-		dhtStartingNodes:               nil,
 		UploadRateLimiter:              rate.NewLimiter(rate.Limit(128*bytesx.MiB), bytesx.MiB),
 		DownloadRateLimiter:            rate.NewLimiter(rate.Limit(256*bytesx.MiB), bytesx.MiB),
 		dialRateLimiter:                rate.NewLimiter(rate.Limit(32), 128),
@@ -517,8 +441,6 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		Warn:             discard{},
 		Debug:            discard{},
 		Error:            log.Default(),
-		DHTAnnouncePeer:  func(ih int160.T, ip net.IP, port uint16, portOk bool) {},
-		DHTMuxer:         dht.DefaultMuxer(),
 		ConnectionClosed: func(t int160.T, stats ConnStats, remaining int) {},
 		Handshaker: connections.NewHandshaker(
 			connections.AutoFirewall(),

@@ -6,13 +6,13 @@ import (
 	"time"
 
 	"github.com/james-lawrence/torrent"
-	"github.com/james-lawrence/torrent/autobind"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/testutil"
 	"github.com/james-lawrence/torrent/internal/testx"
 	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/james-lawrence/torrent/storage"
+	"github.com/james-lawrence/torrent/torrenttestx"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,8 +45,7 @@ func TestMetadataExtension(t *testing.T) {
 		seedingdir,
 		torrent.ClientConfigSeed(true),
 	)
-
-	seeder, err := autobind.NewLoopback(autobind.DisableIPv6, autobind.DisableUTP).Bind(torrent.NewClient(cfg))
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(cfg))
 	require.NoError(t, err)
 	defer seeder.Close()
 
@@ -61,7 +60,7 @@ func TestMetadataExtension(t *testing.T) {
 	// we limit ourselves to tcp ipv4 here because of racing dialer.
 	// basically the receiving end will see multiple connections but only one
 	// will work. and the delay causes this test to take longer than it should.
-	leecher, err := autobind.NewLoopback(autobind.DisableIPv6, autobind.DisableUTP).Bind(c, err)
+	leecher, err := torrenttestx.Autosocket(t).Bind(c, err)
 	require.NoError(t, err)
 	defer leecher.Close()
 

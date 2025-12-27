@@ -3,6 +3,7 @@ package torrent
 import (
 	"errors"
 
+	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/sockets"
@@ -18,8 +19,10 @@ type Binder interface {
 type BinderOption func(v *binder)
 
 // EnableDHT enables DHT.
-func BinderOptionDHT(a *binder) {
-	a.EnableDHT = true
+func BinderOptionDHT(d *dht.Server) BinderOption {
+	return func(v *binder) {
+		v.dht = d
+	}
 }
 
 // NewSocketsBind binds a set of sockets to the client.
@@ -29,8 +32,8 @@ func NewSocketsBind(s ...sockets.Socket) binder {
 }
 
 type binder struct {
-	EnableDHT bool
-	sockets   []sockets.Socket
+	dht     *dht.Server
+	sockets []sockets.Socket
 }
 
 func (t binder) Options(opts ...BinderOption) binder {
@@ -54,8 +57,8 @@ func (t binder) Bind(cl *Client, err error) (*Client, error) {
 			return nil, err
 		}
 
-		if t.EnableDHT {
-			if err = cl.BindDHT(s); err != nil {
+		if t.dht != nil {
+			if err = cl.BindDHT(t.dht, s); err != nil {
 				cl.Close()
 				return nil, err
 			}

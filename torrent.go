@@ -88,7 +88,7 @@ func TuneReadPeerID(id *int160.T) Tuner {
 	return func(t *torrent) error {
 		t.rLock()
 		defer t.rUnlock()
-		*id = t.cln.config.localID
+		*id = t.cln.dht.ID()
 		return nil
 	}
 }
@@ -107,26 +107,6 @@ func TuneReadUserAgent(v *string) Tuner {
 		t.rLock()
 		defer t.rUnlock()
 		*v = t.cln.config.HTTPUserAgent
-		return nil
-	}
-}
-
-func TuneReadPublicIPv4(v net.IP) Tuner {
-	return func(t *torrent) error {
-		t.rLock()
-		defer t.rUnlock()
-
-		copy(v, t.cln.config.publicIP4)
-		return nil
-	}
-}
-
-func TuneReadPublicIPv6(v net.IP) Tuner {
-	return func(t *torrent) error {
-		t.rLock()
-		defer t.rUnlock()
-
-		copy(v, t.cln.config.publicIP6)
 		return nil
 	}
 }
@@ -175,7 +155,7 @@ func TuneReadAnnounce(v *tracker.Announce) Tuner {
 func TuneClientPeer(cl *Client) Tuner {
 	return func(t *torrent) error {
 		ps := []Peer{}
-		id := cl.PeerID()
+		id := cl.dht.ID()
 
 		for _, la := range cl.ListenAddrs() {
 			addrport := errorsx.Must(netx.AddrPort(la))
@@ -218,7 +198,7 @@ func TunePublicTrackers(trackers ...string) Tuner {
 		go func() {
 			<-t.GotInfo()
 
-			if t.info.Private != nil && langx.Autoderef(t.info.Private) {
+			if t.info.Private != nil && langx.Zero(t.info.Private) {
 				return
 			}
 
@@ -1349,20 +1329,20 @@ func (t *torrent) announceToDht(impliedPort bool, s *dht.Server) error {
 func (t *torrent) dhtAnnouncer(s *dht.Server) {
 	errdelay := time.Duration(0) // for the first run 0 delay to immediately find peers
 	for {
-		t.cln.config.debug().Println("dht ancouncer waiting for peers event", int160.FromByteArray(s.ID()), t.md.ID)
+		t.cln.config.debug().Println("dht ancouncer waiting for peers event", s.ID(), t.md.ID)
 		select {
 		case <-t.closed:
 			return
 		case <-time.After(errdelay):
 		case <-t.wantPeersEvent:
-			log.Println("dht ancouncing peers wanted event", int160.FromByteArray(s.ID()), t.md.ID)
+			log.Println("dht ancouncing peers wanted event", s.ID(), t.md.ID)
 		}
 
 		t.stats.DHTAnnounce.Add(1)
 
 		if err := t.announceToDht(true, s); err == nil {
 			errdelay = time.Minute // when we succeeded wait unless a wantPeersEvent comes in.
-			t.cln.config.debug().Println("dht ancouncing completed", int160.FromByteArray(s.ID()), t.md.ID)
+			t.cln.config.debug().Println("dht ancouncing completed", s.ID(), t.md.ID)
 			t.openNewConns()
 			continue
 		} else if errors.Is(err, dht.ErrDHTNoInitialNodes) {
@@ -1395,7 +1375,7 @@ func (t *torrent) statsLocked() (ret Stats) {
 	}, conns...)
 
 	ret.PendingPeers, ret.HalfOpenPeers = t.peers.Stats()
-	ret.LastConnection = langx.Autoderef(t.lastConnection.Load())
+	ret.LastConnection = langx.Zero(t.lastConnection.Load())
 	t.chunks.Snapshot(&ret)
 
 	// TODO: these can be moved to the connections directly.
@@ -1526,7 +1506,7 @@ func (t *torrent) wantConns() bool {
 // Start the process of connecting to the given peer for the given torrent if
 // appropriate.
 func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
-	if t.cln.config.localID.Cmp(peer.ID) == 0 {
+	if t.cln.dht.ID().Cmp(peer.ID) == 0 {
 		t.cln.config.debug().Println("skipping connection to self based on peer id")
 		return
 	}
@@ -1664,14 +1644,16 @@ func (t *torrent) String() string {
 }
 
 func (t *torrent) ping(addr net.UDPAddr) {
-	t.cln.eachDhtServer(func(s *dht.Server) {
-		go func() {
-			ret := dht.Ping3S(context.Background(), s, dht.NewAddr(&addr), s.ID())
-			if errorsx.Ignore(ret.Err, context.DeadlineExceeded) != nil {
-				t.cln.config.debug().Println("failed to ping address", ret.Err)
-			}
-		}()
-	})
+	if t.cln.dht == nil {
+		return
+	}
+
+	go func() {
+		ret := dht.Ping3S(context.Background(), t.cln.dht, dht.NewAddr(&addr), t.cln.dht.ID())
+		if errorsx.Ignore(ret.Err, context.DeadlineExceeded) != nil {
+			t.cln.config.debug().Println("failed to ping address", ret.Err)
+		}
+	}()
 }
 
 // Process incoming ut_metadata message.

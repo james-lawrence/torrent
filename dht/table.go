@@ -18,7 +18,6 @@ func newTable(k int) *table {
 
 // Node table, with indexes on distance from root ID to bucket, and node addr.
 type table struct {
-	rootID  int160.T
 	k       int
 	m       *sync.Mutex
 	buckets [160]bucket
@@ -29,15 +28,15 @@ func (tbl *table) K() int {
 	return tbl.k
 }
 
-func (tbl *table) randomIdForBucket(bucketIndex int) int160.T {
-	randomId := randomIdInBucket(tbl.rootID, bucketIndex)
-	if randomIdBucketIndex := tbl.bucketIndex(randomId); randomIdBucketIndex != bucketIndex {
+func (tbl *table) randomIdForBucket(root int160.T, bucketIndex int) int160.T {
+	randomId := randomIdInBucket(root, bucketIndex)
+	if randomIdBucketIndex := tbl.bucketIndex(root, randomId); randomIdBucketIndex != bucketIndex {
 		panic(fmt.Sprintf("bucket index for random id %v == %v not %v", randomId, randomIdBucketIndex, bucketIndex))
 	}
 	return randomId
 }
 
-func (tbl *table) dropNode(n *node) {
+func (tbl *table) dropNode(root int160.T, n *node) {
 	as := n.Addr.String()
 	if _, ok := tbl.addrs[as][n.Id]; !ok {
 		panic("missing id for addr")
@@ -46,13 +45,13 @@ func (tbl *table) dropNode(n *node) {
 	if len(tbl.addrs[as]) == 0 {
 		delete(tbl.addrs, as)
 	}
-	b := tbl.bucketForID(n.Id)
+	b := tbl.bucketForID(root, n.Id)
 
 	b.Remove(n)
 }
 
-func (tbl *table) bucketForID(id int160.T) *bucket {
-	return &tbl.buckets[tbl.bucketIndex(id)]
+func (tbl *table) bucketForID(root int160.T, id int160.T) *bucket {
+	return &tbl.buckets[tbl.bucketIndex(root, id)]
 }
 
 func (tbl *table) numNodes() (num int) {
@@ -62,12 +61,13 @@ func (tbl *table) numNodes() (num int) {
 	return num
 }
 
-func (tbl *table) bucketIndex(id int160.T) int {
-	if id == tbl.rootID {
+func (tbl *table) bucketIndex(root, id int160.T) int {
+	if id == root {
 		panic("nobody puts the root ID in a bucket")
 	}
+
 	var a int160.T
-	a.Xor(&tbl.rootID, &id)
+	a.Xor(&root, &id)
 	index := 160 - a.BitLen()
 	return index
 }
@@ -81,22 +81,22 @@ func (tbl *table) forNodes(f func(*node) bool) bool {
 	return true
 }
 
-func (tbl *table) getNode(addr Addr, id int160.T) *node {
-	if id == tbl.rootID {
+func (tbl *table) getNode(root int160.T, addr Addr, id int160.T) *node {
+	if id == root {
 		return nil
 	}
-	return tbl.buckets[tbl.bucketIndex(id)].GetNode(addr, id)
+	return tbl.buckets[tbl.bucketIndex(root, id)].GetNode(addr, id)
 }
 
-func (tbl *table) closestNodes(k int, target int160.T, filter func(*node) bool) (ret []*node) {
+func (tbl *table) closestNodes(root int160.T, k int, target int160.T, filter func(*node) bool) (ret []*node) {
 	tbl.m.Lock()
 	defer tbl.m.Unlock()
 
 	for bi := func() int {
-		if target == tbl.rootID {
+		if target == root {
 			return len(tbl.buckets) - 1
 		} else {
-			return tbl.bucketIndex(target)
+			return tbl.bucketIndex(root, target)
 		}
 	}(); bi >= 0 && len(ret) < k; bi-- {
 		for n := range tbl.buckets[bi].NodeIter() {
@@ -112,11 +112,11 @@ func (tbl *table) closestNodes(k int, target int160.T, filter func(*node) bool) 
 	return ret[:min(len(ret), k)]
 }
 
-func (tbl *table) addNode(n *node) error {
-	if n.Id == tbl.rootID {
+func (tbl *table) addNode(root int160.T, n *node) error {
+	if n.Id == root {
 		return errors.New("is root id")
 	}
-	b := &tbl.buckets[tbl.bucketIndex(n.Id)]
+	b := &tbl.buckets[tbl.bucketIndex(root, n.Id)]
 	if b.Len() >= tbl.k {
 		return errors.New("bucket is full")
 	}
