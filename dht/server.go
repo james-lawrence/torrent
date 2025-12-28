@@ -205,6 +205,26 @@ func NewServer(c *ServerConfig) (s *Server, err error) {
 }
 
 func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
+	updateaddr := func(fixed int160.T, detected netip.AddrPort) {
+		var (
+			upd krpc.ID = fixed.AsByteArray()
+		)
+
+		SecureNodeId(&upd, detected.Addr().AsSlice())
+
+		log.Println("updated", fixed, "->", upd, detected.Addr(), detected.Addr().AsSlice())
+
+		latest := int160.New(upd[:])
+		old := langx.Zero(s.id.Swap(&latest))
+		if latest.Cmp(old) == 0 {
+			return
+		}
+
+		log.Println("peer id changed", old, "->", latest)
+		// s.id.Store(langx.Autoptr(fixed))
+		s.dynamicaddr.Store(&detected)
+	}
+
 	safeclose := func(n net.PacketConn) error {
 		if n == nil {
 			return nil
@@ -229,25 +249,19 @@ func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
 		return err
 	}
 
+	// resolve the public ip before attempting to move forward.
+	for detected := range seq {
+		updateaddr(langx.Zero(s.id.Load()), detected)
+		break
+	}
+
 	go func() {
 		defer log.Println("dht dynamic address completed")
 		// static value to use as our base.
 		fixed := langx.Zero(s.id.Load())
 
 		for detected := range seq {
-			var (
-				upd krpc.ID = fixed.AsByteArray()
-			)
-
-			SecureNodeId(&upd, detected.Addr().AsSlice())
-
-			latest := int160.New(upd[:])
-			old := langx.Zero(s.id.Swap(&latest))
-			if latest.Cmp(old) == 0 {
-				continue
-			}
-
-			log.Println("peer id changed", old, "->", latest)
+			updateaddr(fixed, detected)
 		}
 	}()
 
@@ -821,8 +835,8 @@ type QueryInput struct {
 func (s *Server) Query(ctx context.Context, addr Addr, input QueryInput) (ret QueryResult) {
 	defer func(started time.Time) {
 		s.logger().Printf(
-			"Query(%v) returned after %v (err=%v, reply.Y=%v, reply.E=%v, writes=%v)",
-			input.Method, time.Since(started), ret.Err, ret.Reply.Y, ret.Reply.E, ret.Writes)
+			"Query(%v) returned after %v (err=%v, reply.Y=%v, reply.E=%v, writes=%v) encoded=%s",
+			input.Method, time.Since(started), ret.Err, ret.Reply.Y, ret.Reply.E, ret.Writes, string(input.Encoded))
 	}(time.Now())
 
 	replyChan := make(chan *QueryResult, 1)
@@ -1063,18 +1077,18 @@ func (s *Server) TraversalStartingNodes() (nodes []addrMaybeId, err error) {
 	if len(nodes) > 0 {
 		return
 	}
-	if s.config.StartingNodes != nil {
+
+	for _, fn := range s.config.bootstrap {
 		// There seems to be floods on this call on occasion, which may cause a barrage of DNS
 		// resolution attempts. This would require that we're unable to get replies because we can't
 		// resolve, transmit or receive on the network. Nodes currently don't get expired from the
 		// table, so once we have some entries, we should never have to fallback.
 		// s.logger().Println("falling back on starting nodes")
-		addrs, err := s.config.StartingNodes()
+		addrs, err := fn()
 		if err != nil {
-			return nil, fmt.Errorf("getting starting nodes: %w", err)
-		} else {
-			// log.Printf("resolved %v addresses", len(addrs))
+			return nil, errorsx.Wrap(err, "getting starting nodes")
 		}
+
 		for _, a := range addrs {
 			nodes = append(nodes, addrMaybeId{Addr: a.KRPC()})
 		}
@@ -1084,7 +1098,7 @@ func (s *Server) TraversalStartingNodes() (nodes []addrMaybeId, err error) {
 		return nil, ErrDHTNoInitialNodes
 	}
 
-	return nodes, err
+	return nodes, nil
 }
 
 func (s *Server) AddNodesFromFile(fileName string) (added int, err error) {

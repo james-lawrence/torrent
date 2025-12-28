@@ -10,6 +10,7 @@ import (
 	pp "github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/dht/krpc"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/internal/userx"
@@ -61,12 +62,11 @@ type ClientConfig struct {
 	acceptRateLimiter *rate.Limiter
 
 	HeaderObfuscationPolicy HeaderObfuscationPolicy
+
 	// The crypto methods to offer when initiating connections with header obfuscation.
 	CryptoProvides mse.CryptoMethod
 	// Chooses the crypto method to use when receiving connections with header obfuscation.
 	CryptoSelector mse.CryptoSelector
-
-	DisableIPv4Peers bool
 
 	Error  logging // standard logging for errors, defaults to stderr
 	Warn   logging // warn logging
@@ -84,11 +84,11 @@ type ClientConfig struct {
 	// Updated occasionally to when there's been some changes to client
 	// behaviour in case other clients are assuming anything of us. See also
 	// `bep20`.
-	ExtendedHandshakeClientVersion string
+	extendedHandshakeClientVersion string
 	// Peer ID client identifier prefix. We'll update this occasionally to
 	// reflect changes to client behaviour that other clients may depend on.
 	// Also see `extendedHandshakeClientVersion`.
-	Bep20 string
+	bep20 string
 
 	// Peer dial timeout to use when there are limited peers.
 	NominalDialTimeout time.Duration
@@ -116,11 +116,6 @@ type ClientConfig struct {
 
 	Handshaker connections.Handshaker
 
-	// OnQuery hook func
-	// DHTOnQuery      func(query *krpc.Msg, source net.Addr) (propagate bool)
-	// DHTAnnouncePeer func(ih int160.T, ip net.IP, port uint16, portOk bool)
-	// DHTMuxer        dht.Muxer
-
 	ConnectionClosed func(ih int160.T, stats ConnStats, remaining int)
 	extensions       map[pp.ExtensionName]pp.ExtensionNumber
 }
@@ -133,12 +128,12 @@ func (cfg *ClientConfig) Storage() storage.ClientImpl {
 	return cfg.defaultStorage
 }
 
-func (cfg *ClientConfig) AnnounceRequest() tracker.Announce {
+func (cfg *ClientConfig) AnnounceRequest(s *Client) tracker.Announce {
 	return tracker.Announce{
 		UserAgent: cfg.HTTPUserAgent,
-		// ClientIp4: krpc.NewNodeAddrFromIPPort(cfg.publicIP4, 0),
-		// ClientIp6: krpc.NewNodeAddrFromIPPort(cfg.publicIP6, 0),
-		Dialer: cfg.dialer,
+		ClientIp4: krpc.NewNodeAddrFromAddrPort(s.dht.AddrPort()),
+		ClientIp6: krpc.NewNodeAddrFromAddrPort(s.dht.AddrPort()),
+		Dialer:    cfg.dialer,
 	}
 }
 
@@ -178,24 +173,6 @@ func ClientConfigDialer(d netx.Dialer) ClientConfigOption {
 	}
 }
 
-// func ClientConfigPortForward(b bool) ClientConfigOption {
-// 	if b {
-// 		return ClientConfigDynamicIP(UPnPPortForward)
-// 	} else {
-// 		return ClientConfigDisableDynamicIP
-// 	}
-// }
-
-// func ClientConfigDisableDynamicIP(cc *ClientConfig) {
-// 	cc.dynamicip = nil
-// }
-
-// func ClientConfigDynamicIP(fn func(ctx context.Context, c *Client) (iter.Seq[netip.AddrPort], error)) ClientConfigOption {
-// 	return func(cc *ClientConfig) {
-// 		cc.dynamicip = fn
-// 	}
-// }
-
 func ClientConfigDialRateLimit(l *rate.Limiter) ClientConfigOption {
 	return func(cc *ClientConfig) {
 		cc.dialRateLimiter = l
@@ -234,41 +211,6 @@ func ClientConfigStorageDir(dir string) ClientConfigOption {
 		c.defaultMetadata = NewMetadataCache(dir)
 	}
 }
-
-// // resets the set of bootstrap functions to an empty set.
-// func ClientConfigBootstrapNone(c *ClientConfig) {
-// 	c.dhtStartingNodes = nil
-// }
-
-// func ClientConfigBootstrapFn(fn func(n string) dht.StartingNodesGetter) ClientConfigOption {
-// 	return func(c *ClientConfig) {
-// 		c.dhtStartingNodes = append(c.dhtStartingNodes, fn)
-// 	}
-// }
-
-// func ClientConfigBootstrapGlobal(c *ClientConfig) {
-// 	c.dhtStartingNodes = append(c.dhtStartingNodes, func(network string) dht.StartingNodesGetter {
-// 		return func() ([]dht.Addr, error) { return dht.GlobalBootstrapAddrs(network) }
-// 	})
-// }
-
-// // Bootstrap from a file written by dht.WriteNodesToFile
-// func ClientConfigBootstrapPeerFile(path string) ClientConfigOption {
-// 	return ClientConfigBootstrapFn(func(n string) dht.StartingNodesGetter {
-// 		return func() (res []dht.Addr, err error) {
-// 			ps, err := dht.ReadNodesFromFile(path)
-// 			if err != nil {
-// 				return nil, err
-// 			}
-
-// 			for _, p := range ps {
-// 				res = append(res, dht.NewAddr(p.Addr.UDP()))
-// 			}
-
-// 			return res, nil
-// 		}
-// 	})
-// }
 
 func ClientConfigHTTPUserAgent(s string) ClientConfigOption {
 	return func(cc *ClientConfig) {
@@ -396,7 +338,7 @@ func ClientConfigAcceptLimit(l *rate.Limiter) ClientConfigOption {
 // peer id prefix for BEP20 implementation.
 func ClientConfigIDPrefix(prefix string) ClientConfigOption {
 	return func(cc *ClientConfig) {
-		cc.Bep20 = prefix
+		cc.bep20 = prefix
 	}
 }
 
@@ -415,10 +357,10 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		defaultStorage:                 store,
 		extensionbits:                  defaultPeerExtensionBytes(),
 		HTTPUserAgent:                  DefaultHTTPUserAgent,
-		ExtendedHandshakeClientVersion: "ghost.torrent dev 2025",
-		Bep20:                          "-GT0002-",
+		extendedHandshakeClientVersion: "ghost.torrent dev 2025",
+		bep20:                          "-GT0002-",
 		UpnpID:                         "ghost.torrent",
-		maximumOutstandingRequests:     64,
+		maximumOutstandingRequests:     2048,
 		NominalDialTimeout:             16 * time.Second,
 		MinDialTimeout:                 4 * time.Second,
 		HalfOpenConnsPerTorrent:        8,

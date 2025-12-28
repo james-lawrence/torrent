@@ -7,7 +7,6 @@ import (
 	"encoding"
 	"hash"
 	"io"
-	"log"
 	"net"
 	"net/netip"
 	"sync"
@@ -107,7 +106,6 @@ func genconnection(t *testing.T, seed string, n uint64, pbits, sbits pp.Extensio
 	asnetip := testx.Must(netx.AddrPort(_pconn.RemoteAddr()))(t)
 	apnetip := testx.Must(netx.AddrPort(_pconn.LocalAddr()))(t)
 
-	log.Println("DERP DERP", apnetip)
 	pconn := newConnection(cfgl, _pconn, true, asnetip, &pbits, apnetip.Port(), apnetip)
 	pconn.PeerExtensionBytes = sbits
 	pconn.PeerID = int160.Random()
@@ -173,7 +171,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		msg, err := sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
 		torrenttest.RequireMessageType(t, pp.Extended, msg.Type)
-		require.Equal(t, 156, len(msg.ExtendedPayload), string(msg.ExtendedPayload))
+		require.Equal(t, 158, len(msg.ExtendedPayload), string(msg.ExtendedPayload))
 
 		msg, err = sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
@@ -314,7 +312,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		msg, err := sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
 		torrenttest.RequireMessageType(t, pp.Extended, msg.Type)
-		require.Equal(t, 156, len(msg.ExtendedPayload))
+		require.Equal(t, 158, len(msg.ExtendedPayload))
 
 		// --------------------------------------- allow fast extension ----------------------------------------------
 		msg, err = sconn.ReadOne(ctx, d)
@@ -414,7 +412,7 @@ func TestProtocolSequencesDownloading(t *testing.T) {
 		msg, err := sconn.ReadOne(ctx, d)
 		require.NoError(t, err)
 		torrenttest.RequireMessageType(t, pp.Extended, msg.Type)
-		require.Equal(t, 156, len(msg.ExtendedPayload))
+		require.Equal(t, 158, len(msg.ExtendedPayload))
 
 		// --------------------------------------- allow fast extension ----------------------------------------------
 		msg, err = sconn.ReadOne(ctx, d)

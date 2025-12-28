@@ -107,7 +107,7 @@ func connexinit(cn *connection, n cstate.T) cstate.T {
 		// used.
 		msg := btprotocol.ExtendedHandshakeMessage{
 			M:            cn.cfg.extensions,
-			V:            cn.cfg.ExtendedHandshakeClientVersion,
+			V:            cn.cfg.extendedHandshakeClientVersion,
 			Reqq:         cn.cfg.maximumOutstandingRequests,
 			YourIp:       btprotocol.CompactIp(cn.remoteAddr.Addr().AsSlice()),
 			Encryption:   cn.cfg.HeaderObfuscationPolicy.Preferred || cn.cfg.HeaderObfuscationPolicy.RequirePreferred,
@@ -475,7 +475,7 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg messageW
 	// t.cfg.debug().Printf("c(%p) seed(%t) make requests initated avail(%d)\n", t.connection, t.seed, t.requestable.GetCardinality())
 	// defer t.cfg.debug().Printf("c(%p) seed(%t) make requests completed avail(%d)\n", t.connection, t.seed, t.requestable.GetCardinality())
 
-	if len(t.requests) > t.lowrequestwatermark/2 {
+	if len(t.requests) > t.lowrequestwatermark {
 		t.cfg.debug().Printf("c(%p) seed(%t) skipping buffer fill - req(current(%d) >= low watermark(%d) / 2)", t.connection, t.seed, len(t.requests), t.lowrequestwatermark)
 		return
 	}

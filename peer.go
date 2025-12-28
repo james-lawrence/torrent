@@ -1,8 +1,12 @@
 package torrent
 
 import (
+	"fmt"
+	"log"
 	"net"
 	"net/netip"
+	"net/url"
+	"strings"
 
 	"github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -40,6 +44,30 @@ func NewPeer(id int160.T, addr netip.AddrPort, options ...PeerOption) Peer {
 		ID:       id,
 		AddrPort: addr,
 	}, options...)
+}
+
+// generate a peer from a uri in the form of:
+// p0000000000000000000000000000000000000000://127.0.0.1:3196
+// aka: p{nodeID}://ip:port
+func NewPeersFromURI(uris ...url.URL) (peers []Peer) {
+	peers = make([]Peer, 0, len(uris))
+	for _, uri := range uris {
+		id, err := int160.FromHexEncodedString(strings.TrimPrefix(uri.Scheme, "p"))
+		if err != nil {
+			log.Println("failed to create peer from", uri, "invalid id, expected hex encoding similar to", fmt.Sprintf("p%s", int160.Zero()))
+			continue
+		}
+
+		addrport, err := netip.ParseAddrPort(uri.Host)
+		if err != nil {
+			log.Println("failed to create peer from", uri, "invalid host/port must be in the form ip:port", uri.Host)
+			continue
+		}
+
+		peers = append(peers, NewPeer(id, addrport))
+	}
+
+	return peers
 }
 
 // Peer connection info, handed about publicly.

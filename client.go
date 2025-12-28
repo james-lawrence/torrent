@@ -211,12 +211,6 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 		}
 	}()
 
-	// if cfg.localID.IsZero() {
-	// 	if cfg.localID, err = int160.RandomPrefixed(stringsx.Default(cfg.PeerID, cfg.Bep20)); err != nil {
-	// 		return nil, errorsx.Wrap(err, "error generating peer id")
-	// 	}
-	// }
-
 	return cl, nil
 }
 
@@ -261,77 +255,12 @@ func (cl *Client) BindDHT(d *dht.Server, s sockets.Socket) (err error) {
 	return d.Serve(context.Background(), pc)
 }
 
-// func (cl *Client) newDhtServer(conn net.PacketConn) (s *dht.Server, err error) {
-// 	cfg := dht.ServerConfig{
-// 		OnAnnouncePeer: cl.onDHTAnnouncePeer,
-// 		PublicIP: func() net.IP {
-// 			if connIsIpv6(conn) && cl.config.publicIP6 != nil {
-// 				return cl.config.publicIP6
-// 			}
-// 			return cl.config.publicIP4
-// 		}(),
-// 		StartingNodes: func() (res []dht.Addr, err error) {
-// 			for _, fn := range cl.config.dhtStartingNodes {
-// 				_local, _err := fn(conn.LocalAddr().Network())()
-// 				res = append(res, _local...)
-// 				err = errorsx.Compact(err, _err)
-// 			}
-
-// 			return res, err
-// 		},
-// 		OnQuery:     cl.config.DHTOnQuery,
-// 		Logger:      newlogger(cl.config.Debug, "dht", log.Flags()),
-// 		BucketLimit: cl.config.bucketLimit,
-// 	}
-
-// 	if s, err = dht.NewServer(&cfg); err != nil {
-// 		return s, err
-// 	}
-
-// 	go func() {
-// 		if err = s.ServeMux(context.Background(), conn, cl.config.DHTMuxer); err != nil {
-// 			log.Println("dht failed", err)
-// 		}
-// 	}()
-
-// 	return s, nil
-// }
-
-// func (cl *Client) BindDHT(s sockets.Socket) (err error) {
-// 	var (
-// 		ok bool
-// 		pc net.PacketConn
-// 	)
-
-// 	if pc, ok = s.(net.PacketConn); !ok {
-// 		cl.config.debug().Println("dht servers disabled: not a packet conn")
-// 		return nil
-// 	}
-
-// 	cl.config.debug().Println("dht servers enabled")
-
-// 	ds, err := cl.newDhtServer(pc)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	cl.dhtServers = append(cl.dhtServers, ds)
-
-// 	return nil
-// }
-
 // Closed returns a channel to detect when the client is closed.
 func (cl *Client) Closed() <-chan struct{} {
 	cl.rLock()
 	defer cl.rUnlock()
 	return cl.closed
 }
-
-// func (cl *Client) eachDhtServer(f func(*dht.Server)) {
-// 	for _, ds := range cl.dhtServers {
-// 		f(ds)
-// 	}
-// }
 
 func (cl *Client) closeSockets() {
 	cl.eachListener(func(l sockets.Socket) bool {
@@ -528,8 +457,8 @@ func (cl *Client) establishOutgoingConn(ctx context.Context, t *torrent, addr ne
 func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (err error) {
 	var (
 		c       *connection
-		ps      peerSource = p.Source
-		trusted bool       = p.Trusted
+		ps      = p.Source
+		trusted = p.Trusted
 	)
 
 	defer func() {
@@ -762,14 +691,12 @@ func (cl *Client) publicIP(peer netip.Addr) netip.Addr {
 		return netx.FirstAddrOrZero(
 			cl.dht.AddrPort().Addr(),
 			cl.findListenerIP(func(ip netip.Addr) bool { return ip.Is4() && ip.IsValid() }),
-			cl.dht.AddrPort().Addr(),
 		)
 	}
 
 	return netx.FirstAddrOrZero(
 		cl.dht.AddrPort().Addr(),
 		cl.findListenerIP(func(ip netip.Addr) bool { return ip.Is6() && ip.IsValid() }),
-		cl.dht.AddrPort().Addr(),
 	)
 }
 

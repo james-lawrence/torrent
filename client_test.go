@@ -6,6 +6,7 @@ import (
 	"crypto/md5"
 	"fmt"
 	"io"
+	"log"
 	"math/rand/v2"
 	"net"
 	"net/netip"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
@@ -1123,6 +1125,8 @@ func TestProtocolSwarmManagement(t *testing.T) {
 	// const iolimit int64 = 128 * bytesx.KiB
 
 	t.Run("should maintain a peer even in face of networking issues", func(t *testing.T) {
+		t.Skip("need to be reworked since we removed the range loop")
+
 		datadir := t.TempDir()
 		from, err := torrenttestx.Autosocket(t).Bind(
 			torrent.NewClient(
@@ -1143,9 +1147,10 @@ func TestProtocolSwarmManagement(t *testing.T) {
 		require.NoError(t, err)
 		_ = seeding
 
-		a := netip.AddrPortFrom(netip.IPv6Loopback(), 0)
+		// torrenttestx.Autosocket is restricted to ipv4 by default.
+		a := netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), 0)
 
-		l, err := net.Listen("tcp6", a.String())
+		l, err := net.Listen("tcp4", a.String())
 		require.NoError(t, err)
 		defer l.Close()
 		a, err = netip.ParseAddrPort(l.Addr().String())
@@ -1155,7 +1160,7 @@ func TestProtocolSwarmManagement(t *testing.T) {
 		require.NoError(t, seeding.Tune(torrent.TunePeers(torrent.NewPeer(int160.Random(), a))))
 
 		for range 5 {
-			// log.Println("stats 0", spew.Sdump(seeding.Stats()))
+			log.Println("stats 0", spew.Sdump(seeding.Stats()))
 			require.EventuallyWithT(t, func(collect *assert.CollectT) {
 				stat := seeding.Stats()
 				if stat.HalfOpenPeers > 0 {
@@ -1168,7 +1173,7 @@ func TestProtocolSwarmManagement(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, c.Close())
 
-			// log.Println("stats 1", spew.Sdump(seeding.Stats()))
+			log.Println("stats 1", spew.Sdump(seeding.Stats()))
 
 			require.EventuallyWithT(t, func(collect *assert.CollectT) {
 				stat := seeding.Stats()

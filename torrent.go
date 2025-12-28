@@ -145,7 +145,7 @@ func TuneReadAnnounce(v *tracker.Announce) Tuner {
 		t.rLock()
 		defer t.rUnlock()
 
-		*v = t.cln.config.AnnounceRequest()
+		*v = t.cln.config.AnnounceRequest(t.cln)
 		return nil
 	}
 }
@@ -1524,27 +1524,26 @@ func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
 	go func() {
 		defer t.openNewConns()
 
-		for range 5 {
-			var (
-				timedout errorsx.Timeout
-			)
+		var (
+			timedout errorsx.Timeout
+		)
 
-			t.peers.Loaned(peer)
+		t.peers.Loaned(peer)
 
-			// outgoing connection has a dial rate limit
-			if err := t.cln.outgoingConnection(ctx, t, peer); err == nil {
-				t.cln.config.debug().Printf("outgoing connection completed\n")
-				return
-			} else if errors.As(err, &timedout) {
-				t.cln.config.debug().Printf("timeout detected, retrying %T - %v - %s - %t\n", err, err, timedout.Timedout(), peer.Trusted)
-				time.Sleep(timedout.Timedout())
-				continue
-			} else if errorsx.Ignore(err, context.DeadlineExceeded, context.Canceled) != nil {
-				t.cln.config.debug().Printf("outgoing connection failed %T - %v\n", errorsx.Compact(errorsx.Unwrap(err), err), err)
-				return
-			} else {
-				t.cln.config.debug().Printf("outgoing connection retrying %T - %v\n", errorsx.Compact(errorsx.Unwrap(err), err), err)
-			}
+		// outgoing connection has a dial rate limit
+		if err := t.cln.outgoingConnection(ctx, t, peer); err == nil {
+			t.cln.config.debug().Printf("outgoing connection completed\n")
+			return
+		} else if errors.As(err, &timedout) {
+			t.cln.config.debug().Printf("timeout detected, retrying %T - %v - %s - %t\n", err, err, timedout.Timedout(), peer.Trusted)
+			time.Sleep(timedout.Timedout())
+			return
+		} else if errorsx.Ignore(err, context.DeadlineExceeded, context.Canceled) != nil {
+			t.cln.config.debug().Printf("outgoing connection failed %T - %v\n", errorsx.Compact(errorsx.Unwrap(err), err), err)
+			return
+		} else {
+			t.cln.config.debug().Printf("outgoing connection retrying %T - %v\n", errorsx.Compact(errorsx.Unwrap(err), err), err)
+			return
 		}
 	}()
 }

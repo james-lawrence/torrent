@@ -24,9 +24,9 @@ func TestAnnounceNoStartingNodes(t *testing.T) {
 
 func TestAnnounceStopsNoPending(t *testing.T) {
 	s, err := NewServer(&ServerConfig{
-		StartingNodes: func() ([]Addr, error) {
+		bootstrap: []StartingNodesGetter{func() ([]Addr, error) {
 			return []Addr{NewAddr(&net.TCPAddr{})}, nil
-		},
+		}},
 	})
 	backgroundServe(t, s, mustListen(":0"))
 

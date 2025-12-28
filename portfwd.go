@@ -8,7 +8,9 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/gofrs/uuid/v5"
 	"github.com/james-lawrence/torrent/internal/errorsx"
+	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/upnp"
 )
 
@@ -39,31 +41,10 @@ func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort uint16, upn
 	}
 }
 
-// func (cl *Client) forwardPort() {
-// 	if cl.config.dynamicip == nil {
-// 		return
-// 	}
-
-// 	addrs, err := cl.config.dynamicip(context.Background(), cl)
-// 	if err != nil {
-// 		cl.config.errors().Println(err)
-// 		return
-// 	}
-
-// 	for addrport := range addrs {
-// 		cl.dynamicaddr.Store(&addrport)
-// 		log.Println("dynamic ip update", cl.LocalPort16(), "->", addrport)
-// 	}
-// }
-
-func UPnPPortForward(ctx context.Context, c *Client) (iter.Seq[netip.AddrPort], error) {
+func UPnPPortForward2(ctx context.Context, id string, port uint16) (iter.Seq[netip.AddrPort], error) {
+	id = langx.FirstNonZero(id, errorsx.Must(uuid.NewV7()).String())
 	return func(yield func(netip.AddrPort) bool) {
 		ds := upnp.Discover(ctx, 0, 2*time.Second)
-		c.config.debug().Printf("discovered %d upnp devices\n", len(ds))
-		c.lock()
-		port := c.LocalPort16()
-		id := c.config.UpnpID
-		c.unlock()
 
 		for _, d := range ds {
 			if c, err := addPortMapping(d, upnp.TCP, port, id); err == nil {

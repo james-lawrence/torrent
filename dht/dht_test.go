@@ -67,22 +67,6 @@ func TestMaxDistanceString(t *testing.T) {
 	require.EqualValues(t, "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", int160.Max().Bytes())
 }
 
-// func TestClosestNodes(t *testing.T) {
-// 	cn := newKClosestNodeIDs(2, testIDs[3])
-// 	for _, i := range rand.Perm(len(testIDs)) {
-// 		cn.Push(testIDs[i])
-// 	}
-// 	ids := iter.ToSlice(cn.IDs())
-// 	assert.Len(t, ids, 2)
-// 	m := map[string]bool{}
-// 	for _, id := range ids {
-// 		m[id.(nodeID).ByteString()] = true
-// 	}
-// 	log.Printf("%q", m)
-// 	assert.True(t, m[testIDs[3].ByteString()])
-// 	assert.True(t, m[testIDs[4].ByteString()])
-// }
-
 func TestDHTDefaultConfig(t *testing.T) {
 	s, err := NewServer(nil)
 	assert.NoError(t, err)
@@ -101,8 +85,9 @@ func TestPing(t *testing.T) {
 		}
 	}
 	defer srv.Close()
+
 	srv0, err := NewServer(&ServerConfig{
-		StartingNodes: addrResolver(srvUdpAddr(srv).String()),
+		bootstrap: []StartingNodesGetter{addrResolver(srvUdpAddr(srv).String())},
 	})
 	require.NoError(t, err)
 	backgroundServe(t, srv0, mustListen("127.0.0.1:0"))
@@ -131,7 +116,7 @@ func TestAnnounceTimeout(t *testing.T) {
 	defer done0()
 
 	s, err := NewServer(&ServerConfig{
-		StartingNodes: addrResolver("1.2.3.4:5"),
+		bootstrap: []StartingNodesGetter{addrResolver("1.2.3.4:5")},
 		QueryResendDelay: func() time.Duration {
 			return 0
 		},
@@ -158,12 +143,11 @@ func TestHook(t *testing.T) {
 	pinger, err := NewServer(&ServerConfig{})
 	require.NoError(t, err)
 	backgroundServe(t, pinger, pconn)
-	log.Println("WAAAT")
 	defer pinger.Close()
 	// Establish server with a hook attached to "ping"
 	hookCalled := make(chan struct{}, 1)
 	receiver, err := NewServer(&ServerConfig{
-		StartingNodes: addrResolver(pconn.LocalAddr().String()),
+		bootstrap: []StartingNodesGetter{addrResolver(pconn.LocalAddr().String())},
 		OnQuery: func(m *krpc.Msg, addr net.Addr) bool {
 			t.Logf("receiver got msg: %v", m)
 			if m.Q == "ping" {
@@ -222,9 +206,9 @@ func TestBadGetPeersResponse(t *testing.T) {
 	require.NoError(t, err)
 	defer pc.Close()
 	s, err := NewServer(&ServerConfig{
-		StartingNodes: func() ([]Addr, error) {
+		bootstrap: []StartingNodesGetter{func() ([]Addr, error) {
 			return []Addr{NewAddr(pc.LocalAddr().(*net.UDPAddr))}, nil
-		},
+		}},
 	})
 	require.NoError(t, err)
 	backgroundServe(t, s, mustListen("localhost:0"))

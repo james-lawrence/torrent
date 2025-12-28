@@ -60,10 +60,54 @@ func PublicAddrPortFromPacketConn(ctx context.Context, id int160.T, local net.Pa
 	}, nil
 }
 
-func NewDefaultServerConfig() *ServerConfig {
-	return &ServerConfig{
+type ServerConfigOption func(*ServerConfig)
+
+func ServerConfigOptionDynamicPort(fn PublicAddrPort) ServerConfigOption {
+	return func(sc *ServerConfig) {
+		sc.PublicAddrPort = fn
+	}
+}
+
+func ServerConfigOptionBootstrapNodesFn(fn StartingNodesGetter) ServerConfigOption {
+	return func(sc *ServerConfig) {
+		sc.bootstrap = append(sc.bootstrap, fn)
+	}
+}
+
+func ServerConfigOptionBootstrapGlobal(sc *ServerConfig) {
+	ServerConfigOptionBootstrapNodesFn(func() ([]Addr, error) { return GlobalBootstrapAddrs("udp") })(sc)
+}
+
+func ServerConfigOptionBootstrapPeerFile(path string) ServerConfigOption {
+	return ServerConfigOptionBootstrapNodesFn(func() (res []Addr, err error) {
+		ps, err := ReadNodesFromFile(path)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, p := range ps {
+			res = append(res, NewAddr(p.Addr.UDP()))
+		}
+
+		return res, nil
+	})
+}
+
+func ServerConfigOptionBootstrapNodesNone(sc *ServerConfig) {
+	sc.bootstrap = nil
+}
+
+func ServerConfigOptionMuxer(m Muxer) ServerConfigOption {
+	return func(sc *ServerConfig) {
+		sc.mux = m
+	}
+}
+
+func ServerConfigOptionNoop(sc *ServerConfig) {}
+
+func NewDefaultServerConfig(options ...func(*ServerConfig)) *ServerConfig {
+	return langx.Autoptr(langx.Clone(ServerConfig{
 		PublicAddrPort:   PublicAddrPortFromPacketConn,
-		StartingNodes:    func() ([]Addr, error) { return GlobalBootstrapAddrs("udp") },
 		DefaultWant:      []krpc.Want{krpc.WantNodes, krpc.WantNodes6},
 		Store:            bep44.NewMemory(),
 		Exp:              2 * time.Hour,
@@ -72,7 +116,7 @@ func NewDefaultServerConfig() *ServerConfig {
 		BucketLimit:      32,
 		mux:              DefaultMuxer(),
 		QueryResendDelay: defaultQueryResendDelay,
-	}
+	}, options...))
 }
 
 func ensureDefaultServerConfig(c *ServerConfig) *ServerConfig {
@@ -96,11 +140,13 @@ type ServerConfig struct {
 	BucketLimit int
 	// Don't respond to queries from other nodes.
 	Passive bool
-	// Called when there are no good nodes to use in the routing table. This might be called any
+
+	// used when there are no good nodes to use in the routing table. This might be called any
 	// time when there are no nodes, including during bootstrap if one is performed. Typically it
 	// returns the resolve addresses of bootstrap or "router" nodes that are designed to kick-start
 	// a routing table.
-	StartingNodes StartingNodesGetter
+	bootstrap []StartingNodesGetter
+
 	// Initial IP blocklist to use. Applied before serving and bootstrapping
 	// begins.
 	IPBlocklist iplist.Ranger
