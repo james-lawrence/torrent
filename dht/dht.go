@@ -69,16 +69,14 @@ func OptionDynamicPort(fn PublicAddrPort) Option {
 	}
 }
 
-func OptionUPnP(fn PublicAddrPort) Option {
-	return func(sc *Server) {
-		sc.resolvepublicaddr = func(ctx context.Context, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
-			addr, err := netx.AddrPort(local.LocalAddr())
-			if err != nil {
-				return nil, err
-			}
-
-			return UPnPPortForward(ctx, id.String(), addr.Port())
+func OptionUPnP(sc *Server) {
+	sc.resolvepublicaddr = func(ctx context.Context, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
+		addr, err := netx.AddrPort(local.LocalAddr())
+		if err != nil {
+			return nil, err
 		}
+
+		return UPnPPortForward(ctx, id.String(), addr.Port())
 	}
 }
 

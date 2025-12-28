@@ -104,15 +104,15 @@ func BenchmarkDecodeBitfield(b *testing.B) {
 	b.ReportAllocs()
 	defer r.Close()
 	go func() {
-		    defer w.Close()
-		    for {
-		        n, err := w.Write(data)
-		        if err == io.ErrClosedPipe {
-		            return
-		        }
-	        require.NoError(b, err)
-	        require.Equal(b, len(data), n)
-	    }
+		defer w.Close()
+		for {
+			n, err := w.Write(data)
+			if err == io.ErrClosedPipe {
+				return
+			}
+			require.NoError(b, err)
+			require.Equal(b, len(data), n)
+		}
 	}()
 	d := Decoder{
 		R:         bufio.NewReader(r),
@@ -147,13 +147,13 @@ func BenchmarkDecodeExtended(b *testing.B) {
 			require.NoError(b, err)
 			require.Equal(b, len(data), n)
 		}
-		}()
-		d := Decoder{
-			R:         bufio.NewReader(r),
-			MaxLength: 1 << 18,
-		}
-		for i := 0; i < b.N; i++ {
-			var msg Message
-			require.NoError(b, d.Decode(&msg))
+	}()
+	d := Decoder{
+		R:         bufio.NewReader(r),
+		MaxLength: 1 << 18,
+	}
+	for i := 0; i < b.N; i++ {
+		var msg Message
+		require.NoError(b, d.Decode(&msg))
 	}
 }

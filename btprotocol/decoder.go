@@ -129,7 +129,7 @@ func unmarshalBitfield(b []byte) (bf []bool) {
 	idx := 0
 	for _, c := range b {
 		for i := 7; i >= 0; i-- {
-			bf[idx] = (c >> uint(i)) & 1 == 1
+			bf[idx] = (c>>uint(i))&1 == 1
 			idx++
 		}
 	}

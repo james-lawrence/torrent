@@ -336,7 +336,7 @@ func getDictField(dict reflect.Type, key reflect.Value) (_ dictField, err error)
 }
 
 var (
-	structFields   sync.Map // map[reflect.Type]map[string]dictField
+	structFields sync.Map // map[reflect.Type]map[string]dictField
 )
 
 func parseStructFields(struct_ reflect.Type, each func(key string, df dictField)) {
