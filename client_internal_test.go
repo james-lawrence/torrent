@@ -45,7 +45,7 @@ func Autosocket(t *testing.T) Binder {
 	var (
 		bindings []sockets.Socket
 	)
-	_dht, err := dht.NewServer(nil)
+	_dht, err := dht.NewServer(32)
 	require.NoError(t, err)
 
 	s, err := utpx.New("udp4", "localhost:")

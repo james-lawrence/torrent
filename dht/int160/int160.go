@@ -23,7 +23,7 @@ func New[Y string | []byte](b Y) (ret T) {
 	return
 }
 
-func RandomPrefixed(b string) (ret T, err error) {
+func RandomPrefixed[X ~[]byte | ~string](b X) (ret T, err error) {
 	var buf [20]byte
 	o := copy(buf[:], b)
 	if _, err = rand.Read(buf[o:]); err != nil {
@@ -184,6 +184,13 @@ func (me *T) Xor(a, b *T) *T {
 	}
 
 	return me
+}
+
+func (me T) Prefix(b []byte) T {
+	var buf [20]byte
+	o := copy(buf[:], []byte(b))
+	copy(buf[o:], me.bits[o:])
+	return FromByteArray(buf)
 }
 
 func (a T) Distance(b T) (ret T) {

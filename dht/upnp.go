@@ -1,4 +1,4 @@
-package torrent
+package dht
 
 import (
 	"context"
@@ -41,7 +41,7 @@ func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort uint16, upn
 	}
 }
 
-func UPnPPortForward2(ctx context.Context, id string, port uint16) (iter.Seq[netip.AddrPort], error) {
+func UPnPPortForward(ctx context.Context, id string, port uint16) (iter.Seq[netip.AddrPort], error) {
 	id = langx.FirstNonZero(id, errorsx.Must(uuid.NewV7()).String())
 	return func(yield func(netip.AddrPort) bool) {
 		ds := upnp.Discover(ctx, 0, 2*time.Second)

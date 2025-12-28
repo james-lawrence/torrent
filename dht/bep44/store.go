@@ -63,3 +63,7 @@ func (w *Wrapper) Get(t Target) (*Item, error) {
 
 	return nil, ErrItemNotFound
 }
+
+func (w *Wrapper) Del(t Target) error {
+	return w.s.Del(t)
+}

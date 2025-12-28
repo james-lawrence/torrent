@@ -53,15 +53,48 @@ type Server struct {
 	transactions transactions.Dispatcher[*transaction]
 	table        *table
 	closed       chan struct{}
-	ipBlockList  iplist.Ranger
 	tokenServer  tokenServer // Manages tokens we issue to our queriers.
-	config       ServerConfig
-	stats        ServerStats
-	announceto   []PeerAnnounce
+	// config       ServerConfig
+	stats      ServerStats
+	announceto []PeerAnnounce
 
 	lastBootstrap    time.Time
 	bootstrappingNow bool
-	store            *bep44.Wrapper
+
+	resolvepublicaddr PublicAddrPort
+	// Hook received queries. Return false if you don't want to propagate to the default handlers.
+	hookQuery HookQuery
+	// Called when a peer successfully announces to us.
+	hookAnnouncePeer PeerAnnounce
+	// How long to wait before resending queries that haven't received a response. Defaults to 2s.
+	// After the last send, a query is aborted after this time.
+	queryResendDelay func() time.Duration
+	defaultWant      []krpc.Want
+
+	// Don't respond to queries from other nodes.
+	passive bool
+
+	// used when there are no good nodes to use in the routing table. This might be called any
+	// time when there are no nodes, including during bootstrap if one is performed. Typically it
+	// returns the resolve addresses of bootstrap or "router" nodes that are designed to kick-start
+	// a routing table.
+	bootstrap []StartingNodesGetter
+
+	// Initial IP blocklist to use. Applied before serving and bootstrapping
+	// begins.
+	blocklist iplist.Ranger
+	// TODO: Expose Peers, to return NodeInfo for received get_peers queries.
+	peers peer_store.Interface
+	// BEP-44: Storing arbitrary data in the DHT.
+	store bep44.Store
+
+	// If no Logger is provided, log.Default is used and log.Debug messages are filtered out. Note
+	// that all messages without a log.Level, have log.Debug added to them before being passed to
+	// this Logger.
+	Logger      *log.Logger
+	sendLimiter *rate.Limiter
+
+	mux Muxer
 }
 
 func (s *Server) numGoodNodes() (num int) {
@@ -173,33 +206,32 @@ func (s *Server) AddrPort() netip.AddrPort {
 }
 
 // NewServer initializes a new DHT node server.
-func NewServer(c *ServerConfig) (s *Server, err error) {
-	c = ensureDefaultServerConfig(c)
-	var (
-		announcers []PeerAnnounce
-	)
-
-	if c.OnAnnouncePeer != nil {
-		announcers = append(announcers, c.OnAnnouncePeer)
-	}
-
-	s = &Server{
-		id:          atomicx.Pointer(int160.Random()),
-		config:      *c,
-		ipBlockList: c.IPBlocklist,
+func NewServer(k int, options ...Option) (s *Server, err error) {
+	s = langx.Autoptr(langx.Clone(Server{
+		id:        atomicx.Pointer(int160.Random()),
+		blocklist: iplist.Zero(),
 		tokenServer: tokenServer{
 			maxIntervalDelta: 2,
 			interval:         5 * time.Minute,
 			secret:           make([]byte, 20),
 		},
-		table:       newTable(c.BucketLimit),
-		store:       bep44.NewWrapper(c.Store, c.Exp),
-		closed:      make(chan struct{}),
-		dynamicaddr: atomicx.Pointer(netip.AddrPortFrom(netip.IPv6Unspecified(), 0)),
-		announceto:  announcers,
-	}
+		table:             newTable(k),
+		store:             bep44.NewWrapper(bep44.NewMemory(), 2*time.Hour),
+		closed:            make(chan struct{}),
+		dynamicaddr:       atomicx.Pointer(netip.AddrPortFrom(netip.IPv6Unspecified(), 0)),
+		resolvepublicaddr: PublicAddrPortFromPacketConn,
+		sendLimiter:       DefaultSendLimiter,
+		mux:               DefaultMuxer(),
+		queryResendDelay:  defaultQueryResendDelay,
+		defaultWant:       []krpc.Want{krpc.WantNodes, krpc.WantNodes6},
+		Logger:            log.Default(),
+		hookQuery:         func(query *krpc.Msg, source net.Addr) (propagate bool) { return true },
+		hookAnnouncePeer:  PeerAnnounceFn(func(peerid int160.T, ip net.IP, port uint16, portOk bool) {}),
+	}, options...))
 
-	_, _ = rand.Read(s.tokenServer.secret)
+	if _, err = rand.Read(s.tokenServer.secret); err != nil {
+		return nil, err
+	}
 
 	return s, nil
 }
@@ -212,16 +244,15 @@ func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
 
 		SecureNodeId(&upd, detected.Addr().AsSlice())
 
-		log.Println("updated", fixed, "->", upd, detected.Addr(), detected.Addr().AsSlice())
+		log.Println("updated", fixed, "->", upd, detected.Addr())
 
-		latest := int160.New(upd[:])
+		latest := int160.FromByteArray(upd)
 		old := langx.Zero(s.id.Swap(&latest))
 		if latest.Cmp(old) == 0 {
 			return
 		}
 
 		log.Println("peer id changed", old, "->", latest)
-		// s.id.Store(langx.Autoptr(fixed))
 		s.dynamicaddr.Store(&detected)
 	}
 
@@ -242,8 +273,11 @@ func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
 		return errorsx.Wrap(err, "failed to close old dht socket")
 	}
 
+	// static value to use as our base.
+	fixed := langx.Zero(s.id.Load())
+
 	dctx, done := context.WithCancelCause(context.Background())
-	seq, err := s.config.PublicAddrPort(dctx, langx.Zero(s.id.Load()), pc)
+	seq, err := s.resolvepublicaddr(dctx, fixed, pc)
 	if err != nil {
 		done(nil)
 		return err
@@ -251,15 +285,12 @@ func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
 
 	// resolve the public ip before attempting to move forward.
 	for detected := range seq {
-		updateaddr(langx.Zero(s.id.Load()), detected)
+		updateaddr(fixed, detected)
 		break
 	}
 
 	go func() {
 		defer log.Println("dht dynamic address completed")
-		// static value to use as our base.
-		fixed := langx.Zero(s.id.Load())
-
 		for detected := range seq {
 			updateaddr(fixed, detected)
 		}
@@ -321,11 +352,11 @@ func (s *Server) String() string {
 func (s *Server) SetIPBlockList(list iplist.Ranger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ipBlockList = list
+	s.blocklist = list
 }
 
 func (s *Server) IPBlocklist() iplist.Ranger {
-	return s.ipBlockList
+	return s.blocklist
 }
 
 func (s *Server) processPacket(ctx context.Context, b []byte, addr Addr) {
@@ -437,11 +468,8 @@ func (s *Server) serve(socket net.PacketConn) error {
 }
 
 func (s *Server) ipBlocked(ip net.IP) (blocked bool) {
-	if s.ipBlockList == nil {
-		return
-	}
-	_, blocked = s.ipBlockList.Lookup(ip)
-	return
+	_, blocked = s.blocklist.Lookup(ip)
+	return blocked
 }
 
 // Adds directly to the node table.
@@ -546,14 +574,12 @@ func (s *Server) handleQuery(ctx context.Context, source Addr, raw []byte, m krp
 		n.numReceivesFrom++
 	})
 
-	if s.config.OnQuery != nil {
-		propagate := s.config.OnQuery(&m, source.Raw())
-		if !propagate {
-			return
-		}
+	propagate := s.hookQuery(&m, source.Raw())
+	if !propagate {
+		return
 	}
 
-	if pattern, fn = s.config.mux.Handler(raw, &m); fn == nil {
+	if pattern, fn = s.mux.Handler(raw, &m); fn == nil {
 		log.Println("unable to locate a handler for", pattern)
 		return
 	}
@@ -723,11 +749,10 @@ func (s *Server) SendToNode(ctx context.Context, b []byte, node Addr, maximum in
 			err = errors.New("server is closed")
 			return
 		}
-		if list := s.ipBlockList; list != nil {
-			if r, ok := list.Lookup(node.IP()); ok {
-				err = fmt.Errorf("write to %v blocked by %v", node, r)
-				return
-			}
+
+		if r, ok := s.blocklist.Lookup(node.IP()); ok {
+			err = fmt.Errorf("write to %v blocked by %v", node, r)
+			return
 		}
 	}()
 
@@ -735,7 +760,7 @@ func (s *Server) SendToNode(ctx context.Context, b []byte, node Addr, maximum in
 		return false, err
 	}
 
-	n, err := repeatsend(ctx, s.socket, node.Raw(), b, s.config.QueryResendDelay(), maximum)
+	n, err := repeatsend(ctx, s.socket, node.Raw(), b, s.queryResendDelay(), maximum)
 	if err != nil {
 		return false, err
 	}
@@ -962,7 +987,7 @@ func (s *Server) announcePeer(
 // Sends a find_node query to addr. targetID is the node we're looking for. The Server makes use of
 // some of the response fields.
 func (s *Server) FindNode(ctx context.Context, addr Addr, targetID int160.T, rl QueryRateLimiting) (ret QueryResult) {
-	return FindNode(ctx, s, addr, s.ID().AsByteArray(), targetID, s.config.DefaultWant)
+	return FindNode(ctx, s, addr, s.ID().AsByteArray(), targetID, s.defaultWant)
 }
 
 // Returns how many nodes are in the node table.
@@ -1078,7 +1103,7 @@ func (s *Server) TraversalStartingNodes() (nodes []addrMaybeId, err error) {
 		return
 	}
 
-	for _, fn := range s.config.bootstrap {
+	for _, fn := range s.bootstrap {
 		// There seems to be floods on this call on occasion, which may cause a barrage of DNS
 		// resolution attempts. This would require that we're unable to get replies because we can't
 		// resolve, transmit or receive on the network. Nodes currently don't get expired from the
@@ -1116,14 +1141,11 @@ func (s *Server) AddNodesFromFile(fileName string) (added int, err error) {
 }
 
 func (s *Server) logger() *log.Logger {
-	if s.config.Logger == nil {
-		panic("missing logger")
-	}
-	return s.config.Logger
+	return s.Logger
 }
 
 func (s *Server) PeerStore() peer_store.Interface {
-	return s.config.PeerStore
+	return s.peers
 }
 
 func (s *Server) shouldStopRefreshingBucket(bucketIndex int) bool {

@@ -82,7 +82,7 @@ func (t HandlerPeers) Handle(ctx context.Context, src Addr, srv *Server, raw []b
 		return srv.sendError(ctx, src, msg.T, krpcErrMissingArguments)
 	}
 
-	if ps := srv.config.PeerStore; ps != nil {
+	if ps := srv.peers; ps != nil {
 		r.Values = filterPeers(src.IP(), msg.A.Want, ps.GetPeers(peer_store.InfoHash(msg.A.InfoHash)))
 		r.Token = langx.Autoptr(srv.createToken(src))
 	}
@@ -119,7 +119,7 @@ func (t HandlerAnnounce) Handle(ctx context.Context, source Addr, s *Server, raw
 		go h.Announced(int160.FromByteArray(m.A.InfoHash), source.IP(), port, portOk)
 	}
 
-	if ps := s.config.PeerStore; ps != nil {
+	if ps := s.peers; ps != nil {
 		go ps.AddPeer(
 			peer_store.InfoHash(m.A.InfoHash),
 			krpc.NewNodeAddrFromIPPort(source.IP(), port),

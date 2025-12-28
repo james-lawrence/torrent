@@ -21,7 +21,7 @@ func Autosocket(t *testing.T) torrent.Binder {
 	var (
 		bindings []sockets.Socket
 	)
-	_dht, err := dht.NewServer(nil)
+	_dht, err := dht.NewServer(32)
 	require.NoError(t, err)
 
 	s, err := utpx.New("udp4", "localhost:")
@@ -46,9 +46,7 @@ func QuickClient(t testing.TB, options ...torrent.ClientConfigOption) *torrent.C
 
 func Client(t testing.TB, mdcache torrent.MetadataStore, scache storage.ClientImpl, options ...torrent.ClientConfigOption) *torrent.Client {
 	cdir := t.TempDir()
-	dht, err := dht.NewServer(&dht.ServerConfig{
-		BucketLimit: 32,
-	})
+	dht, err := dht.NewServer(32)
 	require.NoError(t, err)
 
 	return testx.Must(autobind.NewLoopback(autobind.EnableDHT(dht)).Bind(
@@ -58,7 +56,6 @@ func Client(t testing.TB, mdcache torrent.MetadataStore, scache storage.ClientIm
 				scache,
 				torrent.ClientConfigCacheDirectory(cdir),
 				// torrent.ClientConfigPeerID(krpc.RandomID().String()),
-				// torrent.ClientConfigBucketLimit(32),
 				torrent.ClientConfigSeed(true),
 				torrent.ClientConfigInfoLogger(log.New(log.Writer(), "[torrent] ", log.Flags())),
 				torrent.ClientConfigDebugLogger(log.New(log.Writer(), "[torrent] ", log.Flags())),

@@ -13,7 +13,7 @@ import (
 )
 
 func TestAnnounceNoStartingNodes(t *testing.T) {
-	s, err := NewServer(&ServerConfig{})
+	s, err := NewServer(32)
 	require.NoError(t, err)
 	backgroundServe(t, s, mustListen(":0"))
 	defer s.Close()
@@ -23,11 +23,10 @@ func TestAnnounceNoStartingNodes(t *testing.T) {
 }
 
 func TestAnnounceStopsNoPending(t *testing.T) {
-	s, err := NewServer(&ServerConfig{
-		bootstrap: []StartingNodesGetter{func() ([]Addr, error) {
-			return []Addr{NewAddr(&net.TCPAddr{})}, nil
-		}},
-	})
+	s, err := NewServer(
+		32,
+		OptionBootstrapFixedAddrs(NewAddr(&net.TCPAddr{})),
+	)
 	backgroundServe(t, s, mustListen(":0"))
 
 	require.NoError(t, err)

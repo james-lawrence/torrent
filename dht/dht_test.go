@@ -2,12 +2,8 @@ package dht
 
 import (
 	"context"
-	"errors"
-	"io"
-	"log"
 	"math/big"
 	"net"
-	"sync"
 	"testing"
 	"time"
 
@@ -68,14 +64,14 @@ func TestMaxDistanceString(t *testing.T) {
 }
 
 func TestDHTDefaultConfig(t *testing.T) {
-	s, err := NewServer(nil)
+	s, err := NewServer(32)
 	assert.NoError(t, err)
 	s.Close()
 }
 
 func TestPing(t *testing.T) {
 	recvConn := mustListen("127.0.0.1:0")
-	srv, err := NewServer(&ServerConfig{})
+	srv, err := NewServer(32)
 	require.NoError(t, err)
 	backgroundServe(t, srv, recvConn)
 	srvUdpAddr := func(s *Server) *net.UDPAddr {
@@ -86,9 +82,10 @@ func TestPing(t *testing.T) {
 	}
 	defer srv.Close()
 
-	srv0, err := NewServer(&ServerConfig{
-		bootstrap: []StartingNodesGetter{addrResolver(srvUdpAddr(srv).String())},
-	})
+	srv0, err := NewServer(
+		32,
+		OptionBootstrapNodesFn(addrResolver(srvUdpAddr(srv).String())),
+	)
 	require.NoError(t, err)
 	backgroundServe(t, srv0, mustListen("127.0.0.1:0"))
 	defer srv0.Close()
@@ -97,30 +94,33 @@ func TestPing(t *testing.T) {
 	require.EqualValues(t, srv0.ID(), res.Reply.SenderID().Int160())
 }
 
-// no longer supported.
-// func TestServerCustomNodeId(t *testing.T) {
-// 	idHex := "5a3ce1c14e7a08645677bbd1cfe7d8f956d53256"
-// 	id, err := int160.FromHexEncodedString(idHex)
-// 	require.NoError(t, err)
-// 	// How to test custom *secure* ID when tester computers will have
-// 	// different IDs? Generate custom ids for local IPs and use mini-ID?
-// 	s, err := NewServer(nil)
-// 	require.NoError(t, err)
-// 	backgroundServe(t, s, mustListen(":0"))
-// 	defer s.Close()
-// 	assert.Equal(t, id, s.ID(), s.ID().String())
-// }
+func TestServerCustomNodeId(t *testing.T) {
+	idHex := "5a3ce1c14e7a08645677bbd1cfe7d8f956d53256"
+	id, err := int160.FromHexEncodedString(idHex)
+	require.NoError(t, err)
+	// How to test custom *secure* ID when tester computers will have
+	// different IDs? Generate custom ids for local IPs and use mini-ID?
+	s, err := NewServer(
+		32,
+		OptionNodeID(id),
+	)
+	require.NoError(t, err)
+	require.Equal(t, id, s.ID(), s.ID().String())
+	backgroundServe(t, s, mustListen(":0"))
+	defer s.Close()
+
+	assert.Equal(t, id.Prefix([]byte{0x0, 0x0, 0x0}), s.ID().Prefix([]byte{0x0, 0x0, 0x0}), s.ID().String())
+}
 
 func TestAnnounceTimeout(t *testing.T) {
 	ctx, done0 := testx.Context(t)
 	defer done0()
 
-	s, err := NewServer(&ServerConfig{
-		bootstrap: []StartingNodesGetter{addrResolver("1.2.3.4:5")},
-		QueryResendDelay: func() time.Duration {
-			return 0
-		},
-	})
+	s, err := NewServer(
+		32,
+		OptionBootstrapNodesFn(addrResolver("1.2.3.4:5")),
+		OptionQueryResendDelay(0),
+	)
 	require.NoError(t, err)
 	backgroundServe(t, s, mustListen(":0"))
 
@@ -140,15 +140,18 @@ func TestEqualPointers(t *testing.T) {
 func TestHook(t *testing.T) {
 	rconn := mustListen("127.0.0.1:0")
 	pconn := mustListen("127.0.0.1:0")
-	pinger, err := NewServer(&ServerConfig{})
+	pinger, err := NewServer(32)
 	require.NoError(t, err)
 	backgroundServe(t, pinger, pconn)
 	defer pinger.Close()
 	// Establish server with a hook attached to "ping"
 	hookCalled := make(chan struct{}, 1)
-	receiver, err := NewServer(&ServerConfig{
-		bootstrap: []StartingNodesGetter{addrResolver(pconn.LocalAddr().String())},
-		OnQuery: func(m *krpc.Msg, addr net.Addr) bool {
+	receiver, err := NewServer(
+		32,
+		OptionBootstrapFixedAddrs(
+			NewAddr(pconn.LocalAddr().(*net.UDPAddr)),
+		),
+		OptionOnQuery(func(m *krpc.Msg, addr net.Addr) bool {
 			t.Logf("receiver got msg: %v", m)
 			if m.Q == "ping" {
 				select {
@@ -157,8 +160,8 @@ func TestHook(t *testing.T) {
 				}
 			}
 			return true
-		},
-	})
+		}),
+	)
 	require.NoError(t, err)
 	backgroundServe(t, receiver, rconn)
 	defer receiver.Close()
@@ -205,11 +208,12 @@ func TestBadGetPeersResponse(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "localhost:0")
 	require.NoError(t, err)
 	defer pc.Close()
-	s, err := NewServer(&ServerConfig{
-		bootstrap: []StartingNodesGetter{func() ([]Addr, error) {
-			return []Addr{NewAddr(pc.LocalAddr().(*net.UDPAddr))}, nil
-		}},
-	})
+	s, err := NewServer(
+		32,
+		OptionBootstrapFixedAddrs(
+			NewAddr(pc.LocalAddr().(*net.UDPAddr)),
+		),
+	)
 	require.NoError(t, err)
 	backgroundServe(t, s, mustListen("localhost:0"))
 	defer s.Close()
@@ -218,14 +222,15 @@ func TestBadGetPeersResponse(t *testing.T) {
 		n, addr, err := pc.ReadFrom(b)
 		require.NoError(t, err)
 		var rm krpc.Msg
-		bencode.Unmarshal(b[:n], &rm)
+		require.NoError(t, bencode.Unmarshal(b[:n], &rm))
 		m := krpc.Msg{
 			R: &krpc.Return{},
 			T: rm.T,
 		}
 		b, err = bencode.Marshal(m)
 		require.NoError(t, err)
-		pc.WriteTo(b, addr)
+		_, err = pc.WriteTo(b, addr)
+		require.NoError(t, err)
 	}()
 	a, err := s.AnnounceTraversal(ctx, int160.Zero(), AnnouncePeer(true, 0))
 	require.NoError(t, err)
@@ -277,55 +282,55 @@ func TestBadGetPeersResponse(t *testing.T) {
 // 	require.NoError(t, err)
 // }
 
-type emptyNetAddr struct{}
+// type emptyNetAddr struct{}
 
-func (emptyNetAddr) Network() string { return "" }
-func (emptyNetAddr) String() string  { return "" }
+// func (emptyNetAddr) Network() string { return "" }
+// func (emptyNetAddr) String() string  { return "" }
 
-type read struct {
-	b    []byte
-	addr net.Addr
-}
+// type read struct {
+// 	b    []byte
+// 	addr net.Addr
+// }
 
-type bootstrapRacePacketConn struct {
-	mu       sync.Mutex
-	writes   int
-	maxWrite int
-	read     chan read
-}
+// type bootstrapRacePacketConn struct {
+// 	mu       sync.Mutex
+// 	writes   int
+// 	maxWrite int
+// 	read     chan read
+// }
 
-func (me *bootstrapRacePacketConn) Close() error {
-	close(me.read)
-	return nil
-}
-func (me *bootstrapRacePacketConn) LocalAddr() net.Addr { return emptyNetAddr{} }
-func (me *bootstrapRacePacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
-	r, ok := <-me.read
-	if !ok {
-		return 0, nil, io.EOF
-	}
-	copy(b, r.b)
-	log.Printf("reading %q from %s", r.b, r.addr)
-	return len(r.b), r.addr, nil
-}
-func (me *bootstrapRacePacketConn) SetDeadline(time.Time) error      { return nil }
-func (me *bootstrapRacePacketConn) SetReadDeadline(time.Time) error  { return nil }
-func (me *bootstrapRacePacketConn) SetWriteDeadline(time.Time) error { return nil }
+// func (me *bootstrapRacePacketConn) Close() error {
+// 	close(me.read)
+// 	return nil
+// }
+// func (me *bootstrapRacePacketConn) LocalAddr() net.Addr { return emptyNetAddr{} }
+// func (me *bootstrapRacePacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
+// 	r, ok := <-me.read
+// 	if !ok {
+// 		return 0, nil, io.EOF
+// 	}
+// 	copy(b, r.b)
+// 	log.Printf("reading %q from %s", r.b, r.addr)
+// 	return len(r.b), r.addr, nil
+// }
+// func (me *bootstrapRacePacketConn) SetDeadline(time.Time) error      { return nil }
+// func (me *bootstrapRacePacketConn) SetReadDeadline(time.Time) error  { return nil }
+// func (me *bootstrapRacePacketConn) SetWriteDeadline(time.Time) error { return nil }
 
-func (me *bootstrapRacePacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-	me.mu.Lock()
-	defer me.mu.Unlock()
-	me.writes++
-	if me.writes == me.maxWrite {
-		var m krpc.Msg
-		bencode.Unmarshal(b[:], &m)
-		m.Y = "r"
-		rb, err := bencode.Marshal(m)
-		if err != nil {
-			panic(err)
-		}
-		me.read <- read{rb, addr}
-		return 0, errors.New("write error")
-	}
-	return len(b), nil
-}
+// func (me *bootstrapRacePacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
+// 	me.mu.Lock()
+// 	defer me.mu.Unlock()
+// 	me.writes++
+// 	if me.writes == me.maxWrite {
+// 		var m krpc.Msg
+// 		bencode.Unmarshal(b[:], &m)
+// 		m.Y = "r"
+// 		rb, err := bencode.Marshal(m)
+// 		if err != nil {
+// 			panic(err)
+// 		}
+// 		me.read <- read{rb, addr}
+// 		return 0, errors.New("write error")
+// 	}
+// 	return len(b), nil
+// }
