@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -202,7 +203,7 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 		closed:   make(chan struct{}),
 		torrents: NewCache(cfg.defaultMetadata, NewBitmapCache(cfg.defaultCacheDirectory)),
 		_mu:      &sync.RWMutex{},
-		dialing:  netx.NewRacing(cfg.dialPoolSize), // four concurrent dials per cpu seems a reasonable starting point.
+		dialing:  netx.NewRacing(cfg.dialPoolSize),
 	}
 
 	defer func() {
@@ -433,19 +434,23 @@ func (cl *Client) establishOutgoingConn(ctx context.Context, t *torrent, addr ne
 		}
 	}()
 
-	obfuscatedHeaderFirst := cl.config.HeaderObfuscationPolicy.Preferred
-	if c, err = cl.establishOutgoingConnEx(ctx, t, addr, obfuscatedHeaderFirst); err == nil {
-		return c, nil
-	}
+	// obfuscatedHeaderFirst := cl.config.HeaderObfuscationPolicy.Preferred
+	// if c, err = cl.establishOutgoingConnEx(ctx, t, addr, obfuscatedHeaderFirst); err == nil {
+	// 	return c, nil
+	// }
 
-	if cl.config.HeaderObfuscationPolicy.RequirePreferred {
-		// We should have just tried with the preferred header obfuscation. If it was required,
-		// there's nothing else to try.
-		return c, err
-	}
+	// if cl.config.HeaderObfuscationPolicy.RequirePreferred {
+	// 	// We should have just tried with the preferred header obfuscation. If it was required,
+	// 	// there's nothing else to try.
+	// 	return c, err
+	// }
 
+	// // Try again with encryption if we didn't earlier, or without if we did.
+	// if c, err = cl.establishOutgoingConnEx(ctx, t, addr, !obfuscatedHeaderFirst); err != nil {
+	// 	return c, err
+	// }
 	// Try again with encryption if we didn't earlier, or without if we did.
-	if c, err = cl.establishOutgoingConnEx(ctx, t, addr, !obfuscatedHeaderFirst); err != nil {
+	if c, err = cl.establishOutgoingConnEx(ctx, t, addr, false); err != nil {
 		return c, err
 	}
 
@@ -466,13 +471,13 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (e
 	}()
 
 	if c, err = cl.establishOutgoingConn(ctx, t, p.AddrPort); err != nil {
-		t.peers.Attempted(p, ConnStats{})
-		return errorsx.Wrapf(err, "error establishing connection to %v", p.AddrPort)
+		log.Println("returning failed", err)
+		t.peers.Attempted(p, p.Attempts+1)
+		return errorsx.Wrapf(err, "returning error establishing connection to %v", p.AddrPort)
 	}
 
-	defer func() {
-		t.peers.Attempted(p, c.stats)
-	}()
+	log.Println("returning successful conn", spew.Sdump(c.stats))
+	t.peers.Attempted(p, 0)
 
 	c.Discovery = ps
 	c.trusted = trusted

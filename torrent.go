@@ -1136,15 +1136,18 @@ func (t *torrent) openNewConns() {
 	for {
 		if !t.wantConns() {
 			t.cln.config.debug().Println("openNewConns: connections not wanted")
+			// log.Println("openNewConns: connections not wanted")
 			return
 		}
 
 		if popped, ok = t.peers.PopMax(); !ok {
 			t.cln.config.debug().Println("openNewConns: no peers")
+			// log.Println("openNewConns: no peers")
 			return
 		}
 
 		t.cln.config.debug().Printf("%p initiating connection to peer %s\n", t, popped.p.AddrPort)
+		// log.Printf("%p initiating connection to peer %s\n", t, popped.p.AddrPort)
 		t.initiateConn(context.Background(), popped.p)
 	}
 }
@@ -1226,7 +1229,11 @@ func (t *torrent) assertNoPendingRequests() {
 	}
 }
 
-func (t *torrent) wantPeers() bool {
+func (t *torrent) wantPeers() (b bool) {
+	defer log.Println("returning want peers 0")
+	defer func() {
+		log.Println("returning want peers 1", b)
+	}()
 	select {
 	case <-t.closed:
 		return false
@@ -1492,7 +1499,7 @@ func (t *torrent) wantConns() bool {
 		return false
 	}
 
-	if _, half := t.peers.Stats(); half >= t.cln.config.HalfOpenConnsPerTorrent {
+	if _, half := t.peers.Stats(); half >= t.cln.config.halfOpenConnsPerTorrent {
 		return false
 	}
 
@@ -1549,7 +1556,7 @@ func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
 }
 
 func (t *torrent) dialTimeout() time.Duration {
-	return reducedDialTimeout(t.cln.config.MinDialTimeout, t.cln.config.NominalDialTimeout, t.cln.config.HalfOpenConnsPerTorrent, t.peers.Len())
+	return reducedDialTimeout(t.cln.config.MinDialTimeout, t.cln.config.NominalDialTimeout, t.cln.config.halfOpenConnsPerTorrent, t.peers.Len())
 }
 
 func (t *torrent) piece(i int) *metainfo.Piece {

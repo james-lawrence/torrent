@@ -9,9 +9,9 @@ import (
 
 func NewAnnouncePeerRequest(from krpc.ID, id krpc.ID, port uint16, token string, impliedPort bool) (qi QueryInput, err error) {
 	if port == 0 && !impliedPort {
-		err = errors.New("no port specified")
-		return
+		return qi, errors.New("no port specified")
 	}
+
 	return NewMessageRequest(
 		"announce_peer",
 		&krpc.MsgArgs{

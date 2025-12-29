@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -41,8 +42,9 @@ func NewPeerDeprecated(id int160.T, ip net.IP, port uint16, options ...PeerOptio
 
 func NewPeer(id int160.T, addr netip.AddrPort, options ...PeerOption) Peer {
 	return langx.Clone(Peer{
-		ID:       id,
-		AddrPort: addr,
+		ID:          id,
+		AddrPort:    addr,
+		LastAttempt: time.Now(),
 	}, options...)
 }
 
@@ -75,7 +77,8 @@ type Peer struct {
 	ID int160.T
 	netip.AddrPort
 	btprotocol.PexPeerFlags
-	Attempts           uint
+	LastAttempt        time.Time
+	Attempts           uint64
 	Source             peerSource
 	SupportsEncryption bool // Peer is known to support encryption.
 	Trusted            bool // Whether we can ignore poor or bad behaviour from the peer.

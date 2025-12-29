@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -859,9 +860,9 @@ type QueryInput struct {
 // may make use of the response internally before passing it back to the caller.
 func (s *Server) Query(ctx context.Context, addr Addr, input QueryInput) (ret QueryResult) {
 	defer func(started time.Time) {
-		s.logger().Printf(
-			"Query(%v) returned after %v (err=%v, reply.Y=%v, reply.E=%v, writes=%v) encoded=%s",
-			input.Method, time.Since(started), ret.Err, ret.Reply.Y, ret.Reply.E, ret.Writes, string(input.Encoded))
+		log.Printf(
+			"Query(%v) returned after %v (err=%v, reply.Y=%v, reply.E=%v, writes=%v) encoded=%s\n",
+			input.Method, time.Since(started), ret.Err, ret.Reply.Y, ret.Reply.E, ret.Writes, base64.URLEncoding.EncodeToString(input.Encoded))
 	}(time.Now())
 
 	replyChan := make(chan *QueryResult, 1)

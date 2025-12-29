@@ -94,7 +94,7 @@ type ClientConfig struct {
 	NominalDialTimeout time.Duration
 	// Minimum peer dial timeout to use (even if we have lots of peers).
 	MinDialTimeout          time.Duration
-	HalfOpenConnsPerTorrent int
+	halfOpenConnsPerTorrent int
 
 	// Maximum number of peer addresses in reserve.
 	TorrentPeersHighWater int
@@ -314,6 +314,14 @@ func ClientConfigPeerLimits[T constraints.Integer](low, high T) ClientConfigOpti
 	}
 }
 
+// specify the limit to the number of peers a torrent will attempt to connect to concurrently.
+func ClientConfigMaxConnecting[T constraints.Integer](connecting T) ClientConfigOption {
+	return func(cc *ClientConfig) {
+		cc.halfOpenConnsPerTorrent = int(connecting)
+		log.Println("returning setting Maximum number of half open", connecting)
+	}
+}
+
 // specify the global capacity for uploading pieces to peers.
 func ClientConfigUploadLimit(l *rate.Limiter) ClientConfigOption {
 	return func(cc *ClientConfig) {
@@ -363,7 +371,7 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		maximumOutstandingRequests:     2048,
 		NominalDialTimeout:             16 * time.Second,
 		MinDialTimeout:                 4 * time.Second,
-		HalfOpenConnsPerTorrent:        8,
+		halfOpenConnsPerTorrent:        64,
 		TorrentPeersHighWater:          64,
 		TorrentPeersLowWater:           16,
 		handshakesTimeout:              4 * time.Second,
