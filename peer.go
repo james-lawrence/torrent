@@ -75,6 +75,7 @@ type Peer struct {
 	ID int160.T
 	netip.AddrPort
 	btprotocol.PexPeerFlags
+	Attempts           uint
 	Source             peerSource
 	SupportsEncryption bool // Peer is known to support encryption.
 	Trusted            bool // Whether we can ignore poor or bad behaviour from the peer.

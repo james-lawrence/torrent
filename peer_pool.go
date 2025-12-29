@@ -1,11 +1,13 @@
 package torrent
 
 import (
+	"log"
 	"net/netip"
 	"sync"
 	"time"
 
 	"github.com/anacrolix/multiless"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/google/btree"
 	"github.com/james-lawrence/torrent/internal/fnvx"
 )
@@ -32,7 +34,7 @@ func priorityPeerCmp(a, b prioritizedPeer) bool {
 func newPeerPool(n int, prio func(Peer) peerPriority) peerPool {
 	return peerPool{
 		m:         &sync.RWMutex{},
-		om:        btree.NewG(n, priorityPeerCmp),
+		available: btree.NewG(n, priorityPeerCmp),
 		attempted: btree.NewG(n, priorityPeerCmp),
 		loaned:    make(map[netip.AddrPort]Peer, 32),
 		getPrio:   prio,
@@ -42,7 +44,7 @@ func newPeerPool(n int, prio func(Peer) peerPriority) peerPool {
 
 type peerPool struct {
 	m         *sync.RWMutex
-	om        *btree.BTreeG[prioritizedPeer]
+	available *btree.BTreeG[prioritizedPeer]
 	attempted *btree.BTreeG[prioritizedPeer]
 	loaned    map[netip.AddrPort]Peer
 	getPrio   func(Peer) peerPriority
@@ -57,7 +59,7 @@ func (t *peerPool) Each(f func(Peer)) {
 	t.m.RLock()
 	defer t.m.RUnlock()
 
-	t.om.Ascend(func(item prioritizedPeer) bool {
+	t.available.Ascend(func(item prioritizedPeer) bool {
 		f(item.p)
 		return true
 	})
@@ -75,13 +77,13 @@ func (t *peerPool) Each(f func(Peer)) {
 func (t *peerPool) Stats() (pending, connecting int) {
 	t.m.RLock()
 	defer t.m.RUnlock()
-	return t.om.Len(), len(t.loaned)
+	return t.available.Len(), len(t.loaned)
 }
 
 func (t *peerPool) Len() int {
 	t.m.RLock()
 	defer t.m.RUnlock()
-	return t.om.Len()
+	return t.available.Len()
 }
 
 func (t *peerPool) Connecting(p Peer) bool {
@@ -92,10 +94,12 @@ func (t *peerPool) Connecting(p Peer) bool {
 }
 
 // Peer is returned to the pool
-func (t *peerPool) Attempted(p Peer) {
+func (t *peerPool) Attempted(p Peer, c ConnStats) {
 	t.m.Lock()
 	defer t.m.Unlock()
 
+	p.Attempts += 1
+	log.Println("returning", p.ID, p.AddrPort, p.Attempts, spew.Sdump(c))
 	delete(t.loaned, p.AddrPort)
 
 	t.attempted.ReplaceOrInsert(t.prioritized(p))
@@ -119,7 +123,7 @@ func (t *peerPool) Add(p Peer) bool {
 	// 	return replaced
 	// }
 
-	if _, replaced := t.om.ReplaceOrInsert(prio); replaced {
+	if _, replaced := t.available.ReplaceOrInsert(prio); replaced {
 		return replaced
 	}
 
@@ -130,14 +134,14 @@ func (t *peerPool) DeleteMin() (ret prioritizedPeer, ok bool) {
 	t.m.Lock()
 	defer t.m.Unlock()
 
-	return t.om.DeleteMin()
+	return t.available.DeleteMin()
 }
 
 func (t *peerPool) PopMax() (p prioritizedPeer, ok bool) {
 	t.m.Lock()
 	defer t.m.Unlock()
 
-	if max, present := t.om.DeleteMax(); present {
+	if max, present := t.available.DeleteMax(); present {
 		return max, present
 	}
 
@@ -147,8 +151,8 @@ func (t *peerPool) PopMax() (p prioritizedPeer, ok bool) {
 		t.nextswap = ts.Add(time.Minute)
 	}
 
-	t.om = t.attempted.Clone()
+	t.available = t.attempted.Clone()
 	t.attempted.Clear(true)
 
-	return t.om.DeleteMax()
+	return t.available.DeleteMax()
 }

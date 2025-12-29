@@ -466,11 +466,13 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (e
 	}()
 
 	if c, err = cl.establishOutgoingConn(ctx, t, p.AddrPort); err != nil {
-		t.peers.Attempted(p)
+		t.peers.Attempted(p, ConnStats{})
 		return errorsx.Wrapf(err, "error establishing connection to %v", p.AddrPort)
 	}
 
-	t.peers.Attempted(p)
+	defer func() {
+		t.peers.Attempted(p, c.stats)
+	}()
 
 	c.Discovery = ps
 	c.trusted = trusted
