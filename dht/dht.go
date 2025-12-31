@@ -81,7 +81,7 @@ func OptionUPnP(sc *Server) {
 			return nil, err
 		}
 
-		return UPnPPortForward(ctx, id.String(), addr.Port(), time.Hour)
+		return UPnPPortForward(ctx, id.String(), addr.Port())
 	}
 }
 
