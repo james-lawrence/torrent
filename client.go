@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -486,7 +485,6 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (e
 		return cause
 	}
 
-	log.Println("conn", spew.Sdump(c.stats))
 	t.peers.Attempted(p, 0)
 	defer t.deleteConnection(c)
 

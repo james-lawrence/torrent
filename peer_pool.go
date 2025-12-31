@@ -115,6 +115,11 @@ func (t *peerPool) Attempted(p Peer, attempts uint64) {
 	p.Attempts = attempts
 	delete(t.loaned, p.AddrPort)
 
+	if attempts == 0 {
+		t.available.ReplaceOrInsert(t.prioritized(p))
+		return
+	}
+
 	t.attempted.ReplaceOrInsert(t.prioritized(p))
 }
 
