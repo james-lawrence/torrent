@@ -524,7 +524,7 @@ func (cl *Client) initiateHandshakes(c *connection, t *torrent) (err error) {
 		}.Outgoing(rw, t.md.ID.Bytes(), cl.config.CryptoProvides)
 
 		if err != nil {
-			return errorsx.Wrap(err, "encryption handshake failed")
+			return errorsx.Wrapf(err, "encryption handshake failed: %s", t.md.ID)
 		}
 	}
 	c.setRW(rw)
@@ -535,7 +535,7 @@ func (cl *Client) initiateHandshakes(c *connection, t *torrent) (err error) {
 	}.Outgoing(c.rw(), t.md.ID.AsByteArray())
 
 	if err != nil {
-		return errorsx.Wrap(err, "bittorrent protocol handshake failure")
+		return errorsx.Wrapf(err, "bittorrent protocol handshake failure: %s", t.md.ID)
 	}
 
 	cl.config.debug().Println("initiated outgoing connection", cl.dht.ID(), "->", int160.FromByteArray(info.PeerID))
