@@ -377,21 +377,14 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 		return nil, errorsx.Errorf("unable to dial due to no servers")
 	}
 
-	dctx, done := context.WithTimeout(ctx, time.Second)
-	err = cl.config.dialRateLimiter.Wait(dctx)
-	done()
-	if err != nil {
+	if err = cl.config.dialRateLimiter.Wait(ctx); err != nil {
 		return nil, errorsx.Wrap(err, "dial rate limit failed")
 	}
 
-	ts0 := time.Now()
 	if nc, err = cl.dialing.Dial(ctx, t.dialTimeout(), addr.String(), conns...); err != nil {
-		cl.config.debug().Println("dialing failed", t.md.ID, cl.dht.AddrPort(), "->", addr, err)
-		return nil, err
+		return nil, errorsx.Wrap(err, "dialing failed")
 	}
 
-	ts1 := time.Now()
-	// cl.config.debug().Println("dialing completed", t.md.ID, cl.dynamicaddr.Load(), "->", addr)
 	defer func() {
 		if err == nil {
 			return
@@ -416,9 +409,9 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 	c.headerEncrypted = obfuscatedHeader
 
 	if err = cl.initiateHandshakes(c, t); err != nil {
-		return nil, errorsx.Wrapf(err, "fail handshake elapsed %v  %v", time.Since(ts0), time.Since(ts1))
+		return nil, errorsx.Wrapf(err, "handshake failed")
 	}
-	log.Printf("handshake elapsed %v  %v\n", time.Since(ts0), time.Since(ts1))
+
 	return c, nil
 }
 
@@ -441,7 +434,7 @@ func (cl *Client) establishOutgoingConn(ctx context.Context, t *torrent, addr ne
 		return c, nil
 	}
 
-	if cl.config.HeaderObfuscationPolicy.RequirePreferred {
+	if cl.config.HeaderObfuscationPolicy.Required {
 		// We should have just tried with the preferred header obfuscation. If it was required,
 		// there's nothing else to try.
 		return c, err
@@ -561,7 +554,7 @@ func (cl *Client) receiveHandshakes(c *connection) (t *torrent, err error) {
 	if _, buffered, err = encryption.Incoming(c.rw()); errors.Is(err, io.EOF) {
 		cl.config.debug().Println("encryption handshake timedout", err)
 		return nil, errorsx.Timedout(err, 0)
-	} else if err != nil && cl.config.HeaderObfuscationPolicy.RequirePreferred {
+	} else if err != nil && cl.config.HeaderObfuscationPolicy.Required {
 		return t, errorsx.Wrap(err, "connection does not have the required header obfuscation")
 	} else if err != nil && buffered == nil {
 		cl.config.debug().Println("encryption handshake", err)

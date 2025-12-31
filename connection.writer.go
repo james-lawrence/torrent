@@ -110,7 +110,7 @@ func connexinit(cn *connection, n cstate.T) cstate.T {
 			V:            cn.cfg.extendedHandshakeClientVersion,
 			Reqq:         cn.cfg.maximumOutstandingRequests,
 			YourIp:       btprotocol.CompactIp(cn.remoteAddr.Addr().AsSlice()),
-			Encryption:   cn.cfg.HeaderObfuscationPolicy.Preferred || cn.cfg.HeaderObfuscationPolicy.RequirePreferred,
+			Encryption:   cn.cfg.HeaderObfuscationPolicy.Preferred || cn.cfg.HeaderObfuscationPolicy.Required,
 			Port:         int(dynamicport),
 			MetadataSize: cn.t.metadatalen(),
 			Ipv4:         btprotocol.CompactIp(netx.IP4FromAddr(cn.connaddr.Addr())),

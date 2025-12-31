@@ -181,13 +181,17 @@ func (cr *cipherWriter) Write(b []byte) (n int, err error) {
 		}
 	}()
 	cr.c.XORKeyStream(be[:], b)
-	n, err = cr.w.Write(be[:len(b)])
+	if n, err = cr.w.Write(be[:len(b)]); err != nil {
+		return n, err
+	}
+
 	if n != len(b) {
 		panic(fmt.Sprintf("problem? %d != %d", n, len(b)))
 		// // The cipher will have advanced beyond the callers stream position.
 		// // We can't use the cipher anymore.
 		// cr.c = nil
 	}
+
 	if len(be) > len(cr.b) {
 		cr.b = be
 	}

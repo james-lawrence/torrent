@@ -226,8 +226,8 @@ func ClientConfigConnectionClosed(fn func(ih int160.T, stats ConnStats, remainin
 
 func ClientConfigEnableEncryption(cc *ClientConfig) {
 	cc.HeaderObfuscationPolicy = HeaderObfuscationPolicy{
-		Preferred:        true,
-		RequirePreferred: false,
+		Preferred: true,
+		Required:  false,
 	}
 }
 
@@ -382,8 +382,8 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		dialPoolSize:                   uint16(runtime.NumCPU()),
 		ConnTracker:                    conntrack.NewInstance(),
 		HeaderObfuscationPolicy: HeaderObfuscationPolicy{
-			Preferred:        false,
-			RequirePreferred: false,
+			Preferred: false,
+			Required:  false,
 		},
 		CryptoSelector:   mse.DefaultCryptoSelector,
 		CryptoProvides:   mse.AllSupportedCrypto,
@@ -410,6 +410,6 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 
 // HeaderObfuscationPolicy ...
 type HeaderObfuscationPolicy struct {
-	RequirePreferred bool // Whether the value of Preferred is a strict requirement.
-	Preferred        bool // Whether header obfuscation is preferred.
+	Required  bool // Whether the value of Preferred is a strict requirement.
+	Preferred bool // Whether header obfuscation is preferred.
 }

@@ -105,13 +105,14 @@ func (t *peerPool) Connecting(p Peer) bool {
 
 // Peer is returned to the pool
 func (t *peerPool) Attempted(p Peer, attempts uint64) {
+	if attempts > 3 {
+		return
+	}
+
 	t.m.Lock()
 	defer t.m.Unlock()
-	ts := time.Now()
-	elapsed := time.Since(p.LastAttempt)
-	p.LastAttempt = ts
+	p.LastAttempt = time.Now()
 	p.Attempts = attempts
-	log.Println("returning", elapsed, "untried", t.untried.Len(), "half", len(t.loaned), "available", t.available.Len(), "attempted", t.attempted.Len(), "attempts", p.Attempts, p.AddrPort)
 	delete(t.loaned, p.AddrPort)
 
 	t.attempted.ReplaceOrInsert(t.prioritized(p))

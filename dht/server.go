@@ -87,11 +87,7 @@ type Server struct {
 	// TODO: Expose Peers, to return NodeInfo for received get_peers queries.
 	peers peer_store.Interface
 	// BEP-44: Storing arbitrary data in the DHT.
-	store bep44.Store
-
-	// If no log is provided, log.Default is used and log.Debug messages are filtered out. Note
-	// that all messages without a log.Level, have log.Debug added to them before being passed to
-	// this log.
+	store       bep44.Store
 	log         logging
 	sendLimiter *rate.Limiter
 
@@ -206,6 +202,23 @@ func (s *Server) AddrPort() netip.AddrPort {
 	return langx.Zero(s.dynamicaddr.Load())
 }
 
+type discard struct{}
+
+func (discard) Output(int, string) error {
+	return nil
+}
+
+// Println replicates the behaviour of the standard logger.
+func (t discard) Println(v ...any) {
+}
+
+func (t discard) Printf(format string, v ...any) {
+}
+
+func (t discard) Print(v ...any) {
+
+}
+
 // NewServer initializes a new DHT node server.
 func NewServer(k int, options ...Option) (s *Server, err error) {
 	s = langx.Autoptr(langx.Clone(Server{
@@ -225,7 +238,7 @@ func NewServer(k int, options ...Option) (s *Server, err error) {
 		mux:               DefaultMuxer(),
 		queryResendDelay:  defaultQueryResendDelay,
 		defaultWant:       []krpc.Want{krpc.WantNodes, krpc.WantNodes6},
-		log:               log.Default(),
+		log:               discard{},
 		hookQuery:         func(query *krpc.Msg, source net.Addr) (propagate bool) { return true },
 		hookAnnouncePeer:  PeerAnnounceFn(func(peerid int160.T, ip net.IP, port uint16, portOk bool) {}),
 	}, options...))
@@ -245,7 +258,7 @@ func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
 
 		SecureNodeId(&upd, detected.Addr().AsSlice())
 
-		log.Println("updated", fixed, "->", upd, detected.Addr())
+		s.logger().Println("updated", fixed, "->", upd, detected)
 
 		latest := int160.FromByteArray(upd)
 		old := langx.Zero(s.id.Swap(&latest))
@@ -253,7 +266,7 @@ func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
 			return
 		}
 
-		log.Println("peer id changed", old, "->", latest)
+		s.logger().Println("peer id changed", old, "->", latest)
 		s.dynamicaddr.Store(&detected)
 	}
 
@@ -291,7 +304,6 @@ func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
 	}
 
 	go func() {
-		defer log.Println("dht dynamic address completed")
 		for detected := range seq {
 			updateaddr(fixed, detected)
 		}
@@ -400,7 +412,7 @@ func (s *Server) processPacket(ctx context.Context, b []byte, addr Addr) {
 	}
 
 	if d.Y == krpc.YQuery {
-		s.logger().Printf("received query %q from %v", d.Q, addr)
+		s.logger().Printf("received query %q from %v\n", d.Q, addr)
 		s.handleQuery(ctx, addr, b, d)
 		return
 	}
@@ -629,7 +641,7 @@ func (s *Server) reply(ctx context.Context, addr Addr, t string, r krpc.Return) 
 		IP: addr.KRPC(),
 	}
 	b := bencode.MustMarshal(m)
-	s.logger().Printf("replying to %q\n", addr)
+	s.logger().Printf("replying to %s\n", addr)
 	_, err := s.SendToNode(ctx, b, addr, 1)
 	if err != nil {
 		s.logger().Printf("error replying to %s: %s\n", addr, err)

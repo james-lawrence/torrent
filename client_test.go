@@ -825,11 +825,11 @@ func TestMultipleTorrentsWithEncryption(t *testing.T) {
 		t,
 		func(cfg *torrent.ClientConfig) {
 			cfg.HeaderObfuscationPolicy.Preferred = true
-			cfg.HeaderObfuscationPolicy.RequirePreferred = true
+			cfg.HeaderObfuscationPolicy.Required = true
 		},
 		func(cfg *torrent.ClientConfig) {
 			cfg.HeaderObfuscationPolicy.Preferred = true
-			cfg.HeaderObfuscationPolicy.RequirePreferred = false
+			cfg.HeaderObfuscationPolicy.Required = false
 		},
 	)
 }
@@ -896,11 +896,11 @@ func TestObfuscatedHeaderFallbackSeederDisallowsLeecherPrefers(t *testing.T) {
 		t,
 		func(cfg *torrent.ClientConfig) {
 			cfg.HeaderObfuscationPolicy.Preferred = false
-			cfg.HeaderObfuscationPolicy.RequirePreferred = true
+			cfg.HeaderObfuscationPolicy.Required = true
 		},
 		func(cfg *torrent.ClientConfig) {
 			cfg.HeaderObfuscationPolicy.Preferred = true
-			cfg.HeaderObfuscationPolicy.RequirePreferred = false
+			cfg.HeaderObfuscationPolicy.Required = false
 		},
 	)
 }
@@ -911,11 +911,11 @@ func TestObfuscatedHeaderFallbackSeederRequiresLeecherPrefersNot(t *testing.T) {
 		t,
 		func(cfg *torrent.ClientConfig) {
 			cfg.HeaderObfuscationPolicy.Preferred = true
-			cfg.HeaderObfuscationPolicy.RequirePreferred = true
+			cfg.HeaderObfuscationPolicy.Required = true
 		},
 		func(cfg *torrent.ClientConfig) {
 			cfg.HeaderObfuscationPolicy.Preferred = false
-			cfg.HeaderObfuscationPolicy.RequirePreferred = false
+			cfg.HeaderObfuscationPolicy.Required = false
 		},
 	)
 }

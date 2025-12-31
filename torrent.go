@@ -1230,10 +1230,6 @@ func (t *torrent) assertNoPendingRequests() {
 }
 
 func (t *torrent) wantPeers() (b bool) {
-	defer log.Println("returning want peers 0")
-	defer func() {
-		log.Println("returning want peers 1", b)
-	}()
 	select {
 	case <-t.closed:
 		return false

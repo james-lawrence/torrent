@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"io"
-	"log"
 	"unicode"
 
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -74,7 +73,7 @@ func (t *HandshakeMessage) ReadFrom(src io.Reader) (n int64, err error) {
 	}
 
 	if !bytes.HasPrefix(buf, []byte(Protocol)) {
-		return int64(read), errorsx.Errorf("unexpected protocol string %s: %x", Protocol, buf)
+		return int64(read), errorsx.Errorf("unexpected protocol string %x != %x", buf, Protocol)
 	}
 
 	copy(t.Extensions[:], buf[20:])
@@ -218,7 +217,6 @@ func (t Handshake) Outgoing(sock io.ReadWriter, hash [20]byte) (resbits Extensio
 		return resbits, res, errorsx.New("invalid handshake - mismatched hash")
 	}
 
-	log.Printf("handshake completed %s - %s - %s\n", t.Bits, pid.ByteString(), int160.FromByteArray(hash))
 	return msg.Extensions, res, nil
 }
 
