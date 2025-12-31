@@ -753,20 +753,20 @@ func (s *Server) SendMessageToNode(ctx context.Context, m any, node Addr, maximu
 }
 
 func (s *Server) SendToNode(ctx context.Context, b []byte, node Addr, maximum int) (wrote bool, err error) {
-	func() {
+	err = func() error {
 		// This is a pain. It would be better if the blocklist returned an error if it was closed
 		// instead.
 		s.mu.RLock()
 		defer s.mu.RUnlock()
 		if s.isClosed() {
-			err = errors.New("server is closed")
-			return
+			return errors.New("server is closed")
 		}
 
 		if r, ok := s.blocklist.Lookup(node.IP()); ok {
-			err = fmt.Errorf("write to %v blocked by %v", node, r)
-			return
+			return fmt.Errorf("write to %v blocked by %v", node, r)
 		}
+
+		return nil
 	}()
 
 	if err != nil {
@@ -872,7 +872,7 @@ type QueryInput struct {
 // may make use of the response internally before passing it back to the caller.
 func (s *Server) Query(ctx context.Context, addr Addr, input QueryInput) (ret QueryResult) {
 	defer func(started time.Time) {
-		log.Printf(
+		s.logger().Printf(
 			"Query(%v) returned after %v (err=%v, reply.Y=%v, reply.E=%v, writes=%v) encoded=%s\n",
 			input.Method, time.Since(started), ret.Err, ret.Reply.Y, ret.Reply.E, ret.Writes, base64.URLEncoding.EncodeToString(input.Encoded))
 	}(time.Now())
@@ -904,9 +904,9 @@ func (s *Server) Query(ctx context.Context, addr Addr, input QueryInput) (ret Qu
 	s.mu.Unlock()
 
 	go func() {
-		s.logger().Printf("transmitting initiated %s %q %d\n", input.Method, input.Tid, input.NumTries)
+		s.logger().Printf("transmitting initiated %s %x %d\n", input.Method, input.Tid, input.NumTries)
 		_, err := s.SendToNode(sctx, input.Encoded, addr, input.NumTries)
-		s.logger().Printf("transmitting completed %s %q %d %v\n", input.Method, input.Tid, input.NumTries, err)
+		s.logger().Printf("transmitting completed %s %x %d %v\n", input.Method, input.Tid, input.NumTries, err)
 		if err != nil {
 			done(err)
 		}

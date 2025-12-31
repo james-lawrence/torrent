@@ -409,7 +409,7 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 	c.headerEncrypted = obfuscatedHeader
 
 	if err = cl.initiateHandshakes(c, t); err != nil {
-		return nil, errorsx.Wrapf(err, "handshake failed")
+		return nil, errorsx.Wrap(err, "handshake failed")
 	}
 
 	return c, nil

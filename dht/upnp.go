@@ -41,26 +41,38 @@ func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort uint16, upn
 	}
 }
 
-func UPnPPortForward(ctx context.Context, id string, port uint16) (iter.Seq[netip.AddrPort], error) {
+func UPnPPortForward(ctx context.Context, id string, port uint16, lease time.Duration) (iter.Seq[netip.AddrPort], error) {
 	id = langx.FirstNonZero(id, errorsx.Must(uuid.NewV7()).String())
 	return func(yield func(netip.AddrPort) bool) {
-		ds := upnp.Discover(ctx, 0, 2*time.Second)
+		const (
+			lease = time.Hour
+		)
+		for {
+			ds := upnp.Discover(ctx, 0, 2*time.Second)
 
-		for _, d := range ds {
-			if c, err := addPortMapping(d, upnp.TCP, port, id); err == nil {
-				if !yield(c) {
-					return
+			for _, d := range ds {
+				if c, err := addPortMapping(d, upnp.TCP, port, id); err == nil {
+					if !yield(c) {
+						return
+					}
+				} else {
+					log.Println("unable to map port", err)
 				}
-			} else {
-				log.Println("unable to map port", err)
+
+				if c, err := addPortMapping(d, upnp.UDP, port, id); err == nil {
+					if !yield(c) {
+						return
+					}
+				} else {
+					log.Println("unable to map port", err)
+				}
 			}
 
-			if c, err := addPortMapping(d, upnp.UDP, port, id); err == nil {
-				if !yield(c) {
-					return
-				}
-			} else {
-				log.Println("unable to map port", err)
+			select {
+			case <-time.After(lease):
+			case <-ctx.Done():
+				log.Println("context done upnp shutting down", ctx.Err())
+				return
 			}
 		}
 	}, nil
