@@ -104,14 +104,14 @@ func (t RacingDialer) Dial(ctx context.Context, timeout time.Duration, address s
 	select {
 	case <-_ctx.Done():
 	case fastest = <-w.fastest:
+		cancel(nil)
 	}
 
-	failure := langx.Zero(w.failure.Load())
+	failure := errorsx.Compact(langx.Zero(w.failure.Load()), context.Cause(__ctx), context.Cause(_ctx))
 
 	if fastest == nil {
-		return nil, errorsx.Compact(failure, context.Cause(__ctx), context.Cause(_ctx))
+		return nil, failure
 	}
 
-	failure = errorsx.Compact(failure, context.Cause(__ctx), context.Cause(_ctx))
 	return fastest, errorsx.Ignore(failure, context.Canceled)
 }

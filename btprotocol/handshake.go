@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/hex"
 	"io"
+	"log"
 	"unicode"
 
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 )
 
@@ -52,7 +54,6 @@ func (t HandshakeMessage) WriteTo(dst io.Writer) (n int64, err error) {
 
 	written := copy(buf[:20], []byte(Protocol))
 	written += copy(buf[20:28], t.Extensions[:])
-	// log.Println("WRITING HANDSHAKE MESSAGE", debug(buf))
 	nw, err := dst.Write(buf)
 	return int64(nw), err
 }
@@ -187,36 +188,38 @@ type Handshake struct {
 // Outgoing handshake, used to establish a connection to a peer.
 func (t Handshake) Outgoing(sock io.ReadWriter, hash [20]byte) (resbits ExtensionBits, res HandshakeInfoMessage, err error) {
 	var (
+		pid = int160.FromByteArray(t.PeerID) //.Prefix([]byte("-GT2025-"))
 		msg = HandshakeMessage{
 			Extensions: t.Bits,
 		}
 		peering = HandshakeInfoMessage{
-			PeerID: t.PeerID,
+			PeerID: pid.AsByteArray(),
 			Hash:   hash,
 		}
 	)
 
 	if _, err := msg.WriteTo(sock); err != nil {
-		return resbits, res, err
+		return resbits, res, errorsx.Wrap(err, "failed to send handshake")
 	}
 
 	if _, err := peering.WriteTo(sock); err != nil {
-		return resbits, res, err
+		return resbits, res, errorsx.Wrap(err, "failed to send handshake info")
 	}
 
 	if _, err := msg.ReadFrom(sock); err != nil {
-		return resbits, res, err
+		return resbits, res, errorsx.Wrapf(err, "failed to read handshake: %s - %s", t.Bits, int160.FromByteArray(hash))
 	}
 
 	if _, err := res.ReadFrom(sock); err != nil {
-		return resbits, res, err
+		return resbits, res, errorsx.Wrap(err, "failed to read handshake info")
 	}
 
 	if !bytes.Equal(res.Hash[:], hash[:]) {
 		return resbits, res, errorsx.New("invalid handshake - mismatched hash")
 	}
 
-	return msg.Extensions, res, err
+	log.Printf("handshake completed %s - %s - %s\n", t.Bits, pid.ByteString(), int160.FromByteArray(hash))
+	return msg.Extensions, res, nil
 }
 
 // Incoming handshake, used to accept a connection from a peer.

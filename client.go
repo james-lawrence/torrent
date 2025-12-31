@@ -384,11 +384,13 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 		return nil, errorsx.Wrap(err, "dial rate limit failed")
 	}
 
+	ts0 := time.Now()
 	if nc, err = cl.dialing.Dial(ctx, t.dialTimeout(), addr.String(), conns...); err != nil {
 		cl.config.debug().Println("dialing failed", t.md.ID, cl.dht.AddrPort(), "->", addr, err)
 		return nil, err
 	}
 
+	ts1 := time.Now()
 	// cl.config.debug().Println("dialing completed", t.md.ID, cl.dynamicaddr.Load(), "->", addr)
 	defer func() {
 		if err == nil {
@@ -414,9 +416,9 @@ func (cl *Client) establishOutgoingConnEx(ctx context.Context, t *torrent, addr 
 	c.headerEncrypted = obfuscatedHeader
 
 	if err = cl.initiateHandshakes(c, t); err != nil {
-		return nil, err
+		return nil, errorsx.Wrapf(err, "fail handshake elapsed %v  %v", time.Since(ts0), time.Since(ts1))
 	}
-
+	log.Printf("handshake elapsed %v  %v\n", time.Since(ts0), time.Since(ts1))
 	return c, nil
 }
 
@@ -434,23 +436,19 @@ func (cl *Client) establishOutgoingConn(ctx context.Context, t *torrent, addr ne
 		}
 	}()
 
-	// obfuscatedHeaderFirst := cl.config.HeaderObfuscationPolicy.Preferred
-	// if c, err = cl.establishOutgoingConnEx(ctx, t, addr, obfuscatedHeaderFirst); err == nil {
-	// 	return c, nil
-	// }
+	obfuscatedHeaderFirst := cl.config.HeaderObfuscationPolicy.Preferred
+	if c, err = cl.establishOutgoingConnEx(ctx, t, addr, obfuscatedHeaderFirst); err == nil {
+		return c, nil
+	}
 
-	// if cl.config.HeaderObfuscationPolicy.RequirePreferred {
-	// 	// We should have just tried with the preferred header obfuscation. If it was required,
-	// 	// there's nothing else to try.
-	// 	return c, err
-	// }
+	if cl.config.HeaderObfuscationPolicy.RequirePreferred {
+		// We should have just tried with the preferred header obfuscation. If it was required,
+		// there's nothing else to try.
+		return c, err
+	}
 
-	// // Try again with encryption if we didn't earlier, or without if we did.
-	// if c, err = cl.establishOutgoingConnEx(ctx, t, addr, !obfuscatedHeaderFirst); err != nil {
-	// 	return c, err
-	// }
 	// Try again with encryption if we didn't earlier, or without if we did.
-	if c, err = cl.establishOutgoingConnEx(ctx, t, addr, false); err != nil {
+	if c, err = cl.establishOutgoingConnEx(ctx, t, addr, !obfuscatedHeaderFirst); err != nil {
 		return c, err
 	}
 
@@ -468,16 +466,14 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (e
 
 	defer func() {
 		err = errorsx.StdlibTimeout(err, 3*time.Second, syscall.ECONNRESET)
+		if err != nil {
+			t.peers.Attempted(p, p.Attempts+1)
+		}
 	}()
 
 	if c, err = cl.establishOutgoingConn(ctx, t, p.AddrPort); err != nil {
-		log.Println("returning failed", err)
-		t.peers.Attempted(p, p.Attempts+1)
 		return errorsx.Wrapf(err, "returning error establishing connection to %v", p.AddrPort)
 	}
-
-	log.Println("returning successful conn", spew.Sdump(c.stats))
-	t.peers.Attempted(p, 0)
 
 	c.Discovery = ps
 	c.trusted = trusted
@@ -497,6 +493,8 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (e
 		return cause
 	}
 
+	log.Println("conn", spew.Sdump(c.stats))
+	t.peers.Attempted(p, 0)
 	defer t.deleteConnection(c)
 
 	return RunHandshookConn(c, t)
@@ -696,14 +694,14 @@ func (cl *Client) publicIP(peer netip.Addr) netip.Addr {
 	// TODO: Use BEP 10 to determine how peers are seeing us.
 	if peer.Is4() {
 		return netx.FirstAddrOrZero(
-			cl.dht.AddrPort().Addr(),
 			cl.findListenerIP(func(ip netip.Addr) bool { return ip.Is4() && ip.IsValid() }),
+			cl.dht.AddrPort().Addr(),
 		)
 	}
 
 	return netx.FirstAddrOrZero(
-		cl.dht.AddrPort().Addr(),
 		cl.findListenerIP(func(ip netip.Addr) bool { return ip.Is6() && ip.IsValid() }),
+		cl.dht.AddrPort().Addr(),
 	)
 }
 

@@ -89,10 +89,10 @@ type Server struct {
 	// BEP-44: Storing arbitrary data in the DHT.
 	store bep44.Store
 
-	// If no Logger is provided, log.Default is used and log.Debug messages are filtered out. Note
+	// If no log is provided, log.Default is used and log.Debug messages are filtered out. Note
 	// that all messages without a log.Level, have log.Debug added to them before being passed to
-	// this Logger.
-	Logger      *log.Logger
+	// this log.
+	log         logging
 	sendLimiter *rate.Limiter
 
 	mux Muxer
@@ -225,7 +225,7 @@ func NewServer(k int, options ...Option) (s *Server, err error) {
 		mux:               DefaultMuxer(),
 		queryResendDelay:  defaultQueryResendDelay,
 		defaultWant:       []krpc.Want{krpc.WantNodes, krpc.WantNodes6},
-		Logger:            log.Default(),
+		log:               log.Default(),
 		hookQuery:         func(query *krpc.Msg, source net.Addr) (propagate bool) { return true },
 		hookAnnouncePeer:  PeerAnnounceFn(func(peerid int160.T, ip net.IP, port uint16, portOk bool) {}),
 	}, options...))
@@ -1141,8 +1141,8 @@ func (s *Server) AddNodesFromFile(fileName string) (added int, err error) {
 	return added, nil
 }
 
-func (s *Server) logger() *log.Logger {
-	return s.Logger
+func (s *Server) logger() logging {
+	return s.log
 }
 
 func (s *Server) PeerStore() peer_store.Interface {

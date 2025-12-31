@@ -16,12 +16,17 @@ import (
 	"github.com/james-lawrence/torrent/internal/netx"
 )
 
+type logging interface {
+	Println(v ...any)
+	Printf(format string, v ...any)
+	Print(v ...any)
+}
+
 func defaultQueryResendDelay() time.Duration {
 	// This should be the highest reasonable UDP latency an end-user might have.
 	return 2 * time.Second
 }
 
-type announcer struct{ PeerAnnounce }
 type transactionKey = transactions.Key
 
 type StartingNodesGetter func() ([]Addr, error)
@@ -133,6 +138,12 @@ func OptionQueryResendDelay(d time.Duration) Option {
 }
 
 func OptionNoop(sc *Server) {}
+
+func OptionLogger(m logging) Option {
+	return func(sc *Server) {
+		sc.log = m
+	}
+}
 
 // ServerStats instance is returned by Server.Stats() and stores Server metrics
 type ServerStats struct {

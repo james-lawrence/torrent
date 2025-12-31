@@ -193,50 +193,43 @@ func (cr *cipherWriter) Write(b []byte) (n int, err error) {
 	return
 }
 
-func newX() big.Int {
-	var X big.Int
-	X.SetBytes(func() []byte {
-		var b [20]byte
-		_, err := rand.Read(b[:])
-		if err != nil {
-			panic(err)
-		}
-		return b[:]
-	}())
+func newX() (X big.Int) {
+	X.SetBytes(int160.Random().Bytes())
 	return X
-}
-
-func paddedLeft(b []byte, _len int) []byte {
-	if len(b) == _len {
-		return b
-	}
-	ret := make([]byte, _len)
-	if n := copy(ret[_len-len(b):], b); n != len(b) {
-		panic(n)
-	}
-	return ret
 }
 
 // Calculate, and send Y, our public key.
 func (h *handshake) postY(x *big.Int) error {
-	var y big.Int
+	var (
+		y   big.Int
+		buf [96]byte
+	)
 	y.Exp(&g, x, &p)
-	return h.postWrite(paddedLeft(y.Bytes(), 96))
+	y.FillBytes(buf[:])
+	return h.postWrite(buf[:])
 }
 
-func (h *handshake) establishS() error {
+func (h *handshake) establishS(pada []byte) error {
 	x := newX()
-	h.postY(&x)
+	if err := h.postY(&x); err != nil {
+		return errorsx.Wrap(err, "failed to write Y")
+	}
+
+	if err := h.postWrite(pada); err != nil {
+		return errorsx.Wrap(err, "failed to write pada")
+	}
+
 	var b [96]byte
 	_, err := io.ReadFull(h.conn, b[:])
 	if err != nil {
-		return errorsx.Wrap(err, "error reading Y")
+		return errorsx.Wrapf(err, "error reading Y: %d", len(pada))
 	}
 	var Y, S big.Int
 	Y.SetBytes(b[:])
 	S.Exp(&Y, &x, &p)
-	sBytes := S.Bytes()
-	copy(h.s[96-len(sBytes):96], sBytes)
+	S.FillBytes(h.s[:])
+	// sBytes := S.Bytes()
+	// copy(h.s[96-len(sBytes):96], sBytes)
 	return nil
 }
 
@@ -553,15 +546,14 @@ func (h *handshake) Do() (ret io.ReadWriter, method CryptoMethod, err error) {
 			err = h.writeErr
 		}
 	}()
-	err = h.establishS()
-	if err != nil {
-		return nil, method, errorsx.Wrap(err, "error while establishing secret")
-	}
+
 	pad := make([]byte, newPadLen())
-	io.ReadFull(rand.Reader, pad)
-	err = h.postWrite(pad)
-	if err != nil {
-		return nil, method, err
+	if _, err = io.ReadFull(rand.Reader, pad); err != nil {
+		return nil, method, errorsx.Wrap(err, "error while generating padding")
+	}
+
+	if err = h.establishS(pad); err != nil {
+		return nil, method, errorsx.Wrap(err, "error while establishing secret")
 	}
 
 	if h.initer {

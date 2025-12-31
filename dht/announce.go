@@ -5,7 +5,6 @@ package dht
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -202,7 +201,7 @@ func (a *Announce) Close() {
 	})
 }
 
-func (a *Announce) logger() *log.Logger {
+func (a *Announce) logger() logging {
 	return a.server.logger()
 }
 
