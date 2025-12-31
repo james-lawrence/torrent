@@ -183,9 +183,10 @@ func (cr *cipherWriter) Write(b []byte) (n int, err error) {
 	cr.c.XORKeyStream(be[:], b)
 	n, err = cr.w.Write(be[:len(b)])
 	if n != len(b) {
-		// The cipher will have advanced beyond the callers stream position.
-		// We can't use the cipher anymore.
-		cr.c = nil
+		panic(fmt.Sprintf("problem? %d != %d", n, len(b)))
+		// // The cipher will have advanced beyond the callers stream position.
+		// // We can't use the cipher anymore.
+		// cr.c = nil
 	}
 	if len(be) > len(cr.b) {
 		cr.b = be
@@ -327,10 +328,7 @@ func (h *handshake) postWrite(b []byte) error {
 }
 
 func xor(dst, src []byte) (ret []byte) {
-	max := len(dst)
-	if max > len(src) {
-		max = len(src)
-	}
+	max := min(len(dst), len(src))
 	ret = make([]byte, 0, max)
 
 	for i := range max {
@@ -341,22 +339,22 @@ func xor(dst, src []byte) (ret []byte) {
 
 func marshal(w io.Writer, data ...interface{}) (err error) {
 	for _, data := range data {
-		err = binary.Write(w, binary.BigEndian, data)
-		if err != nil {
-			break
+		if err = binary.Write(w, binary.BigEndian, data); err != nil {
+			return err
 		}
 	}
-	return
+
+	return nil
 }
 
 func unmarshal(r io.Reader, data ...interface{}) (err error) {
 	for _, data := range data {
-		err = binary.Read(r, binary.BigEndian, data)
-		if err != nil {
-			break
+		if err = binary.Read(r, binary.BigEndian, data); err != nil {
+			return err
 		}
 	}
-	return
+
+	return nil
 }
 
 // Looking for b at the end of a.
