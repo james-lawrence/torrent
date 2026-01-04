@@ -83,10 +83,9 @@ func (cl *Client) Info(ctx context.Context, m Metadata, options ...Tuner) (i *me
 
 	if t, added, err = cl.start(m); err != nil {
 		return nil, err
-	} else if !added {
-		return nil, fmt.Errorf("attempting to require the info for a torrent that is already running")
+	} else if added {
+		defer cl.Stop(m)
 	}
-	defer cl.Stop(m)
 
 	t.Tune(options...)
 
