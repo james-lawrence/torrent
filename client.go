@@ -92,7 +92,13 @@ func (cl *Client) Info(ctx context.Context, m Metadata, options ...Tuner) (i *me
 
 	select {
 	case <-t.GotInfo():
-		return t.Info(), cl.Stop(m)
+		tmp := t.Info()
+		if tmp == nil {
+			// only path for this to occurr.
+			return nil, ErrTorrentClosed()
+		}
+
+		return tmp, cl.Stop(m)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}

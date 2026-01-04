@@ -48,20 +48,10 @@ func (ca cachedAddr) Raw() net.Addr {
 	return ca.raw
 }
 
-// func NewAddr(raw net.Addr) Addr {
-// 	v := errorsx.Zero(netx.AddrPort(raw))
-// 	return cachedAddr{
-// 		raw: raw,
-// 		v:   v,
-// 		s:   raw.String(),
-// 	}
-// }
-
 func NewAddr(v netip.AddrPort) Addr {
-	raw := net.UDPAddrFromAddrPort(v)
 	return cachedAddr{
-		raw: raw,
+		raw: net.UDPAddrFromAddrPort(v),
 		v:   v,
-		s:   raw.String(),
+		s:   v.String(),
 	}
 }
