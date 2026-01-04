@@ -32,7 +32,7 @@ func (s *Server) Bootstrap(ctx context.Context) (_zero TraversalStats, err error
 		Target: s.id.Load().AsByteArray(),
 		K:      64,
 		DoQuery: func(ctx context.Context, addr krpc.NodeAddr) traversal.QueryResult {
-			return s.FindNode(ctx, NewAddr(addr.UDP()), langx.Zero(s.id.Load()), QueryRateLimiting{}).TraversalQueryResult(addr)
+			return s.FindNode(ctx, NewAddr(addr.AddrPort), langx.Zero(s.id.Load()), QueryRateLimiting{}).TraversalQueryResult(addr)
 		},
 		NodeFilter: s.TraversalNodeFilter,
 	})

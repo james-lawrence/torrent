@@ -1,7 +1,7 @@
 package dht
 
 import (
-	"net"
+	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,11 +22,11 @@ func TestTable(t *testing.T) {
 	id1 := int160.FromByteString("\x2e\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
 	n0 := &node{nodeKey: nodeKey{
 		Id:   id0,
-		Addr: NewAddr(&net.UDPAddr{}),
+		Addr: NewAddr(netip.AddrPort{}),
 	}}
 	n1 := &node{nodeKey: nodeKey{
 		Id:   id1,
-		Addr: NewAddr(&net.UDPAddr{}),
+		Addr: NewAddr(netip.AddrPort{}),
 	}}
 
 	assert.NoError(t, tbl.addNode(root, n0))

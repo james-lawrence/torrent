@@ -103,7 +103,7 @@ func OptionBootstrapPeerFile(path string) Option {
 		}
 
 		for _, p := range ps {
-			res = append(res, NewAddr(p.Addr.UDP()))
+			res = append(res, NewAddr(p.Addr.AddrPort))
 		}
 
 		return res, nil
@@ -200,7 +200,7 @@ func ResolveHostPorts(hostPorts []string) (addrs []Addr, err error) {
 				log.Printf("error resolving %q: %v", a, err)
 				continue
 			}
-			addrs = append(addrs, NewAddr(ua))
+			addrs = append(addrs, NewAddr(ua.AddrPort()))
 		}
 	}
 

@@ -5,8 +5,6 @@ import (
 	"net/netip"
 
 	"github.com/james-lawrence/torrent/dht/krpc"
-	"github.com/james-lawrence/torrent/internal/errorsx"
-	"github.com/james-lawrence/torrent/internal/netx"
 )
 
 // Used internally to refer to node network addresses. String() is called a
@@ -50,8 +48,17 @@ func (ca cachedAddr) Raw() net.Addr {
 	return ca.raw
 }
 
-func NewAddr(raw net.Addr) Addr {
-	v := errorsx.Zero(netx.AddrPort(raw))
+// func NewAddr(raw net.Addr) Addr {
+// 	v := errorsx.Zero(netx.AddrPort(raw))
+// 	return cachedAddr{
+// 		raw: raw,
+// 		v:   v,
+// 		s:   raw.String(),
+// 	}
+// }
+
+func NewAddr(v netip.AddrPort) Addr {
+	raw := net.UDPAddrFromAddrPort(v)
 	return cachedAddr{
 		raw: raw,
 		v:   v,

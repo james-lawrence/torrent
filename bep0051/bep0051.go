@@ -120,7 +120,7 @@ func LatestSampleForNodeInfo(ctx context.Context, s *dht.Server, n krpc.NodeInfo
 	if err != nil {
 		return nil, errorsx.Wrapf(err, "unable to generate sample request: %s", n.ID)
 	}
-	dst := dht.NewAddr(n.Addr.UDP())
+	dst := dht.NewAddr(n.Addr.AddrPort)
 
 	dctx, done := context.WithTimeout(ctx, 30*time.Second)
 	defer done()

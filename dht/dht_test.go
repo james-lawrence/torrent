@@ -89,7 +89,7 @@ func TestPing(t *testing.T) {
 	require.NoError(t, err)
 	backgroundServe(t, srv0, mustListen("127.0.0.1:0"))
 	defer srv0.Close()
-	res := srv.Ping(srv0.Addr())
+	res := srv.Ping(srv0.AddrPort())
 	require.NoError(t, res.Err)
 	require.EqualValues(t, srv0.ID(), res.Reply.SenderID().Int160())
 }
@@ -149,7 +149,7 @@ func TestHook(t *testing.T) {
 	receiver, err := NewServer(
 		32,
 		OptionBootstrapFixedAddrs(
-			NewAddr(pconn.LocalAddr().(*net.UDPAddr)),
+			NewAddr(pconn.LocalAddr().(*net.UDPAddr).AddrPort()),
 		),
 		OptionOnQuery(func(m *krpc.Msg, addr net.Addr) bool {
 			t.Logf("receiver got msg: %v", m)
@@ -167,7 +167,7 @@ func TestHook(t *testing.T) {
 	defer receiver.Close()
 	// Ping receiver from pinger to trigger hook. Should also receive a response.
 	t.Log("TestHook: Servers created, hook for ping established. Calling Ping.")
-	res := pinger.Ping(receiver.Addr())
+	res := pinger.Ping(receiver.AddrPort())
 	assert.NoError(t, res.Err)
 
 	// Await signal that hook has been called.
@@ -211,7 +211,7 @@ func TestBadGetPeersResponse(t *testing.T) {
 	s, err := NewServer(
 		32,
 		OptionBootstrapFixedAddrs(
-			NewAddr(pc.LocalAddr().(*net.UDPAddr)),
+			NewAddr(pc.LocalAddr().(*net.UDPAddr).AddrPort()),
 		),
 	)
 	require.NoError(t, err)

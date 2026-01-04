@@ -18,7 +18,7 @@ func mustListen(addr string) net.PacketConn {
 func addrResolver(addr string) func() ([]Addr, error) {
 	return func() ([]Addr, error) {
 		ua, err := net.ResolveUDPAddr("udp", addr)
-		return []Addr{NewAddr(ua)}, err
+		return []Addr{NewAddr(ua.AddrPort())}, err
 	}
 }
 

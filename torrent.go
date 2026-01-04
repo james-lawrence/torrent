@@ -1651,7 +1651,7 @@ func (t *torrent) ping(addr net.UDPAddr) {
 	}
 
 	go func() {
-		ret := dht.Ping3S(context.Background(), t.cln.dht, dht.NewAddr(&addr), t.cln.dht.ID())
+		ret := dht.Ping3S(context.Background(), t.cln.dht, addr.AddrPort(), t.cln.dht.ID())
 		if errorsx.Ignore(ret.Err, context.DeadlineExceeded) != nil {
 			t.cln.config.debug().Println("failed to ping address", ret.Err)
 		}

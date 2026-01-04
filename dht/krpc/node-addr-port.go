@@ -41,7 +41,7 @@ type NodeAddr struct {
 
 func (me NodeAddr) String() string {
 	if me.IsValid() {
-		return me.Addr().String()
+		return me.AddrPort.String()
 	}
 
 	return ""

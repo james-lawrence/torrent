@@ -2,6 +2,7 @@ package dht
 
 import (
 	"context"
+	"net/netip"
 	"time"
 
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -17,20 +18,20 @@ func NewPingRequest(from int160.T) (qi QueryInput, err error) {
 	)
 }
 
-func Ping(ctx context.Context, q Queryer, to Addr, from int160.T) QueryResult {
+func Ping(ctx context.Context, q Queryer, to netip.AddrPort, from int160.T) QueryResult {
 	qi, err := NewPingRequest(from)
 	if err != nil {
 		return NewQueryResultErr(err)
 	}
 
-	return q.Query(ctx, to, qi)
+	return q.Query(ctx, NewAddr(to), qi)
 }
 
-func Ping3S(ctx context.Context, q Queryer, to Addr, from int160.T) QueryResult {
+func Ping3S(ctx context.Context, q Queryer, to netip.AddrPort, from int160.T) QueryResult {
 	return PingDuration(ctx, 3*time.Second, q, to, from)
 }
 
-func PingDuration(ctx context.Context, d time.Duration, q Queryer, to Addr, from int160.T) QueryResult {
+func PingDuration(ctx context.Context, d time.Duration, q Queryer, to netip.AddrPort, from int160.T) QueryResult {
 	ctx, done := context.WithTimeout(ctx, d)
 	defer done()
 	return Ping(ctx, q, to, from)

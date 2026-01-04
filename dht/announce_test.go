@@ -2,7 +2,7 @@ package dht
 
 import (
 	"context"
-	"net"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -25,7 +25,7 @@ func TestAnnounceNoStartingNodes(t *testing.T) {
 func TestAnnounceStopsNoPending(t *testing.T) {
 	s, err := NewServer(
 		32,
-		OptionBootstrapFixedAddrs(NewAddr(&net.TCPAddr{})),
+		OptionBootstrapFixedAddrs(NewAddr(netip.AddrPort{})),
 	)
 	backgroundServe(t, s, mustListen(":0"))
 

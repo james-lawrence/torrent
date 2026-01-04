@@ -1,7 +1,7 @@
 package dht
 
 import (
-	"net"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -9,12 +9,9 @@ import (
 )
 
 func TestTokenServer(t *testing.T) {
-	addr1 := NewAddr(&net.UDPAddr{
-		IP: []byte{1, 2, 3, 4},
-	})
-	addr2 := NewAddr(&net.UDPAddr{
-		IP: []byte{1, 2, 3, 3},
-	})
+
+	addr1 := NewAddr(netip.AddrPortFrom(netip.AddrFrom4([...]byte{1, 2, 3, 4}), 0))
+	addr2 := NewAddr(netip.AddrPortFrom(netip.AddrFrom4([...]byte{1, 2, 3, 3}), 0))
 	ts := tokenServer{
 		secret:           []byte("42"),
 		interval:         5 * time.Minute,

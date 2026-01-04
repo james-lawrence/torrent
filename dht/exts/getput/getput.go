@@ -35,7 +35,7 @@ func startGetTraversal(
 		Alpha:  15,
 		Target: target,
 		DoQuery: func(ctx context.Context, addr krpc.NodeAddr) traversal.QueryResult {
-			res := s.Get(ctx, dht.NewAddr(addr.UDP()), target, seq, dht.QueryRateLimiting{})
+			res := s.Get(ctx, dht.NewAddr(addr.AddrPort), target, seq, dht.QueryRateLimiting{})
 			err := res.ToError()
 			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, dht.ErrTransactionTimeout) {
 				slog.Debug(fmt.Sprintf("error querying %v: %v", addr, err))
@@ -157,7 +157,7 @@ notDone:
 			defer wg.Done()
 			// This is enforced by startGetTraversal.
 			token := elem.Data.(string)
-			res := s.Put(ctx, dht.NewAddr(elem.Addr.UDP()), put, token, dht.QueryRateLimiting{})
+			res := s.Put(ctx, dht.NewAddr(elem.Addr.AddrPort), put, token, dht.QueryRateLimiting{})
 			err := res.ToError()
 			if err != nil {
 				slog.Warn(fmt.Sprintf("error putting to %v [token=%q]: %v", elem.Addr, token, err))

@@ -55,9 +55,8 @@ type Server struct {
 	table        *table
 	closed       chan struct{}
 	tokenServer  tokenServer // Manages tokens we issue to our queriers.
-	// config       ServerConfig
-	stats      ServerStats
-	announceto []PeerAnnounce
+	stats        ServerStats
+	announceto   []PeerAnnounce
 
 	lastBootstrap    time.Time
 	bootstrappingNow bool
@@ -476,7 +475,7 @@ func (s *Server) serve(socket net.PacketConn) error {
 			continue
 		}
 
-		s.processPacket(context.Background(), b[:n], NewAddr(addr))
+		s.processPacket(context.Background(), b[:n], NewAddr(errorsx.Zero(netx.AddrPort(addr))))
 	}
 }
 
@@ -490,12 +489,12 @@ func (s *Server) AddNode(nis ...krpc.NodeInfo) error {
 	addnode := func(n krpc.NodeInfo) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		return s.updateNode(NewAddr(n.Addr.UDP()), &n.ID, true, func(*node) {})
+		return s.updateNode(NewAddr(n.Addr.AddrPort), &n.ID, true, func(*node) {})
 	}
 
 	for _, ni := range nis {
 		if id := int160.FromByteArray(ni.ID); id.IsZero() {
-			go s.Ping(ni.Addr.UDP())
+			go s.Ping(ni.Addr.AddrPort)
 			continue
 		}
 
@@ -904,9 +903,9 @@ func (s *Server) Query(ctx context.Context, addr Addr, input QueryInput) (ret Qu
 	s.mu.Unlock()
 
 	go func() {
-		s.logger().Printf("transmitting initiated %s %x %d\n", input.Method, input.Tid, input.NumTries)
+		s.logger().Printf("transmitting initiated %s %s %x %d\n", addr, input.Method, input.Tid, input.NumTries)
 		_, err := s.SendToNode(sctx, input.Encoded, addr, input.NumTries)
-		s.logger().Printf("transmitting completed %s %x %d %v\n", input.Method, input.Tid, input.NumTries, err)
+		s.logger().Printf("transmitting completed %s %s %x %d %v\n", addr, input.Method, input.Tid, input.NumTries, err)
 		if err != nil {
 			done(err)
 		}
@@ -927,13 +926,12 @@ func (s *Server) Query(ctx context.Context, addr Addr, input QueryInput) (ret Qu
 }
 
 // Sends a ping query to the address given.
-func (s *Server) PingQueryInput(ctx context.Context, node net.Addr, qi QueryInput) QueryResult {
-	addr := NewAddr(node)
-	res := PingDuration(ctx, 30*time.Second, s, addr, s.ID())
+func (s *Server) PingQueryInput(ctx context.Context, node netip.AddrPort, qi QueryInput) QueryResult {
+	res := PingDuration(ctx, 30*time.Second, s, node, s.ID())
 	if res.Err == nil {
 		id := res.Reply.SenderID()
 		if id != nil {
-			s.NodeRespondedToPing(addr, id.Int160())
+			s.NodeRespondedToPing(NewAddr(node), id.Int160())
 		}
 	}
 
@@ -941,7 +939,7 @@ func (s *Server) PingQueryInput(ctx context.Context, node net.Addr, qi QueryInpu
 }
 
 // Sends a ping query to the address given.
-func (s *Server) Ping(node net.Addr) QueryResult {
+func (s *Server) Ping(node netip.AddrPort) QueryResult {
 	return s.PingQueryInput(context.Background(), node, QueryInput{})
 }
 
@@ -1113,7 +1111,7 @@ func (s *Server) TraversalStartingNodes() (nodes []addrMaybeId, err error) {
 	})
 	s.mu.RUnlock()
 	if len(nodes) > 0 {
-		return
+		return nodes, nil
 	}
 
 	for _, fn := range s.bootstrap {
@@ -1184,7 +1182,7 @@ func (s *Server) refreshBucket(bucketIndex int) *traversal.Stats {
 		// as soon as the bucket is good.
 		K: s.table.K(),
 		DoQuery: func(ctx context.Context, addr krpc.NodeAddr) traversal.QueryResult {
-			res := s.FindNode(ctx, NewAddr(addr.UDP()), id, QueryRateLimiting{})
+			res := s.FindNode(ctx, NewAddr(addr.AddrPort), id, QueryRateLimiting{})
 			err := res.Err
 			if err != nil && !errors.Is(err, ErrTransactionTimeout) {
 				s.logger().Printf("error doing find node while refreshing bucket: %v\n", err)
