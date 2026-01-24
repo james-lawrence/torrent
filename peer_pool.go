@@ -111,7 +111,6 @@ func (t *peerPool) Attempted(p Peer, attempts uint64) {
 
 	t.m.Lock()
 	defer t.m.Unlock()
-	p.LastAttempt = time.Now()
 	p.Attempts = attempts
 	delete(t.loaned, p.AddrPort)
 
@@ -127,6 +126,7 @@ func (t *peerPool) Loaned(p Peer) {
 	t.m.Lock()
 	defer t.m.Unlock()
 
+	p.LastAttempt = time.Now()
 	t.loaned[p.AddrPort] = p
 }
 
