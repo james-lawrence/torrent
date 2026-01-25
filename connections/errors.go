@@ -6,7 +6,7 @@ import (
 )
 
 // NewBanned bans a connection.
-func NewBanned(c net.Conn, cause error) error {
+func NewBanned(c net.Conn, silent bool, cause error) error {
 	return bannedConnection{
 		conn:  c,
 		cause: cause,
@@ -14,8 +14,9 @@ func NewBanned(c net.Conn, cause error) error {
 }
 
 type bannedConnection struct {
-	conn  net.Conn
-	cause error
+	conn   net.Conn
+	cause  error
+	silent bool
 }
 
 func (t bannedConnection) Unwrap() error {

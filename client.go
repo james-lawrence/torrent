@@ -481,6 +481,7 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (e
 	if c.PeerID == cl.dht.ID() {
 		cause := connections.NewBanned(
 			c.conn,
+			true,
 			errorsx.Errorf("detected connection to self - %s vs %s - %s", c.PeerID, cl.dht.ID(), c.conn.RemoteAddr().String()),
 		)
 		cl.config.Handshaker.Release(
@@ -573,7 +574,7 @@ func (cl *Client) receiveHandshakes(c *connection) (t *torrent, err error) {
 	}.Incoming(buffered)
 
 	if err != nil {
-		return nil, connections.NewBanned(c.conn, errorsx.Wrap(err, "invalid handshake"))
+		return nil, connections.NewBanned(c.conn, false, errorsx.Wrap(err, "invalid handshake"))
 	}
 
 	// cl.config.debug().Println("received incoming connection", int160.FromByteArray(info.PeerID), "->", int160.FromByteArray(cl.config.localID), c.remoteAddr)

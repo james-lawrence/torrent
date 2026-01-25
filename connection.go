@@ -471,7 +471,7 @@ func (cn *connection) checkFailures() error {
 	}
 
 	if !cn.trusted && cn.stats.PiecesDirtiedBad.Int64() > 10 {
-		return connections.NewBanned(cn.conn, errorsx.New("too many bad pieces"))
+		return connections.NewBanned(cn.conn, false, errorsx.New("too many bad pieces"))
 	}
 
 	return nil

@@ -163,7 +163,7 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 		res := t.cfg.UploadRateLimiter.ReserveN(time.Now(), int(r.Length))
 		if !res.OK() {
 			t.cfg.debug().Printf("upload rate limiter burst size < %d\n", r.Length)
-			return 0, connections.NewBanned(t.conn, errorsx.Errorf("upload length is larger than rate limit: %d", r.Length))
+			return 0, connections.NewBanned(t.conn, false, errorsx.Errorf("upload length is larger than rate limit: %d", r.Length))
 		}
 
 		if delay := res.Delay(); delay > 0 {
