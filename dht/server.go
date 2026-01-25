@@ -292,6 +292,7 @@ func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
 	dctx, done := context.WithCancelCause(context.Background())
 	seq, err := s.resolvepublicaddr(dctx, fixed, pc)
 	if err != nil {
+		s.logger().Println("failed to resolve", err)
 		done(nil)
 		return err
 	}

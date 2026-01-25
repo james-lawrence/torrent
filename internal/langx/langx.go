@@ -121,7 +121,6 @@ func isNil(i any) bool {
 	k := v.Kind()
 
 	// Check if the Kind is one that can hold a nil value.
-	//
 	switch k {
 	case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Chan, reflect.Func, reflect.Interface:
 		// v.IsNil() panics if v's Kind is not one of the nilable types,

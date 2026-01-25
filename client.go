@@ -241,19 +241,21 @@ func (cl *Client) BindDHT(d *dht.Server, s sockets.Socket) (err error) {
 		pc net.PacketConn
 	)
 
-	if cl.dht != nil {
-		cl.config.debug().Println("dht server already attached")
-		return nil
-	}
-
 	if pc, ok = s.(net.PacketConn); !ok {
-		cl.config.debug().Println("dht servers disabled: not a packet conn")
+		cl.config.debug().Println("dht bind ignored: not a packet conn")
 		return nil
 	}
 
-	cl.config.debug().Println("binding dht server to client")
+	if cl.dht != nil {
+		cl.config.debug().Printf("dht server already attached %p - %v\n", cl.dht, pc.LocalAddr)
+		return nil
+	}
+
+	cl.config.debug().Printf("binding dht server to client %p - %v\n", d, pc.LocalAddr)
 	cl.lock()
-	cl.dht = d
+	// the check above isnt entirely sufficient to prevent changing the dht.
+	// take the first non-nil of the the two once the lock is acquired.
+	cl.dht = langx.FirstNonZero(cl.dht, d)
 	cl.unlock()
 
 	d.AttachAnnouncer(dht.PeerAnnounceFn(cl.onDHTAnnouncePeer))
