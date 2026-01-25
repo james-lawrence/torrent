@@ -112,7 +112,10 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 		forcecheck = time.Now().Add(maxdelay)
 	)
 
-	trackers := trackerseq(t.md.Trackers)
+	if len(t.md.Trackers) == 0 {
+		log.Println(t.md.ID, "ignoring announce, trackers not available")
+		return
+	}
 
 	for {
 		var (
@@ -127,6 +130,8 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 		} else {
 			forcecheck = ts.Add(maxdelay + backoffx.Random(mindelay))
 		}
+
+		trackers := trackerseq(t.md.Trackers)
 
 		for res := range trackers.Peers(ctx, t, options...) {
 			totalpeers += len(res.Peers)

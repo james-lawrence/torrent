@@ -748,7 +748,7 @@ func (t *chunks) Complete(pid uint64) (changed bool) {
 		delete(t.outstanding, r.Digest)
 
 		tmp := t.missing.CheckedRemove(uint32(cidx))
-		tmp = t.unverified.CheckedRemove(uint32(cidx)) || tmp
+		tmp = tmp || t.unverified.CheckedRemove(uint32(cidx))
 		changed = changed || tmp
 	}
 
