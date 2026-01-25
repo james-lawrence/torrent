@@ -68,7 +68,7 @@ func RandomMulti(dir string, n int, min int64, max int64, options ...metainfo.Op
 		return errorsx.Compact(err, src.Close())
 	}
 
-	for i := 0; i < n; i++ {
+	for range n {
 		if err := addfile(); err != nil {
 			return nil, err
 		}

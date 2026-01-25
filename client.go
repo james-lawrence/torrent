@@ -74,6 +74,25 @@ type Client struct {
 	torrents *memoryseeding
 }
 
+// Modify an already running torrent, returns an error if torrent isnt already running.
+// if you want to start OR modify just use the standard Start function.
+func (cl *Client) Modify(ctx context.Context, md Metadata, options ...Tuner) (err error) {
+	dlt, cached, err := cl.torrents.Load(md.ID, cl.newTorrent, options...)
+	if errorsx.Ignore(err, fs.ErrNotExist) != nil {
+		return err
+	}
+
+	if !cached {
+		return fmt.Errorf("torrent not available")
+	}
+
+	if err = dlt.Tune(options...); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // Query torrent info from the dht
 func (cl *Client) Info(ctx context.Context, m Metadata, options ...Tuner) (i *metainfo.Info, err error) {
 	var (
