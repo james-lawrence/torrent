@@ -22,7 +22,7 @@ type Option func(*Metadata)
 
 // OptionTrackers add the trackers to the torrent.
 func OptionTrackers(trackers ...string) Option {
-	trackers = slicesx.Filter(func(v string) bool { return strings.TrimSpace(v) != "" })
+	trackers = slicesx.Filter(func(v string) bool { return strings.TrimSpace(v) != "" }, trackers...)
 	return func(t *Metadata) {
 		t.Trackers = append(t.Trackers, trackers...)
 	}
