@@ -59,7 +59,7 @@ func TestNext(t *testing.T) {
 		info(id(0x01), addr("127.0.0.2", 1000)),
 		info(id(0x0F), addr("127.0.0.3", 1000)),
 	}
-	tr := New(target, &mockQuerier{}, WithSeeds(seeds))
+	tr := New(target, &mockQuerier{}, WithSeeds(seeds...))
 
 	n1, ok := tr.next()
 	require.True(t, ok)
@@ -118,7 +118,7 @@ func TestTraversal(t *testing.T) {
 		},
 	}
 
-	tr := New(target, querier, WithK(8), WithSeeds([]krpc.NodeInfo{seed}))
+	tr := New(target, querier, WithK(8), WithSeeds(seed))
 
 	var peers []krpc.NodeAddr
 	for peer := range tr.Each(context.Background()) {
@@ -136,18 +136,20 @@ func TestTraversalEarlyTermination(t *testing.T) {
 	target := id(0x00)
 	close1 := info(id(0x01), addr("127.0.0.1", 1000))
 	close2 := info(id(0x02), addr("127.0.0.2", 1000))
-	far := info(id(0xFF), addr("127.0.0.3", 1000))
+	mid := info(id(0x0F), addr("127.0.0.3", 1000))
+	far := info(id(0xFF), addr("127.0.0.4", 1000))
 
 	peer1 := addr("10.0.0.1", 6881)
 
 	querier := &mockQuerier{
 		responses: map[string]QueryResult{
-			"127.0.0.1:1000": {ResponseFrom: &close1, Nodes: []krpc.NodeInfo{far}, Peers: []krpc.NodeAddr{peer1}},
+			"127.0.0.1:1000": {ResponseFrom: &close1, Peers: []krpc.NodeAddr{peer1}},
 			"127.0.0.2:1000": {ResponseFrom: &close2},
+			"127.0.0.3:1000": {ResponseFrom: &mid, Nodes: []krpc.NodeInfo{far}},
 		},
 	}
 
-	tr := New(target, querier, WithK(2), WithSeeds([]krpc.NodeInfo{close1, close2}))
+	tr := New(target, querier, WithK(2), WithSeeds(close1, close2, mid))
 
 	var peers []krpc.NodeAddr
 	for peer := range tr.Each(context.Background()) {
@@ -156,7 +158,7 @@ func TestTraversalEarlyTermination(t *testing.T) {
 
 	require.NoError(t, tr.Err())
 	require.Len(t, peers, 1)
-	require.Equal(t, 1, tr.unqueried.Len())
+	require.Equal(t, 0, tr.unqueried.Len())
 }
 
 func TestContextCancellation(t *testing.T) {
@@ -169,7 +171,7 @@ func TestContextCancellation(t *testing.T) {
 		},
 	}
 
-	tr := New(target, querier, WithSeeds([]krpc.NodeInfo{seed}))
+	tr := New(target, querier, WithSeeds(seed))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -205,7 +207,7 @@ func TestNoPeersReturned(t *testing.T) {
 		},
 	}
 
-	tr := New(target, querier, WithSeeds([]krpc.NodeInfo{seed}))
+	tr := New(target, querier, WithSeeds(seed))
 
 	var peers []krpc.NodeAddr
 	for peer := range tr.Each(context.Background()) {

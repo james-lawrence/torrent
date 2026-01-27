@@ -5,8 +5,9 @@ import (
 	"iter"
 	"net/netip"
 
-	"github.com/anacrolix/multiless"
 	"github.com/google/btree"
+
+	"github.com/james-lawrence/torrent/internal/multiless"
 
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
@@ -22,11 +23,10 @@ type node struct {
 }
 
 func nodeLess(a, b node) bool {
-	return multiless.New().Cmp(
-		a.distance.Cmp(b.distance),
-	).Cmp(
-		a.info.Addr.Compare(b.info.Addr),
-	).Less()
+	var ml multiless.T
+	ml.Compare(a.distance.Cmp(b.distance))
+	ml.Compare(a.info.Addr.Compare(b.info.Addr))
+	return ml.Less()
 }
 
 // Traversal performs a DHT traversal toward a target, yielding peers found.
@@ -67,7 +67,7 @@ func WithK(k int) Option {
 }
 
 // WithSeeds adds initial nodes to query.
-func WithSeeds(nodes []krpc.NodeInfo) Option {
+func WithSeeds(nodes ...krpc.NodeInfo) Option {
 	return func(t *Traversal) {
 		t.addNodes(nodes)
 	}
@@ -78,27 +78,22 @@ func (t *Traversal) addNodes(nodes []krpc.NodeInfo) {
 		if _, ok := t.queried[n.Addr.AddrPort]; ok {
 			continue
 		}
+		distance := n.ID.Int160().Distance(t.target)
+		if t.closest.Len() >= t.k {
+			farthest, _ := t.closest.Max()
+			if distance.Cmp(farthest.distance) > 0 {
+				continue
+			}
+		}
 		t.unqueried.ReplaceOrInsert(node{
 			info:     n,
-			distance: n.ID.Int160().Distance(t.target),
+			distance: distance,
 		})
 	}
 }
 
 func (t *Traversal) next() (node, bool) {
-	n, ok := t.unqueried.Min()
-	if !ok {
-		return node{}, false
-	}
-	if t.closest.Len() >= t.k {
-		farthest, _ := t.closest.Max()
-		if n.distance.Cmp(farthest.distance) > 0 {
-			return node{}, false
-		}
-	}
-	t.unqueried.DeleteMin()
-	t.queried[n.info.Addr.AddrPort] = struct{}{}
-	return n, true
+	return t.unqueried.DeleteMin()
 }
 
 func (t *Traversal) updateClosest(n node) {
@@ -120,6 +115,7 @@ func (t *Traversal) Each(ctx context.Context) iter.Seq[krpc.NodeAddr] {
 			if !ok {
 				return
 			}
+			t.queried[n.info.Addr.AddrPort] = struct{}{}
 			res := t.querier.Query(ctx, n.info.Addr, t.target)
 			t.addNodes(res.Nodes)
 			if res.ResponseFrom != nil {

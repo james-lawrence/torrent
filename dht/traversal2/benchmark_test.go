@@ -69,7 +69,7 @@ func BenchmarkTraversal(b *testing.B) {
 
 	b.Run("new", func(b *testing.B) {
 		for b.Loop() {
-			tr := traversal2.New(target, nodes, traversal2.WithK(benchK), traversal2.WithSeeds(seeds))
+			tr := traversal2.New(target, nodes, traversal2.WithK(benchK), traversal2.WithSeeds(seeds...))
 			for range tr.Each(context.Background()) {
 			}
 		}
