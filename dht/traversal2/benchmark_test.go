@@ -32,7 +32,10 @@ func (q benchQuerier) Query(_ context.Context, addr krpc.NodeAddr, _ int160.T) t
 	if idx+2 < len(q) {
 		nodes = append(nodes, q[idx+2])
 	}
-	return traversal2.QueryResult{ResponseFrom: &q[idx], Nodes: nodes}
+	peers := []krpc.NodeAddr{
+		krpc.NewNodeAddrFromAddrPort(netip.MustParseAddrPort(fmt.Sprintf("10.0.0.%d:6881", idx))),
+	}
+	return traversal2.QueryResult{ResponseFrom: &q[idx], Nodes: nodes, Peers: peers}
 }
 
 func (q benchQuerier) QueryOld(_ context.Context, addr krpc.NodeAddr) traversal.QueryResult {

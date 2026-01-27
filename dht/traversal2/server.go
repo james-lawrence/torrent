@@ -16,4 +16,5 @@ type Querier interface {
 type QueryResult struct {
 	ResponseFrom *krpc.NodeInfo
 	Nodes        []krpc.NodeInfo
+	Peers        []krpc.NodeAddr
 }
