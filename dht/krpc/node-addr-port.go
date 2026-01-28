@@ -11,26 +11,24 @@ import (
 )
 
 func NewNodeAddrFromAddrPort(ap netip.AddrPort) NodeAddr {
+	addr := ap.Addr()
+	if addr.IsValid() {
+		addr = netip.AddrFrom16(addr.As16())
+	}
 	return NodeAddr{
-		AddrPort: ap,
+		AddrPort: netip.AddrPortFrom(addr, ap.Port()),
 	}
 }
 
 func NewNodeAddrFromIPPort(ip net.IP, port uint16) NodeAddr {
 	if ip == nil {
-		addr, _ := netip.AddrFromSlice(ip)
 		return NodeAddr{
-			AddrPort: netip.AddrPortFrom(addr, port),
+			AddrPort: netip.AddrPortFrom(netip.Addr{}, port),
 		}
 	}
 
-	ipaddr := netip.AddrFrom16([16]byte(ip.To16()))
-	if ip.To4() != nil {
-		ipaddr = netip.AddrFrom4([4]byte(ip.To4()))
-	}
-
 	return NodeAddr{
-		AddrPort: netip.AddrPortFrom(ipaddr, port),
+		AddrPort: netip.AddrPortFrom(netip.AddrFrom16([16]byte(ip.To16())), port),
 	}
 }
 
@@ -47,14 +45,22 @@ func (me NodeAddr) String() string {
 	return ""
 }
 func (me NodeAddr) UDP() *net.UDPAddr {
+	addr := me.Addr()
+	if addr.Is4In6() {
+		addr = addr.Unmap()
+	}
 	return &net.UDPAddr{
-		IP:   me.Addr().AsSlice(),
+		IP:   addr.AsSlice(),
 		Port: int(me.Port()),
 	}
 }
 
 func (me NodeAddr) IP() net.IP {
-	return me.Addr().AsSlice()
+	addr := me.Addr()
+	if addr.Is4In6() {
+		return addr.Unmap().AsSlice()
+	}
+	return addr.AsSlice()
 }
 
 func (me NodeAddr) Compare(r NodeAddr) int {

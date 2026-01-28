@@ -1,20 +1,11 @@
 package krpc
 
-import (
-	"net/netip"
-
-	"github.com/anacrolix/missinggo/slices"
-)
-
 type CompactIPv4NodeAddrs []NodeAddr
 
 func (CompactIPv4NodeAddrs) ElemSize() int { return 6 }
 
 func (me CompactIPv4NodeAddrs) MarshalBinary() ([]byte, error) {
-	return marshalBinarySlice(slices.Map(func(addr NodeAddr) NodeAddr {
-		addr.AddrPort = netip.AddrPortFrom(netip.AddrFrom4(addr.Addr().As4()), addr.Port())
-		return addr
-	}, me).(CompactIPv4NodeAddrs))
+	return marshalBinarySlice(me)
 }
 
 func (me CompactIPv4NodeAddrs) MarshalBencode() ([]byte, error) {

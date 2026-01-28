@@ -1,18 +1,18 @@
 package peer_store
 
 import (
-	"bytes"
+	"cmp"
 	"fmt"
 	"io"
+	"net/netip"
 	"slices"
 	"sort"
 	"sync"
 	"time"
 
-	"github.com/anacrolix/multiless"
-
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
+	"github.com/james-lawrence/torrent/internal/multiless"
 )
 
 type InMemory struct {
@@ -22,8 +22,7 @@ type InMemory struct {
 	index  map[InfoHash]indexValue
 }
 
-// A uniqueness key for entries to the entry details
-type indexValue = map[string]NodeAndTime
+type indexValue = map[netip.Addr]NodeAndTime
 
 type debugWriterInterface interface {
 	WriteDebug(w io.Writer)
@@ -36,19 +35,14 @@ var _ interface {
 func (me *InMemory) GetPeers(ih InfoHash) (ret []krpc.NodeAddr) {
 	me.mu.RLock()
 	defer me.mu.RUnlock()
-	for b := range me.index[ih] {
-		var r krpc.NodeAddr
-		err := r.UnmarshalBinary([]byte(b))
-		if err != nil {
-			panic(err)
-		}
-		ret = append(ret, r)
+	for _, v := range me.index[ih] {
+		ret = append(ret, v.NodeAddr)
 	}
 	return
 }
 
 func (me *InMemory) AddPeer(ih InfoHash, na krpc.NodeAddr) {
-	key := string(na.IP())
+	key := na.Addr()
 	me.mu.Lock()
 	defer me.mu.Unlock()
 	if me.index == nil {
@@ -102,11 +96,12 @@ func (me *InMemory) WriteDebug(w io.Writer) {
 		addrs := elem.addrs
 		fmt.Fprintf(w, "%v (count %v):\n", elem.InfoHash, len(addrs))
 		sort.Slice(addrs, func(i, j int) bool {
-			return multiless.New().Cmp(
-				bytes.Compare(addrs[i].IP(), addrs[j].IP())).Int64(
-				addrs[j].Time.UnixNano(), addrs[i].Time.UnixNano()).Int(
-				int(addrs[i].Port()), int(addrs[j].Port()),
-			).MustLess()
+			var ml multiless.T
+			ml.Compare(addrs[i].Addr().Compare(addrs[j].Addr()))
+			ml.StrictNext(addrs[j].Time.UnixNano() == addrs[i].Time.UnixNano(),
+				addrs[j].Time.UnixNano() < addrs[i].Time.UnixNano())
+			ml.Compare(cmp.Compare(addrs[i].Port(), addrs[j].Port()))
+			return ml.Final()
 		})
 		for _, na := range addrs {
 			fmt.Fprintf(w, "\t%v (age: %v)\n", na.NodeAddr, time.Since(na.Time))

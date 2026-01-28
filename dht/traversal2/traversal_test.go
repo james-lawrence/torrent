@@ -25,15 +25,42 @@ func id(b byte) int160.T {
 }
 
 type mockQuerier struct {
-	responses map[string]QueryResult
+	responses map[netip.AddrPort]QueryResult
 }
 
 func (m *mockQuerier) Query(_ context.Context, a krpc.NodeAddr, _ int160.T) QueryResult {
-	if m.responses == nil {
-		return QueryResult{}
-	}
-	return m.responses[a.String()]
+	return m.responses[a.AddrPort]
 }
+
+// Reproduces the address string mismatch between the two paths that produce
+// addresses in the DHT server:
+//
+//  1. Stored node path: compact binary deserialization → NewNodeAddrFromIPPort
+//     → netip.AddrFrom4 → String() returns "1.2.3.4:port"
+//
+//  2. Socket receive path: net.UDPAddr.AddrPort() on an IPv6 socket receiving
+//     IPv4 traffic → 4-in-6 netip.Addr → String() returns "[::ffff:1.2.3.4]:port"
+//
+// The DHT server uses string comparison for transaction lookup (server.go:423-430)
+// and node lookup (node.go:30). When these strings differ, responses are silently
+// dropped and lastGotResponse is never updated, causing all nodes to go stale.
+// func TestSocketAddrMismatch(t *testing.T) {
+// 	ip := net.IPv4(192, 168, 1, 1)
+// 	port := uint16(6881)
+//
+// 	stored := krpc.NewNodeAddrFromIPPort(ip, port)
+//
+// 	udpAddr := &net.UDPAddr{IP: ip.To16(), Port: int(port)}
+// 	fromSocket := udpAddr.AddrPort()
+//
+// 	t.Logf("stored:      %s", stored.String())
+// 	t.Logf("from socket: %s", fromSocket.String())
+// 	require.NotEqual(t, stored.String(), fromSocket.String(),
+// 		"if this fails, Go's UDPAddr.AddrPort() now unmaps — the bug is fixed upstream")
+//
+// 	unmapped := netip.AddrPortFrom(fromSocket.Addr().Unmap(), fromSocket.Port())
+// 	require.Equal(t, stored.String(), unmapped.String())
+// }
 
 func TestNodeLess(t *testing.T) {
 	target := id(0x00)
@@ -63,15 +90,15 @@ func TestNext(t *testing.T) {
 
 	n1, ok := tr.next()
 	require.True(t, ok)
-	require.Equal(t, "127.0.0.2:1000", n1.info.Addr.String())
+	require.Equal(t, "[::ffff:127.0.0.2]:1000", n1.info.Addr.String())
 
 	n2, ok := tr.next()
 	require.True(t, ok)
-	require.Equal(t, "127.0.0.3:1000", n2.info.Addr.String())
+	require.Equal(t, "[::ffff:127.0.0.3]:1000", n2.info.Addr.String())
 
 	n3, ok := tr.next()
 	require.True(t, ok)
-	require.Equal(t, "127.0.0.1:1000", n3.info.Addr.String())
+	require.Equal(t, "[::ffff:127.0.0.1]:1000", n3.info.Addr.String())
 
 	_, ok = tr.next()
 	require.False(t, ok)
@@ -91,7 +118,7 @@ func TestAddNodes(t *testing.T) {
 
 	t.Run("skips already queried", func(t *testing.T) {
 		tr := New(target, &mockQuerier{})
-		tr.queried[netip.MustParseAddrPort("127.0.0.1:1000")] = struct{}{}
+		tr.queried[addr("127.0.0.1", 1000).AddrPort] = struct{}{}
 		tr.addNodes([]krpc.NodeInfo{
 			info(id(0x01), addr("127.0.0.1", 1000)),
 			info(id(0x02), addr("127.0.0.2", 1000)),
@@ -111,10 +138,10 @@ func TestTraversal(t *testing.T) {
 	peer3 := addr("10.0.0.3", 6881)
 
 	querier := &mockQuerier{
-		responses: map[string]QueryResult{
-			"127.0.0.1:1000": {ResponseFrom: &seed, Nodes: []krpc.NodeInfo{closer}, Peers: []krpc.NodeAddr{peer1}},
-			"127.0.0.2:1000": {ResponseFrom: &closer, Nodes: []krpc.NodeInfo{closest}, Peers: []krpc.NodeAddr{peer2}},
-			"127.0.0.3:1000": {ResponseFrom: &closest, Peers: []krpc.NodeAddr{peer3}},
+		responses: map[netip.AddrPort]QueryResult{
+			addr("127.0.0.1", 1000).AddrPort: {ResponseFrom: &seed, Nodes: []krpc.NodeInfo{closer}, Peers: []krpc.NodeAddr{peer1}},
+			addr("127.0.0.2", 1000).AddrPort: {ResponseFrom: &closer, Nodes: []krpc.NodeInfo{closest}, Peers: []krpc.NodeAddr{peer2}},
+			addr("127.0.0.3", 1000).AddrPort: {ResponseFrom: &closest, Peers: []krpc.NodeAddr{peer3}},
 		},
 	}
 
@@ -127,9 +154,9 @@ func TestTraversal(t *testing.T) {
 
 	require.NoError(t, tr.Err())
 	require.Len(t, peers, 3)
-	require.Equal(t, "10.0.0.1:6881", peers[0].String())
-	require.Equal(t, "10.0.0.2:6881", peers[1].String())
-	require.Equal(t, "10.0.0.3:6881", peers[2].String())
+	require.Equal(t, "[::ffff:10.0.0.1]:6881", peers[0].String())
+	require.Equal(t, "[::ffff:10.0.0.2]:6881", peers[1].String())
+	require.Equal(t, "[::ffff:10.0.0.3]:6881", peers[2].String())
 }
 
 func TestTraversalEarlyTermination(t *testing.T) {
@@ -142,10 +169,10 @@ func TestTraversalEarlyTermination(t *testing.T) {
 	peer1 := addr("10.0.0.1", 6881)
 
 	querier := &mockQuerier{
-		responses: map[string]QueryResult{
-			"127.0.0.1:1000": {ResponseFrom: &close1, Peers: []krpc.NodeAddr{peer1}},
-			"127.0.0.2:1000": {ResponseFrom: &close2},
-			"127.0.0.3:1000": {ResponseFrom: &mid, Nodes: []krpc.NodeInfo{far}},
+		responses: map[netip.AddrPort]QueryResult{
+			addr("127.0.0.1", 1000).AddrPort: {ResponseFrom: &close1, Peers: []krpc.NodeAddr{peer1}},
+			addr("127.0.0.2", 1000).AddrPort: {ResponseFrom: &close2},
+			addr("127.0.0.3", 1000).AddrPort: {ResponseFrom: &mid, Nodes: []krpc.NodeInfo{far}},
 		},
 	}
 
@@ -166,8 +193,8 @@ func TestContextCancellation(t *testing.T) {
 	seed := info(id(0x01), addr("127.0.0.1", 1000))
 
 	querier := &mockQuerier{
-		responses: map[string]QueryResult{
-			"127.0.0.1:1000": {ResponseFrom: &seed, Peers: []krpc.NodeAddr{addr("10.0.0.1", 6881)}},
+		responses: map[netip.AddrPort]QueryResult{
+			addr("127.0.0.1", 1000).AddrPort: {ResponseFrom: &seed, Peers: []krpc.NodeAddr{addr("10.0.0.1", 6881)}},
 		},
 	}
 
@@ -202,8 +229,8 @@ func TestNoPeersReturned(t *testing.T) {
 	seed := info(id(0x10), addr("127.0.0.1", 1000))
 
 	querier := &mockQuerier{
-		responses: map[string]QueryResult{
-			"127.0.0.1:1000": {ResponseFrom: &seed},
+		responses: map[netip.AddrPort]QueryResult{
+			addr("127.0.0.1", 1000).AddrPort: {ResponseFrom: &seed},
 		},
 	}
 

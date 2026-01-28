@@ -17,6 +17,7 @@ type Addr interface {
 	IP() net.IP
 	String() string
 	KRPC() krpc.NodeAddr
+	AddrPort() netip.AddrPort
 }
 
 // Speeds up some of the commonly called Addr methods.
@@ -37,7 +38,11 @@ func (ca cachedAddr) KRPC() krpc.NodeAddr {
 }
 
 func (ca cachedAddr) IP() net.IP {
-	return net.IP(ca.v.Addr().AsSlice())
+	addr := ca.v.Addr()
+	if addr.Is4In6() {
+		return net.IP(addr.Unmap().AsSlice())
+	}
+	return net.IP(addr.AsSlice())
 }
 
 func (ca cachedAddr) Port() uint16 {
@@ -48,7 +53,12 @@ func (ca cachedAddr) Raw() net.Addr {
 	return ca.raw
 }
 
+func (ca cachedAddr) AddrPort() netip.AddrPort {
+	return ca.v
+}
+
 func NewAddr(v netip.AddrPort) Addr {
+	v = netip.AddrPortFrom(netip.AddrFrom16(v.Addr().As16()), v.Port())
 	return cachedAddr{
 		raw: net.UDPAddrFromAddrPort(v),
 		v:   v,

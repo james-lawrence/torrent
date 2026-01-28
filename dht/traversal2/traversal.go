@@ -4,6 +4,7 @@ import (
 	"context"
 	"iter"
 	"net/netip"
+	"time"
 
 	"github.com/google/btree"
 
@@ -14,7 +15,8 @@ import (
 )
 
 const (
-	defaultK = 8
+	defaultK            = 8
+	defaultQueryTimeout = 30 * time.Second
 )
 
 type node struct {
@@ -31,24 +33,26 @@ func nodeLess(a, b node) bool {
 
 // Traversal performs a DHT traversal toward a target, yielding peers found.
 type Traversal struct {
-	target    int160.T
-	querier   Querier
-	k         int
-	unqueried *btree.BTreeG[node]
-	queried   map[netip.AddrPort]struct{}
-	closest   *btree.BTreeG[node]
-	err       error
+	target       int160.T
+	querier      Querier
+	k            int
+	queryTimeout time.Duration
+	unqueried    *btree.BTreeG[node]
+	queried      map[netip.AddrPort]struct{}
+	closest      *btree.BTreeG[node]
+	err          error
 }
 
 // New creates a new Traversal.
 func New(target int160.T, querier Querier, opts ...Option) *Traversal {
 	t := &Traversal{
-		target:    target,
-		querier:   querier,
-		k:         defaultK,
-		unqueried: btree.NewG(2, nodeLess),
-		queried:   make(map[netip.AddrPort]struct{}),
-		closest:   btree.NewG(2, nodeLess),
+		target:       target,
+		querier:      querier,
+		k:            defaultK,
+		queryTimeout: defaultQueryTimeout,
+		unqueried:    btree.NewG(2, nodeLess),
+		queried:      make(map[netip.AddrPort]struct{}),
+		closest:      btree.NewG(2, nodeLess),
 	}
 	for _, opt := range opts {
 		opt(t)
@@ -63,6 +67,13 @@ type Option func(*Traversal)
 func WithK(k int) Option {
 	return func(t *Traversal) {
 		t.k = k
+	}
+}
+
+// WithQueryTimeout sets the per-query timeout.
+func WithQueryTimeout(d time.Duration) Option {
+	return func(t *Traversal) {
+		t.queryTimeout = d
 	}
 }
 
@@ -116,7 +127,9 @@ func (t *Traversal) Each(ctx context.Context) iter.Seq[krpc.NodeAddr] {
 				return
 			}
 			t.queried[n.info.Addr.AddrPort] = struct{}{}
-			res := t.querier.Query(ctx, n.info.Addr, t.target)
+			qctx, qcancel := context.WithTimeout(ctx, t.queryTimeout)
+			res := t.querier.Query(qctx, n.info.Addr, t.target)
+			qcancel()
 			t.addNodes(res.Nodes)
 			if res.ResponseFrom != nil {
 				t.updateClosest(node{

@@ -3,6 +3,7 @@ package traversal
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,7 +58,7 @@ func Start(input OperationInput) *Operation {
 	op := &Operation{
 		targetInt160: targetInt160,
 		input:        herp,
-		queried:      make(map[addrString]struct{}),
+		queried:      make(map[netip.AddrPort]struct{}),
 		closest:      k_nearest_nodes.New(targetInt160, herp.K),
 		unqueried:    containers.NewImmutableAddrMaybeIdsByDistance(targetInt160),
 	}
@@ -65,13 +66,11 @@ func Start(input OperationInput) *Operation {
 	return op
 }
 
-type addrString string
-
 type Operation struct {
 	stats        Stats
 	mu           sync.Mutex
 	unqueried    containers.AddrMaybeIdsByDistance
-	queried      map[addrString]struct{}
+	queried      map[netip.AddrPort]struct{}
 	closest      k_nearest_nodes.Type
 	targetInt160 int160.T
 	input        defaultsAppliedOperationInput
@@ -115,7 +114,7 @@ func (op *Operation) Stalled() chansync.Active {
 }
 
 func (op *Operation) addNodeLocked(n types.AddrMaybeId) (err error) {
-	if _, ok := op.queried[addrString(n.Addr.String())]; ok {
+	if _, ok := op.queried[n.Addr.AddrPort]; ok {
 		err = errors.New("already queried")
 		return
 	}
@@ -147,7 +146,7 @@ func (op *Operation) AddNodes(nodes []types.AddrMaybeId) (added int) {
 }
 
 func (op *Operation) markQueried(addr krpc.NodeAddr) {
-	op.queried[addrString(addr.String())] = struct{}{}
+	op.queried[addr.AddrPort] = struct{}{}
 }
 
 func (op *Operation) closestUnqueried() (ret types.AddrMaybeId) {
