@@ -5,6 +5,7 @@ package dht
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -59,21 +60,21 @@ func Scrape() AnnounceOpt {
 
 // Arguments for announce_peer from a Server.Announce.
 type AnnouncePeerOpts struct {
-	// The peer port that we're announcing.
-	Port uint16
+	// The node that we're announcing.
+	Addressable addressable
 	// The peer port should be determined by the receiver to be the source port of the query packet.
 	ImpliedPort bool
 }
 
-// Finish an Announce get_peers traversal with an announce of a local peer.
-func AnnouncePeer(implied bool, port uint16) AnnounceOpt {
-	return func(a *Announce) {
-		if port == 0 && !implied {
-			return
-		}
+type addressable interface {
+	AddrPort() netip.AddrPort
+}
 
+// Finish an Announce get_peers traversal with an announce of a local peer.
+func AnnouncePeer(n addressable, implied bool) AnnounceOpt {
+	return func(a *Announce) {
 		a.announcePeerOpts = &AnnouncePeerOpts{
-			Port:        port,
+			Addressable: n,
 			ImpliedPort: implied,
 		}
 	}
@@ -145,6 +146,12 @@ func (a *Announce) announceClosest(ctx context.Context) {
 }
 
 func (a *Announce) announcePeer(ctx context.Context, peer dhtutil.Elem) error {
+	port := a.announcePeerOpts.Addressable.AddrPort().Port()
+	implied := a.announcePeerOpts.ImpliedPort
+	if port == 0 && !implied { // nothing to do in this case its invalid just ignore.
+		return nil
+	}
+
 	ctx, done := context.WithTimeout(ctx, 30*time.Second)
 	defer done()
 
@@ -158,9 +165,9 @@ func (a *Announce) announcePeer(ctx context.Context, peer dhtutil.Elem) error {
 		ctx,
 		NewAddr(peer.Addr.AddrPort),
 		a.infoHash,
-		a.announcePeerOpts.Port,
+		port,
 		peer.Data.(string),
-		a.announcePeerOpts.ImpliedPort,
+		implied,
 	).Err
 }
 

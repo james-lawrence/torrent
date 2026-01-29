@@ -11,10 +11,10 @@ import (
 	"github.com/james-lawrence/torrent/internal/iterx"
 )
 
-func DHTAnnounceOnce(ctx context.Context, cln *Client, d *dht.Server, id int160.T) (err error) {
-	// log.Println("dht announced initiated", id, cln.LocalPort16())
-	// defer log.Println("dht announced completed", id, cln.LocalPort16())
-	announced, err := d.AnnounceTraversal(ctx, id, dht.AnnouncePeer(true, cln.LocalPort16()))
+func DHTAnnounceOnce(ctx context.Context, d *dht.Server, id int160.T) (err error) {
+	log.Println("dht announced initiated", id, d.AddrPort())
+	defer log.Println("dht announced completed", id, d.AddrPort())
+	announced, err := d.AnnounceTraversal(ctx, id, dht.AnnouncePeer(d, true))
 	if err != nil {
 		return errorsx.Wrapf(err, "dht failed to announce: %s", id)
 	}
@@ -63,7 +63,7 @@ func (t *announceseq) Err() error {
 }
 
 func DHTAnnounce(ctx context.Context, d *dht.Server, id int160.T) (iterx.Seq[dht.PeersValues], error) {
-	announced, err := d.AnnounceTraversal(ctx, id, dht.AnnouncePeer(false, d.AddrPort().Port()))
+	announced, err := d.AnnounceTraversal(ctx, id, dht.AnnouncePeer(d, true))
 	if err != nil {
 		return nil, errorsx.Wrapf(err, "dht failed to announce: %s", id)
 	}

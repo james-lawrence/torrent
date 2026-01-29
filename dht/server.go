@@ -198,7 +198,12 @@ func (s *Server) AddrPort() netip.AddrPort {
 		return netip.AddrPortFrom(netip.IPv6Unspecified(), 0)
 	}
 
-	return langx.Zero(s.dynamicaddr.Load())
+	addr := langx.Zero(s.dynamicaddr.Load())
+	if addr.Addr().Is4In6() {
+		return netip.AddrPortFrom(addr.Addr(), addr.Port())
+	}
+
+	return addr
 }
 
 type discard struct{}

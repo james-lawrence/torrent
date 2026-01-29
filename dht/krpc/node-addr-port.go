@@ -44,13 +44,10 @@ func (me NodeAddr) String() string {
 
 	return ""
 }
+
 func (me NodeAddr) UDP() *net.UDPAddr {
-	addr := me.Addr()
-	if addr.Is4In6() {
-		addr = addr.Unmap()
-	}
 	return &net.UDPAddr{
-		IP:   addr.AsSlice(),
+		IP:   me.IP(),
 		Port: int(me.Port()),
 	}
 }
@@ -75,7 +72,7 @@ func (me NodeAddr) Equal(r NodeAddr) bool {
 }
 
 func (ni NodeAddr) MarshalBinary() ([]byte, error) {
-	var encoded serialized = serialized{
+	var encoded = serialized{
 		IP:   ni.IP(),
 		Port: ni.Port(),
 	}
@@ -107,7 +104,7 @@ func (ni *NodeAddr) UnmarshalBencode(b []byte) (err error) {
 }
 
 func (ni NodeAddr) MarshalBencode() ([]byte, error) {
-	var encoded serialized = serialized{
+	var encoded = serialized{
 		IP:   ni.IP(),
 		Port: ni.Port(),
 	}

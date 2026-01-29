@@ -670,7 +670,11 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr netip.Add
 		l: cl.config.DownloadRateLimiter,
 		r: c.r,
 	}
-	cl.config.debug().Printf("initialized with remote %v (outgoing=%t)\n", remoteAddr, outgoing)
+
+	if nc != nil {
+		cl.config.debug().Printf("initialized with remote %v|%v %v (outgoing=%t)\n", cl.dht.AddrPort(), nc.LocalAddr(), remoteAddr, outgoing)
+	}
+
 	return c
 }
 

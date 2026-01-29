@@ -18,7 +18,7 @@ func TestAnnounceNoStartingNodes(t *testing.T) {
 	backgroundServe(t, s, mustListen(":0"))
 	defer s.Close()
 
-	_, err = s.AnnounceTraversal(t.Context(), int160.Random(), AnnouncePeer(true, 0))
+	_, err = s.AnnounceTraversal(t.Context(), int160.Random(), AnnouncePeer(s, true))
 	require.ErrorIs(t, err, ErrDHTNoInitialNodes)
 }
 
@@ -30,7 +30,7 @@ func TestAnnounceStopsNoPending(t *testing.T) {
 	backgroundServe(t, s, mustListen(":0"))
 
 	require.NoError(t, err)
-	a, err := s.AnnounceTraversal(t.Context(), int160.Random(), AnnouncePeer(true, 0))
+	a, err := s.AnnounceTraversal(t.Context(), int160.Random(), AnnouncePeer(s, true))
 	require.NoError(t, err)
 	defer a.Close()
 	<-a.Peers
