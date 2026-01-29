@@ -1,8 +1,9 @@
-package dht
+package traversal2
 
 import (
 	"context"
 	"iter"
+	"net"
 	"os"
 	"sync"
 	"testing"
@@ -10,24 +11,41 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
 	"github.com/james-lawrence/torrent/dht/traversal"
-	"github.com/james-lawrence/torrent/dht/traversal2"
 	"github.com/james-lawrence/torrent/dht/types"
+	"github.com/james-lawrence/torrent/internal/errorsx"
 )
 
-type serverQuerier struct {
-	s *Server
+func mustListen(addr string) net.PacketConn {
+	ret, err := net.ListenPacket("udp", addr)
+	if err != nil {
+		panic(err)
+	}
+	return ret
 }
 
-func (q serverQuerier) Query(ctx context.Context, addr krpc.NodeAddr, target int160.T) traversal2.QueryResult {
-	res := q.s.GetPeers(ctx, NewAddr(addr.AddrPort), target, false)
+func backgroundServe(t *testing.T, s *dht.Server, pc net.PacketConn) {
+	orig := s.ID()
+	errorsx.Log(errorsx.Wrap(s.Serve(t.Context(), pc), "dht server shutdown"))
+	require.Eventually(t, func() bool {
+		return orig != s.ID()
+	}, time.Second, time.Millisecond)
+}
+
+type serverQuerier struct {
+	s *dht.Server
+}
+
+func (q serverQuerier) Query(ctx context.Context, addr krpc.NodeAddr, target int160.T) QueryResult {
+	res := q.s.GetPeers(ctx, dht.NewAddr(addr.AddrPort), target, false)
 	r := res.Reply.R
 	if r == nil {
-		return traversal2.QueryResult{}
+		return QueryResult{}
 	}
-	return traversal2.QueryResult{
+	return QueryResult{
 		ResponseFrom: &krpc.NodeInfo{Addr: addr, ID: r.ID},
 		Nodes:        r.Nodes,
 		Peers:        r.Values,
@@ -46,7 +64,7 @@ func TestLiveDHTComparison(t *testing.T) {
 	target, err := int160.FromHexEncodedString("1e873cd33f55737aaaefc0c282c428593c16e106")
 	require.NoError(t, err)
 
-	srv, err := NewServer(32, OptionBootstrapGlobal)
+	srv, err := dht.NewServer(32, dht.OptionBootstrapGlobal)
 	require.NoError(t, err)
 	backgroundServe(t, srv, mustListen("0.0.0.0:0"))
 	defer srv.Close()
@@ -84,7 +102,7 @@ func TestLiveDHTComparison(t *testing.T) {
 	t.Run("new", func(t *testing.T) {
 		var results []krpc.NodeAddr
 
-		tr := traversal2.New(target, serverQuerier{s: srv}, traversal2.WithK(8), traversal2.WithSeeds(seeds...))
+		tr := New(target, serverQuerier{s: srv}, WithK(8), WithSeeds(seeds...))
 		next, done := iter.Pull(tr.Each(ctx))
 		defer done()
 
@@ -110,7 +128,7 @@ func TestLiveDHTComparison(t *testing.T) {
 			Target: krpc.ID(target.AsByteArray()),
 			K:      8,
 			DoQuery: func(ctx context.Context, addr krpc.NodeAddr) traversal.QueryResult {
-				res := srv.GetPeers(ctx, NewAddr(addr.AddrPort), target, false)
+				res := srv.GetPeers(ctx, dht.NewAddr(addr.AddrPort), target, false)
 				r := res.Reply.R
 				if r == nil {
 					return traversal.QueryResult{}
