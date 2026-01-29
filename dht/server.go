@@ -421,7 +421,7 @@ func (s *Server) processPacket(ctx context.Context, b []byte, addr Addr) {
 	defer s.mu.Unlock()
 
 	tk := transactionKey{
-		RemoteAddr: addr.String(),
+		RemoteAddr: addr.AddrPort(),
 		T:          d.T,
 	}
 	if !s.transactions.Have(tk) {
@@ -895,7 +895,7 @@ func (s *Server) Query(ctx context.Context, addr Addr, input QueryInput) (ret Qu
 		},
 	}
 	tk := transactionKey{
-		RemoteAddr: addr.String(),
+		RemoteAddr: addr.AddrPort(),
 	}
 	s.mu.Lock()
 	s.stats.OutboundQueriesAttempted++

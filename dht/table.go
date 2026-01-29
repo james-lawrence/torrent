@@ -3,6 +3,7 @@ package dht
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"slices"
 	"sync"
 
@@ -21,7 +22,7 @@ type table struct {
 	k       int
 	m       *sync.Mutex
 	buckets [160]bucket
-	addrs   map[string]map[int160.T]struct{}
+	addrs   map[netip.AddrPort]map[int160.T]struct{}
 }
 
 func (tbl *table) K() int {
@@ -37,13 +38,13 @@ func (tbl *table) randomIdForBucket(root int160.T, bucketIndex int) int160.T {
 }
 
 func (tbl *table) dropNode(root int160.T, n *node) {
-	as := n.Addr.String()
-	if _, ok := tbl.addrs[as][n.Id]; !ok {
+	ap := n.Addr.AddrPort()
+	if _, ok := tbl.addrs[ap][n.Id]; !ok {
 		panic("missing id for addr")
 	}
-	delete(tbl.addrs[as], n.Id)
-	if len(tbl.addrs[as]) == 0 {
-		delete(tbl.addrs, as)
+	delete(tbl.addrs[ap], n.Id)
+	if len(tbl.addrs[ap]) == 0 {
+		delete(tbl.addrs, ap)
 	}
 	b := tbl.bucketForID(root, n.Id)
 
@@ -130,13 +131,13 @@ func (tbl *table) addNode(root int160.T, n *node) error {
 	defer tbl.m.Unlock()
 
 	if tbl.addrs == nil {
-		tbl.addrs = make(map[string]map[int160.T]struct{}, 160*tbl.k)
+		tbl.addrs = make(map[netip.AddrPort]map[int160.T]struct{}, 160*tbl.k)
 	}
-	as := n.Addr.String()
-	if tbl.addrs[as] == nil {
-		tbl.addrs[as] = make(map[int160.T]struct{}, 1)
+	ap := n.Addr.AddrPort()
+	if tbl.addrs[ap] == nil {
+		tbl.addrs[ap] = make(map[int160.T]struct{}, 1)
 	}
 
-	tbl.addrs[as][n.Id] = struct{}{}
+	tbl.addrs[ap][n.Id] = struct{}{}
 	return nil
 }

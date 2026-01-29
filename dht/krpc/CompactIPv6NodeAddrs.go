@@ -1,20 +1,19 @@
 package krpc
 
-import (
-	"net/netip"
-
-	"github.com/anacrolix/missinggo/slices"
-)
+import "encoding/binary"
 
 type CompactIPv6NodeAddrs []NodeAddr
 
 func (CompactIPv6NodeAddrs) ElemSize() int { return 18 }
 
 func (me CompactIPv6NodeAddrs) MarshalBinary() ([]byte, error) {
-	return marshalBinarySlice(slices.Map(func(na NodeAddr) NodeAddr {
-		na.AddrPort = netip.AddrPortFrom(netip.AddrFrom16(na.Addr().As16()), na.Port())
-		return na
-	}, me).(CompactIPv6NodeAddrs))
+	ret := make([]byte, 0, len(me)*me.ElemSize())
+	for _, na := range me {
+		ip := na.Addr().As16()
+		ret = append(ret, ip[:]...)
+		ret = binary.BigEndian.AppendUint16(ret, na.Port())
+	}
+	return ret, nil
 }
 
 func (me CompactIPv6NodeAddrs) MarshalBencode() ([]byte, error) {

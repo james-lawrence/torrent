@@ -45,19 +45,17 @@ func (b *bucket) NodeIter() iter.Seq[*node] {
 func (b *bucket) EachNode(f func(*node) bool) bool {
 	next, stop := iter.Pull(b.NodeIter())
 	defer stop()
-	for c := true; c; {
+	for {
 		b._m.RLock()
 		v, ok := next()
 		b._m.RUnlock()
 		if !ok {
-			return false
+			return true
 		}
 		if !f(v) {
 			return false
 		}
 	}
-
-	return true
 }
 
 func (b *bucket) AddNode(n *node, k int) {

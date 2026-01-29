@@ -27,7 +27,7 @@ func (s *Server) IsQuestionable(n *node) bool {
 }
 
 func (n *node) hasAddrAndID(addr Addr, id int160.T) bool {
-	return id == n.Id && n.Addr.String() == addr.String()
+	return id == n.Id && n.Addr.AddrPort() == addr.AddrPort()
 }
 
 func (n *node) IsSecure() bool {

@@ -99,9 +99,7 @@ func TestMarshalUnmarshalMsg(t *testing.T) {
 		R: &Return{
 			ID: IdFromString("\xeb\xff6isQ\xffJ\xec)ͺ\xab\xf2\xfb\xe3F|\xc2g"),
 		},
-		IP: NodeAddr{
-			AddrPort: netip.AddrPortFrom(netip.AddrFrom4([4]byte{124, 168, 180, 8}), 62844),
-		},
+		IP: NewNodeAddrFromIPPort(net.IPv4(124, 168, 180, 8), 62844),
 	}, "d2:ip6:|\xa8\xb4\b\xf5|1:rd2:id20:\xeb\xff6isQ\xffJ\xec)ͺ\xab\xf2\xfb\xe3F|\xc2ge1:t1:\x031:y1:re")
 
 	// var k [32]byte
