@@ -199,8 +199,8 @@ func (s *Server) AddrPort() netip.AddrPort {
 	}
 
 	addr := langx.Zero(s.dynamicaddr.Load())
-	if addr.Addr().Is4In6() {
-		return netip.AddrPortFrom(addr.Addr(), addr.Port())
+	if ip := addr.Addr(); ip.Is4In6() {
+		return netip.AddrPortFrom(ip.Unmap(), addr.Port())
 	}
 
 	return addr
