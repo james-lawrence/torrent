@@ -1308,7 +1308,7 @@ func (t *torrent) consumeDhtAnnouncePeers(ctx context.Context, pvs <-chan dht.Pe
 	}
 }
 
-func (t *torrent) announceToDht(impliedPort bool, s *dht.Server) error {
+func (t *torrent) announceToDht(s *dht.Server, impliedPort bool) error {
 	ctx, done := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer done()
 
@@ -1343,7 +1343,7 @@ func (t *torrent) dhtAnnouncer(s *dht.Server) {
 
 		t.stats.DHTAnnounce.Add(1)
 
-		if err := t.announceToDht(true, s); err == nil {
+		if err := t.announceToDht(s, false); err == nil {
 			errdelay = time.Minute // when we succeeded wait unless a wantPeersEvent comes in.
 			t.cln.config.debug().Println("dht ancouncing completed", s.ID(), t.md.ID)
 			t.openNewConns()
