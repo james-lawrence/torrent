@@ -38,6 +38,10 @@ import (
 	"github.com/james-lawrence/torrent/internal/langx"
 )
 
+type dnscacher interface {
+	LookupHost(ctx context.Context, host string) (addrs []string, err error)
+}
+
 // A Server defines parameters for a DHT node server that is able to send
 // queries, and respond to the ones from the network. Each node has a globally
 // unique identifier known as the "node ID." Node IDs are chosen at random
@@ -50,14 +54,14 @@ type Server struct {
 	dynamicaddr *atomic.Pointer[netip.AddrPort]
 	socket      net.PacketConn
 
-	mu           sync.RWMutex
-	transactions transactions.Dispatcher[*transaction]
-	table        *table
-	closed       chan struct{}
-	tokenServer  tokenServer // Manages tokens we issue to our queriers.
-	stats        ServerStats
-	announceto   []PeerAnnounce
-
+	mu               sync.RWMutex
+	transactions     transactions.Dispatcher[*transaction]
+	table            *table
+	closed           chan struct{}
+	tokenServer      tokenServer // Manages tokens we issue to our queriers.
+	stats            ServerStats
+	announceto       []PeerAnnounce
+	dnscache         dnscacher
 	lastBootstrap    time.Time
 	bootstrappingNow bool
 
@@ -70,9 +74,6 @@ type Server struct {
 	// After the last send, a query is aborted after this time.
 	queryResendDelay func() time.Duration
 	defaultWant      []krpc.Want
-
-	// Don't respond to queries from other nodes.
-	passive bool
 
 	// used when there are no good nodes to use in the routing table. This might be called any
 	// time when there are no nodes, including during bootstrap if one is performed. Typically it
@@ -233,6 +234,7 @@ func NewServer(k int, options ...Option) (s *Server, err error) {
 			interval:         5 * time.Minute,
 			secret:           make([]byte, 20),
 		},
+		dnscache:          net.DefaultResolver,
 		table:             newTable(k),
 		store:             bep44.NewWrapper(bep44.NewMemory(), 2*time.Hour),
 		closed:            make(chan struct{}),
@@ -1126,7 +1128,7 @@ func (s *Server) TraversalStartingNodes() (nodes []addrMaybeId, err error) {
 		// resolve, transmit or receive on the network. Nodes currently don't get expired from the
 		// table, so once we have some entries, we should never have to fallback.
 		// s.logger().Println("falling back on starting nodes")
-		addrs, err := fn()
+		addrs, err := fn(context.Background(), s.dnscache)
 		if err != nil {
 			return nil, errorsx.Wrap(err, "getting starting nodes")
 		}

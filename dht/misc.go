@@ -1,6 +1,7 @@
 package dht
 
 import (
+	"context"
 	"net"
 
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -15,8 +16,8 @@ func mustListen(addr string) net.PacketConn {
 	return ret
 }
 
-func addrResolver(addr string) func() ([]Addr, error) {
-	return func() ([]Addr, error) {
+func addrResolver(addr string) func(context.Context, dnscacher) ([]Addr, error) {
+	return func(context.Context, dnscacher) ([]Addr, error) {
 		ua, err := net.ResolveUDPAddr("udp", addr)
 		return []Addr{NewAddr(ua.AddrPort())}, err
 	}

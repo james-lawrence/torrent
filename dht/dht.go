@@ -29,7 +29,7 @@ func defaultQueryResendDelay() time.Duration {
 
 type transactionKey = transactions.Key
 
-type StartingNodesGetter func() ([]Addr, error)
+type StartingNodesGetter func(ctx context.Context, dcache dnscacher) ([]Addr, error)
 
 type PeerAnnounce interface {
 	Announced(peerid int160.T, ip net.IP, port uint16, portOk bool)
@@ -92,11 +92,11 @@ func OptionBootstrapNodesFn(fn StartingNodesGetter) Option {
 }
 
 func OptionBootstrapGlobal(sc *Server) {
-	OptionBootstrapNodesFn(func() ([]Addr, error) { return GlobalBootstrapAddrs("udp") })(sc)
+	OptionBootstrapNodesFn(GlobalBootstrapAddrs)(sc)
 }
 
 func OptionBootstrapPeerFile(path string) Option {
-	return OptionBootstrapNodesFn(func() (res []Addr, err error) {
+	return OptionBootstrapNodesFn(func(ctx context.Context, dcache dnscacher) (res []Addr, err error) {
 		ps, err := ReadNodesFromFile(path)
 		if err != nil {
 			return nil, err
@@ -115,7 +115,7 @@ func OptionBootstrapNodesNone(sc *Server) {
 }
 
 func OptionBootstrapFixedAddrs(addrs ...Addr) Option {
-	return OptionBootstrapNodesFn(func() (res []Addr, err error) {
+	return OptionBootstrapNodesFn(func(ctx context.Context, dcache dnscacher) (res []Addr, err error) {
 		return addrs, nil
 	})
 }
@@ -123,6 +123,12 @@ func OptionBootstrapFixedAddrs(addrs ...Addr) Option {
 func OptionMuxer(m Muxer) Option {
 	return func(sc *Server) {
 		sc.mux = m
+	}
+}
+
+func OptionHostResolver(m dnscacher) Option {
+	return func(sc *Server) {
+		sc.dnscache = m
 	}
 }
 
@@ -176,22 +182,23 @@ var DefaultGlobalBootstrapHostPorts = []string{
 
 // Returns the resolved addresses of the default global bootstrap nodes. Network is unused but was
 // historically passed by anacrolix/torrent.
-func GlobalBootstrapAddrs(network string) ([]Addr, error) {
-	return ResolveHostPorts(DefaultGlobalBootstrapHostPorts)
+func GlobalBootstrapAddrs(ctx context.Context, dns dnscacher) ([]Addr, error) {
+	return ResolveHostPorts(ctx, dns, DefaultGlobalBootstrapHostPorts)
 }
 
 // Resolves host:port strings to dht.Addrs, using the dht DNS resolver cache. Suitable for use with
 // ServerConfig.BootstrapAddrs.
-func ResolveHostPorts(hostPorts []string) (addrs []Addr, err error) {
-	initDnsResolver()
+func ResolveHostPorts(ctx context.Context, dns dnscacher, hostPorts []string) (addrs []Addr, err error) {
 	for _, s := range hostPorts {
 		host, port, err := net.SplitHostPort(s)
 		if err != nil {
-			panic(err)
+			log.Println("failed to split host:port", s, err)
+			continue
 		}
-		hostAddrs, err := dnsResolver.LookupHost(context.Background(), host)
+
+		hostAddrs, err := dns.LookupHost(ctx, host)
 		if err != nil {
-			// log.Default.WithDefaultLevel(log.Debug).Printf("error looking up %q: %v", s, err)
+			log.Println("failed to lookup host addresses", s, err)
 			continue
 		}
 		for _, a := range hostAddrs {
