@@ -41,39 +41,51 @@ func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort uint16, upn
 	}
 }
 
-func UPnPPortForward(ctx context.Context, id string, port uint16) (iter.Seq[netip.AddrPort], error) {
+func UPnPPortForward(ctx context.Context, id string, port uint16, fallback netip.AddrPort) (iter.Seq[netip.AddrPort], error) {
 	id = langx.FirstNonZero(id, errorsx.Must(uuid.NewV7()).String())
 	return func(yield func(netip.AddrPort) bool) {
-		const (
-			lease = time.Hour
-		)
+		const lease = time.Hour
 		for {
-			ds := upnp.Discover(ctx, 0, 2*time.Second)
-
-			for _, d := range ds {
-				if c, err := addPortMapping(d, upnp.TCP, port, id, lease); err == nil {
-					if !yield(c) {
-						return
-					}
-				} else {
-					log.Println("unable to map port", err)
-				}
-
-				if c, err := addPortMapping(d, upnp.UDP, port, id, lease); err == nil {
-					if !yield(c) {
-						return
-					}
-				} else {
-					log.Println("unable to map port", err)
-				}
+			if !upnpPortForward(id, port, fallback, upnp.Discover(ctx, 0, 2*time.Second), lease, yield) {
+				return
 			}
 
 			select {
 			case <-time.After(lease):
 			case <-ctx.Done():
-				log.Println("context done upnp shutting down", ctx.Err())
 				return
 			}
 		}
 	}, nil
+}
+
+func upnpPortForward(id string, port uint16, fallback netip.AddrPort, ds []upnp.Device, lease time.Duration, yield func(netip.AddrPort) bool) bool {
+	mapped := false
+	for _, d := range ds {
+		if c, err := addPortMapping(d, upnp.TCP, port, id, lease); err == nil {
+			mapped = true
+			if !yield(c) {
+				return false
+			}
+		} else {
+			log.Println("upnp unable to map tcp port:", err)
+		}
+
+		if c, err := addPortMapping(d, upnp.UDP, port, id, lease); err == nil {
+			mapped = true
+			if !yield(c) {
+				return false
+			}
+		} else {
+			log.Println("upnp unable to map udp port:", err)
+		}
+	}
+
+	if !mapped {
+		log.Println("upnp failed, using local address")
+		if !yield(fallback) {
+			return false
+		}
+	}
+	return true
 }
