@@ -41,8 +41,6 @@ func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort uint16, upn
 	}
 }
 
-type discoverer func(ctx context.Context) []upnp.Device
-
 func UPnPPortForward(ctx context.Context, id string, port uint16, fallback netip.AddrPort) (iter.Seq[netip.AddrPort], error) {
 	discover := func(ctx context.Context) []upnp.Device {
 		return upnp.Discover(ctx, 0, 2*time.Second)
@@ -50,7 +48,7 @@ func UPnPPortForward(ctx context.Context, id string, port uint16, fallback netip
 	return upnpPortForward(ctx, id, port, fallback, discover, time.Hour)
 }
 
-func upnpPortForward(ctx context.Context, id string, port uint16, fallback netip.AddrPort, discover discoverer, lease time.Duration) (iter.Seq[netip.AddrPort], error) {
+func upnpPortForward(ctx context.Context, id string, port uint16, fallback netip.AddrPort, discover func(context.Context) []upnp.Device, lease time.Duration) (iter.Seq[netip.AddrPort], error) {
 	id = langx.FirstNonZero(id, errorsx.Must(uuid.NewV7()).String())
 	return func(yield func(netip.AddrPort) bool) {
 		for {

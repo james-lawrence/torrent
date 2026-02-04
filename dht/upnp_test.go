@@ -40,11 +40,8 @@ func TestUpnpPortForward(t *testing.T) {
 	lease := 50 * time.Millisecond
 
 	t.Run("yields fallback when no devices", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-
 		discover := func(context.Context) []upnp.Device { return nil }
-		seq, err := upnpPortForward(ctx, "test", 6881, fallback, discover, lease)
+		seq, err := upnpPortForward(t.Context(), "test", 6881, fallback, discover, lease)
 		require.NoError(t, err)
 
 		for addr := range seq {
@@ -55,9 +52,6 @@ func TestUpnpPortForward(t *testing.T) {
 	})
 
 	t.Run("yields fallback when mapping fails", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-
 		discover := func(context.Context) []upnp.Device {
 			return []upnp.Device{&mockDevice{
 				externalIP: net.IPv4(1, 2, 3, 4),
@@ -65,7 +59,7 @@ func TestUpnpPortForward(t *testing.T) {
 				mapErr:     errors.New("mapping failed"),
 			}}
 		}
-		seq, err := upnpPortForward(ctx, "test", 6881, fallback, discover, lease)
+		seq, err := upnpPortForward(t.Context(), "test", 6881, fallback, discover, lease)
 		require.NoError(t, err)
 
 		for addr := range seq {
@@ -76,16 +70,13 @@ func TestUpnpPortForward(t *testing.T) {
 	})
 
 	t.Run("yields mapped address on success", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-
 		discover := func(context.Context) []upnp.Device {
 			return []upnp.Device{&mockDevice{
 				externalIP: net.IPv4(1, 2, 3, 4),
 				mappedPort: 6881,
 			}}
 		}
-		seq, err := upnpPortForward(ctx, "test", 6881, fallback, discover, lease)
+		seq, err := upnpPortForward(t.Context(), "test", 6881, fallback, discover, lease)
 		require.NoError(t, err)
 
 		for addr := range seq {
