@@ -23,7 +23,7 @@ func DHTAnnounceOnce(ctx context.Context, d *dht.Server, id int160.T) (err error
 	for {
 		select {
 		case pv := <-announced.Peers:
-			log.Println("announce dht peers", id, len(pv.Peers))
+			log.Println("announce dht peers", id, len(pv.Peers), pv.Peers[:min(len(pv.Peers), 5)])
 			continue
 		case <-announced.Finished():
 			log.Println("announce dht finished", id)
