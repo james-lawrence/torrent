@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"iter"
 	"log"
 	"math/rand"
 	"net"
@@ -187,29 +186,20 @@ type connection struct {
 	chunkwakefreq atomic.Uint32
 }
 
-func (cn *connection) requestseq() iter.Seq[request] {
-	return func(yield func(request) bool) {
-		for {
-			var (
-				req request
-			)
+func (cn *connection) requestseq() []request {
+	cn._mu.RLock()
+	defer cn._mu.RUnlock()
 
-			cn._mu.RLock()
-			for req = range cn.PeerRequests {
-				break
-			}
-			n := len(cn.PeerRequests)
-			cn._mu.RUnlock()
-
-			if n == 0 {
-				return
-			}
-
-			if !yield(req) {
-				return
-			}
-		}
+	n := len(cn.PeerRequests)
+	if n == 0 {
+		return nil
 	}
+
+	reqs := make([]request, 0, n)
+	for r := range cn.PeerRequests {
+		reqs = append(reqs, r)
+	}
+	return reqs
 }
 
 // Returns true if the connection is over IPv6.
