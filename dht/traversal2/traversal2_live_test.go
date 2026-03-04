@@ -1,4 +1,4 @@
-package traversal2
+package traversal2_test
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
 	"github.com/james-lawrence/torrent/dht/traversal"
+	"github.com/james-lawrence/torrent/dht/traversal2"
 	"github.com/james-lawrence/torrent/dht/types"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 )
@@ -33,23 +34,6 @@ func backgroundServe(t *testing.T, s *dht.Server, pc net.PacketConn) {
 	require.Eventually(t, func() bool {
 		return orig != s.ID()
 	}, time.Second, time.Millisecond)
-}
-
-type serverQuerier struct {
-	s *dht.Server
-}
-
-func (q serverQuerier) Query(ctx context.Context, addr krpc.NodeAddr, target int160.T) QueryResult {
-	res := q.s.GetPeers(ctx, dht.NewAddr(addr.AddrPort), target, false)
-	r := res.Reply.R
-	if r == nil {
-		return QueryResult{}
-	}
-	return QueryResult{
-		ResponseFrom: &krpc.NodeInfo{Addr: addr, ID: r.ID},
-		Nodes:        r.Nodes,
-		Peers:        r.Values,
-	}
 }
 
 // TestLiveDHTComparison compares traversal2 against the old traversal using a
@@ -102,7 +86,7 @@ func TestLiveDHTComparison(t *testing.T) {
 	t.Run("new", func(t *testing.T) {
 		var results []krpc.NodeAddr
 
-		tr := New(target, serverQuerier{s: srv}, WithK(8), WithSeeds(seeds...))
+		tr := traversal2.New(target, dht.NewTraversalQuerier(srv), traversal2.WithK(8), traversal2.WithSeeds(seeds...))
 		next, done := iter.Pull(tr.Each(ctx))
 		defer done()
 

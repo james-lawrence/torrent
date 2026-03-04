@@ -115,28 +115,44 @@ func (t *Traversal) updateClosest(n node) {
 }
 
 // Each returns an iterator that yields peers found during traversal.
-func (t *Traversal) Each(ctx context.Context) iter.Seq[krpc.NodeAddr] {
-	return func(yield func(krpc.NodeAddr) bool) {
+func (t *Traversal) Results(ctx context.Context) iter.Seq[QueryResult] {
+	return func(yield func(QueryResult) bool) {
 		for {
 			if err := ctx.Err(); err != nil {
 				t.err = err
 				return
 			}
+
 			n, ok := t.next()
 			if !ok {
 				return
 			}
+
 			t.queried[n.info.Addr.AddrPort] = struct{}{}
 			qctx, qcancel := context.WithTimeout(ctx, t.queryTimeout)
-			res := t.querier.Query(qctx, n.info.Addr, t.target)
+			res := t.querier.Query(qctx, n.info.Addr, t.target, false)
 			qcancel()
+
 			t.addNodes(res.Nodes)
+
 			if res.ResponseFrom != nil {
 				t.updateClosest(node{
 					info:     *res.ResponseFrom,
 					distance: res.ResponseFrom.ID.Int160().Distance(t.target),
 				})
 			}
+
+			if !yield(res) {
+				return
+			}
+		}
+	}
+}
+
+// Each returns an iterator that yields peers found during traversal.
+func (t *Traversal) Each(ctx context.Context) iter.Seq[krpc.NodeAddr] {
+	return func(yield func(krpc.NodeAddr) bool) {
+		for res := range t.Results(ctx) {
 			for _, peer := range res.Peers {
 				if !yield(peer) {
 					return

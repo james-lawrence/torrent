@@ -40,7 +40,7 @@ func TestUpnpPortForward(t *testing.T) {
 
 	collect := func(ds []upnp.Device) []netip.AddrPort {
 		var addrs []netip.AddrPort
-		upnpPortForward("test", 6881, fallback, ds, time.Millisecond, func(addr netip.AddrPort) bool {
+		upnpPortForward(t.Context(), "test", 6881, fallback, ds, time.Millisecond, func(addr netip.AddrPort) bool {
 			addrs = append(addrs, addr)
 			return true
 		})
@@ -82,6 +82,7 @@ func TestUpnpPortForward(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
+			cancel()
 			for range seq {
 				cancel()
 			}

@@ -28,7 +28,7 @@ type mockQuerier struct {
 	responses map[netip.AddrPort]QueryResult
 }
 
-func (m *mockQuerier) Query(_ context.Context, a krpc.NodeAddr, _ int160.T) QueryResult {
+func (m *mockQuerier) Query(_ context.Context, a krpc.NodeAddr, _ int160.T, scrape bool) QueryResult {
 	return m.responses[a.AddrPort]
 }
 

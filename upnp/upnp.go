@@ -293,9 +293,9 @@ loop:
 			continue
 		}
 		for _, igd := range igds {
-			igd := igd // Copy before sending pointer to the channel.
+			_igd := igd // Copy before sending pointer to the channel.
 			select {
-			case results <- &igd:
+			case results <- &_igd:
 			case <-ctx.Done():
 				return
 			}

@@ -42,9 +42,9 @@ func (t PeerAnnounceFn) Announced(peerid int160.T, ip net.IP, port uint16, portO
 	t(peerid, ip, port, portOk)
 }
 
-type PublicAddrPort func(ctx context.Context, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error)
+type PublicAddrPort func(ctx context.Context, q *Server, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error)
 
-func PublicAddrPortFromPacketConn(ctx context.Context, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
+func PublicAddrPortFromPacketConn(ctx context.Context, q *Server, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
 	addr, err := netx.AddrPort(local.LocalAddr())
 	if err != nil {
 		return nil, err
@@ -75,13 +75,21 @@ func OptionDynamicPort(fn PublicAddrPort) Option {
 }
 
 func OptionUPnP(sc *Server) {
-	sc.resolvepublicaddr = func(ctx context.Context, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
+	sc.resolvepublicaddr = func(ctx context.Context, q *Server, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
 		addr, err := netx.AddrPort(local.LocalAddr())
 		if err != nil {
 			return nil, err
 		}
 
 		return UPnPPortForward(ctx, id.String(), addr.Port(), addr)
+	}
+}
+
+func OptionStaticPort(port uint16) Option {
+	return func(sc *Server) {
+		sc.resolvepublicaddr = func(ctx context.Context, q *Server, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
+			return AutoDetectIP(ctx, q, id, local, port)
+		}
 	}
 }
 

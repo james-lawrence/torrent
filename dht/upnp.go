@@ -14,8 +14,8 @@ import (
 	"github.com/james-lawrence/torrent/upnp"
 )
 
-func addPortMapping(d upnp.Device, proto upnp.Protocol, internalPort uint16, upnpID string, lease time.Duration) (_zero netip.AddrPort, err error) {
-	ctx, done := context.WithTimeout(context.Background(), time.Minute)
+func addPortMapping(ctx context.Context, d upnp.Device, proto upnp.Protocol, internalPort uint16, upnpID string, lease time.Duration) (_zero netip.AddrPort, err error) {
+	ctx, done := context.WithTimeout(ctx, time.Minute)
 	defer done()
 
 	ip, err := d.GetExternalIPv4Address(ctx)
@@ -46,7 +46,7 @@ func UPnPPortForward(ctx context.Context, id string, port uint16, fallback netip
 	return func(yield func(netip.AddrPort) bool) {
 		const lease = time.Hour
 		for {
-			if !upnpPortForward(id, port, fallback, upnp.Discover(ctx, 0, 2*time.Second), lease, yield) {
+			if !upnpPortForward(ctx, id, port, fallback, upnp.Discover(ctx, 0, 2*time.Second), lease, yield) {
 				return
 			}
 
@@ -59,10 +59,10 @@ func UPnPPortForward(ctx context.Context, id string, port uint16, fallback netip
 	}, nil
 }
 
-func upnpPortForward(id string, port uint16, fallback netip.AddrPort, ds []upnp.Device, lease time.Duration, yield func(netip.AddrPort) bool) bool {
+func upnpPortForward(ctx context.Context, id string, port uint16, fallback netip.AddrPort, ds []upnp.Device, lease time.Duration, yield func(netip.AddrPort) bool) bool {
 	mapped := false
 	for _, d := range ds {
-		if c, err := addPortMapping(d, upnp.TCP, port, id, lease); err == nil {
+		if c, err := addPortMapping(ctx, d, upnp.TCP, port, id, lease); err == nil {
 			mapped = true
 			if !yield(c) {
 				return false
@@ -71,7 +71,7 @@ func upnpPortForward(id string, port uint16, fallback netip.AddrPort, ds []upnp.
 			log.Println("upnp unable to map tcp port:", err)
 		}
 
-		if c, err := addPortMapping(d, upnp.UDP, port, id, lease); err == nil {
+		if c, err := addPortMapping(ctx, d, upnp.UDP, port, id, lease); err == nil {
 			mapped = true
 			if !yield(c) {
 				return false
@@ -87,5 +87,6 @@ func upnpPortForward(id string, port uint16, fallback netip.AddrPort, ds []upnp.
 			return false
 		}
 	}
+
 	return true
 }
