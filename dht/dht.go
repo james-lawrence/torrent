@@ -181,11 +181,9 @@ var DefaultGlobalBootstrapHostPorts = []string{
 	"router.utorrent.com:6881",
 	"router.bittorrent.com:6881",
 	"dht.transmissionbt.com:6881",
-	"dht.aelitis.com:6881",     // Vuze
-	"router.silotis.us:6881",   // IPv6
-	"dht.libtorrent.org:25401", // @arvidn's
-	"dht.anacrolix.link:42069",
-	"router.bittorrent.cloud:42069",
+	"dht.aelitis.com:6881",
+	"router.silotis.us:6881",
+	"dht.libtorrent.org:25401",
 }
 
 // Returns the resolved addresses of the default global bootstrap nodes. Network is unused but was
