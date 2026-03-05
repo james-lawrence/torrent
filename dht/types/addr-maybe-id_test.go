@@ -8,6 +8,7 @@ import (
 	qt "github.com/frankban/quicktest"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNoIdFarther(tb *testing.T) {
@@ -77,8 +78,6 @@ func BenchmarkDeterministicAddr(tb *testing.B) {
 			),
 		}
 
-		if a.CloserThan(b, target) != a.CloserThan(b, target) {
-			tb.Fatal("not deterministic")
-		}
+		require.Equal(tb, a.CloserThan(b, target), a.CloserThan(b, target), "not deterministic")
 	}
 }

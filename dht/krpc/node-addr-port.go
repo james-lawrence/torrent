@@ -136,8 +136,8 @@ func (me *serialized) UnmarshalBencode(b []byte) (err error) {
 func (me serialized) MarshalBinary() ([]byte, error) {
 	var b bytes.Buffer
 	b.Write(me.IP)
-	binary.Write(&b, binary.BigEndian, uint16(me.Port))
-	return b.Bytes(), nil
+	err := binary.Write(&b, binary.BigEndian, uint16(me.Port))
+	return b.Bytes(), err
 }
 
 func (me serialized) MarshalBencode() ([]byte, error) {

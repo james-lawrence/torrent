@@ -8,6 +8,8 @@ import (
 	"math"
 	"math/rand/v2"
 	"net"
+
+	"github.com/james-lawrence/torrent/internal/errorsx"
 )
 
 // This is a comparable replacement for NodeInfo.
@@ -25,10 +27,12 @@ func NewInfo(id ID, addr NodeAddr) NodeInfo {
 
 func RandomNodeInfo(ipLen int) (ni NodeInfo) {
 	tmp := make(net.IP, ipLen)
-	crand.Read(ni.ID[:])
-	crand.Read(tmp)
+	_, err := crand.Read(ni.ID[:])
+	errorsx.Panic(err)
+	_, err = crand.Read(tmp)
+	errorsx.Panic(err)
 	ni.Addr = NewNodeAddrFromIPPort(tmp, uint16(rand.IntN(math.MaxUint16+1)))
-	return
+	return ni
 }
 
 var _ interface {
