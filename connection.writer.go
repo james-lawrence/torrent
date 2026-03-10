@@ -45,7 +45,7 @@ func RunHandshookConn(c *connection, t *torrent) error {
 	defer cancel(nil)
 
 	if err := ConnExtensions(ctx, c); err != nil {
-		err = errorsx.LogErr(errorsx.Wrap(err, "error sending configuring connection"))
+		err = errorsx.LogErr(errorsx.Wrap(err, "error configuring connection (extensions)"))
 		cancel(err)
 		return err
 	}

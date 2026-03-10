@@ -624,7 +624,7 @@ func (cl *Client) runReceivedConn(c *connection) {
 
 	t, err := cl.receiveHandshakes(c)
 	if errors.As(err, &timedout) {
-		cl.config.debug().Printf("received connection timed out %T - %v\n", err, err)
+		cl.config.debug().Printf("received connection timeout %T - %v - %v\n", err, err, cl.config.handshakesTimeout)
 		cl.config.Handshaker.Release(c.conn, err)
 		return
 	}
