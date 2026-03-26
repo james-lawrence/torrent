@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"hash"
 	"io"
+	"log"
 	mrand "math/rand/v2"
 	"os"
 	"path/filepath"
@@ -58,18 +59,41 @@ func Random(dir string, n uint64, options ...metainfo.Option) (info *metainfo.In
 }
 
 func RandomMulti(dir string, n int, min int64, max int64, options ...metainfo.Option) (info *metainfo.Info, err error) {
+	return RandomTree(dir, rand.Reader, n, min, max, 0, options...)
+}
+
+func adddir(parent string, depth int64) string {
+	if depth <= 0 {
+		return parent
+	}
+
+	subdir, err := os.MkdirTemp(parent, "*")
+	if err != nil {
+		log.Println("failed to make tmp directory", err, "returning", parent)
+		return parent
+	}
+
+	return adddir(subdir, depth-1)
+}
+
+func RandomTree(dir string, r io.Reader, n int, min int64, max int64, dirs int64, options ...metainfo.Option) (info *metainfo.Info, err error) {
 	root, err := os.MkdirTemp(dir, "multi.torrent.*")
 	if err != nil {
 		return nil, err
 	}
 
-	addfile := func() error {
-		src, err := IOTorrent(root, rand.Reader, uint64(mrand.Int64N(max-min)+min))
+	addfile := func(dir string) error {
+		src, err := IOTorrent(dir, r, uint64(mrand.Int64N(max-min)+min))
 		return errorsx.Compact(err, src.Close())
 	}
 
+	_dirs := []string{root}
+	for range dirs {
+		_dirs = append(_dirs, adddir(root, 4))
+	}
+
 	for range n {
-		if err := addfile(); err != nil {
+		if err := addfile(_dirs[mrand.IntN(len(_dirs))]); err != nil {
 			return nil, err
 		}
 	}
