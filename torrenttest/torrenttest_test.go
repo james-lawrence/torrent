@@ -2,6 +2,7 @@ package torrenttest
 
 import (
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/james-lawrence/torrent/internal/bytesx"
@@ -35,6 +36,32 @@ func TestSeeded(t *testing.T) {
 
 		require.Equal(t, digest1.Sum(nil), digest2.Sum(nil))
 	})
+}
+
+func TestTree(t *testing.T) {
+	t.Run("creates files at explicit paths", func(t *testing.T) {
+		paths := []string{"a.bin", "sub/b.bin", "sub/deep/c.bin"}
+		info, err := Tree(t.TempDir(), cryptox.NewChaCha8(t.Name()), 256, 512, paths)
+		require.NoError(t, err)
+		require.Len(t, info.Files, 3)
+
+		byPath := make(map[string]bool)
+		for _, f := range info.Files {
+			byPath[strings.Join(f.Path, "/")] = true
+		}
+		for _, p := range paths {
+			require.True(t, byPath[p], "missing file %q in torrent", p)
+		}
+	})
+
+	t.Run("nested paths create correct directory depth", func(t *testing.T) {
+		paths := []string{"a/b/c/d.bin"}
+		info, err := Tree(t.TempDir(), cryptox.NewChaCha8(t.Name()), 256, 512, paths)
+		require.NoError(t, err)
+		require.Len(t, info.Files, 1)
+		require.Equal(t, []string{"a", "b", "c", "d.bin"}, info.Files[0].Path)
+	})
+
 }
 
 func TestRandomTree(t *testing.T) {
