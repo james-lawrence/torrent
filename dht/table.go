@@ -37,6 +37,32 @@ func (tbl *table) randomIdForBucket(root int160.T, bucketIndex int) int160.T {
 	return randomId
 }
 
+// dropN removes up to n nodes from b, evicting them from both the bucket and
+// the address index atomically under tbl.m.
+func (tbl *table) dropN(root int160.T, b *bucket, n int) int {
+	if n == 0 {
+		return b.Len() - tbl.k
+	}
+
+	tbl.m.Lock()
+	defer tbl.m.Unlock()
+
+	// Collect first to avoid mutating the bucket map during iteration.
+	toDrop := make([]*node, 0, n)
+	b.EachNode(func(bn *node) bool {
+		if nodeIsBad(root, bn) {
+			toDrop = append(toDrop, bn)
+		}
+		return len(toDrop) < n
+	})
+
+	for _, bn := range toDrop {
+		tbl.dropNode(root, bn)
+	}
+
+	return b.Len() - tbl.k
+}
+
 func (tbl *table) dropNode(root int160.T, n *node) {
 	ap := n.Addr.AddrPort()
 	if _, ok := tbl.addrs[ap][n.Id]; !ok {
@@ -117,7 +143,7 @@ func (tbl *table) addNode(root int160.T, n *node) error {
 	if n.Id == root {
 		return errors.New("is root id")
 	}
-	b := &tbl.buckets[tbl.bucketIndex(root, n.Id)]
+	b := tbl.bucketForID(root, n.Id)
 	if b.Len() >= tbl.k {
 		return errors.New("bucket is full")
 	}
@@ -125,8 +151,7 @@ func (tbl *table) addNode(root int160.T, n *node) error {
 		return errors.New("already present")
 	}
 
-	b.AddNode(n, tbl.k)
-
+	defer b.AddNode(n, tbl.k)
 	tbl.m.Lock()
 	defer tbl.m.Unlock()
 

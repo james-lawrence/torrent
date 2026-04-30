@@ -2,6 +2,7 @@ package dht
 
 import (
 	"net/netip"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -72,6 +73,37 @@ func TestTable(t *testing.T) {
 		require.True(t, ret)
 		require.EqualValues(t, v, c)
 	})
+}
+
+// TestTableAddDropRace reproduces the panic "missing id for addr" from
+// server.addNode: concurrent goroutines racing to fill/evict the same bucket
+// expose two bugs -- dropNode reads tbl.addrs without tbl.m (data race), and
+// addNode makes the node visible in the bucket before tbl.addrs is populated
+// (panic window). Run with -race to surface the data race.
+func TestTableAddDropRace(t *testing.T) {
+	const k = 4
+	root := int160.Zero()
+	tbl := newTable(k)
+
+	// simulateServerAddNode mirrors the logic in Server.addNode.
+	simulateServerAddNode := func(n *node) {
+		b := tbl.bucketForID(root, n.Id)
+		if excess := tbl.dropN(root, b, max(0, b.Len()-tbl.k)); excess >= 0 {
+			return
+		}
+		tbl.addNode(root, n) //nolint:errcheck
+	}
+
+	var wg sync.WaitGroup
+	for range 64 {
+		n := randomNode()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			simulateServerAddNode(n)
+		}()
+	}
+	wg.Wait()
 }
 
 func TestRandomIdInBucket(t *testing.T) {

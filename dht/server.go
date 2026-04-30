@@ -118,11 +118,11 @@ func (s *Server) WriteStatus(w io.Writer) {
 	fmt.Fprintf(w, "Listening on %s\n", s.Addr())
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	id := langx.Zero(s.id.Load())
+	root := langx.Zero(s.id.Load())
 
 	fmt.Fprintf(w, "Nodes in table: %d good, %d total\n", s.numGoodNodes(), s.numNodes())
 	fmt.Fprintf(w, "Ongoing transactions: %d\n", s.transactions.NumActive())
-	fmt.Fprintf(w, "Server node ID: %s\n", id.String())
+	fmt.Fprintf(w, "Server node ID: %s\n", root.String())
 	buckets := &s.table.buckets
 	for i := range s.table.buckets {
 		b := &buckets[i]
@@ -137,14 +137,14 @@ func (s *Server) WriteStatus(w io.Writer) {
 			fmt.Fprintf(tw, "  node id\taddr\tlast query\tlast response\trecv\tdiscard\tflags\n")
 			// Bucket nodes ordered by distance from server ID.
 			nodes := slices.SortedFunc(b.NodeIter(), func(l *node, r *node) int {
-				return l.Id.Distance(id).Cmp(r.Id.Distance(id))
+				return l.Id.Distance(root).Cmp(r.Id.Distance(root))
 			})
 			for _, n := range nodes {
 				var flags []string
 				if s.IsQuestionable(n) {
 					flags = append(flags, "q10e")
 				}
-				if s.nodeIsBad(n) {
+				if nodeIsBad(root, n) {
 					flags = append(flags, "bad")
 				}
 				if s.IsGood(n) {
@@ -660,25 +660,18 @@ func (s *Server) reply(ctx context.Context, addr Addr, t string, r krpc.Return) 
 
 // Adds a node if appropriate.
 func (s *Server) addNode(n *node) error {
-	if s.nodeIsBad(n) {
+	root := langx.Zero(s.id.Load())
+	if nodeIsBad(root, n) {
 		return errors.New("node is bad")
 	}
-	root := langx.Zero(s.id.Load())
+
 	b := s.table.bucketForID(root, n.Id)
-	if b.Len() >= s.table.k {
-		if b.EachNode(func(bn *node) bool {
-			// Replace bad and untested nodes with a good one.
-			if s.nodeIsBad(bn) || (s.IsGood(n) && bn.lastGotResponse.IsZero()) {
-				s.table.dropNode(root, bn)
-			}
-			return b.Len() >= s.table.k
-		}) {
-			return errors.New("no room in bucket")
-		}
+	if excess := s.table.dropN(root, b, max(0, b.Len()-s.table.k)); excess >= 0 {
+		return errors.New("no room in bucket")
 	}
 
 	if err := s.table.addNode(root, n); err != nil {
-		return fmt.Errorf("expected to add node: %s", err)
+		return fmt.Errorf("expected to add node: %w", err)
 	}
 
 	return nil
@@ -730,15 +723,16 @@ func (s *Server) updateNode(addr Addr, id *krpc.ID, tryAdd bool, update func(*no
 	return s.addNode(n)
 }
 
-func (s *Server) nodeIsBad(n *node) bool {
-	return s.nodeErr(n) != nil
+func nodeIsBad(root int160.T, n *node) bool {
+	return nodeErr(root, n) != nil
 }
 
-func (s *Server) nodeErr(n *node) error {
-	root := langx.Zero(s.id.Load())
+func nodeErr(root int160.T, n *node) error {
+	// root := langx.Zero(s.id.Load())
 	if n.Id == root {
 		return errors.New("is self")
 	}
+
 	if n.Id.IsZero() {
 		return errors.New("has zero id")
 	}
@@ -1025,10 +1019,12 @@ func (s *Server) Nodes() (nis []krpc.NodeInfo) {
 
 // Returns non-bad nodes from the routing table.
 func (s *Server) notBadNodes() (nis []krpc.NodeInfo) {
+	root := langx.Zero(s.id.Load())
 	s.table.forNodes(func(n *node) bool {
-		if s.nodeIsBad(n) {
+		if nodeIsBad(root, n) {
 			return true
 		}
+
 		nis = append(nis, krpc.NodeInfo{
 			Addr: n.Addr.KRPC(),
 			ID:   n.Id.AsByteArray(),
@@ -1172,9 +1168,10 @@ func (s *Server) shouldStopRefreshingBucket(bucketIndex int) bool {
 		return true
 	}
 	b := &s.table.buckets[bucketIndex]
+	root := langx.Zero(s.id.Load())
 	// Stop if the bucket is full, and none of the nodes are bad.
 	return b.Len() == s.table.K() && b.EachNode(func(n *node) bool {
-		return !s.nodeIsBad(n)
+		return !nodeIsBad(root, n)
 	})
 }
 

@@ -46,9 +46,7 @@ func (b *bucket) EachNode(f func(*node) bool) bool {
 	next, stop := iter.Pull(b.NodeIter())
 	defer stop()
 	for {
-		b._m.RLock()
 		v, ok := next()
-		b._m.RUnlock()
 		if !ok {
 			return true
 		}
