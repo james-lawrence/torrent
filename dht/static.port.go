@@ -11,6 +11,7 @@ import (
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/traversal2"
 	"github.com/james-lawrence/torrent/internal/errorsx"
+	"github.com/james-lawrence/torrent/internal/netx"
 )
 
 func AutoDetectIP(ctx context.Context, q *Server, id int160.T, local net.PacketConn, port uint16) (iter.Seq[netip.AddrPort], error) {
@@ -25,7 +26,8 @@ func AutoDetectIP(ctx context.Context, q *Server, id int160.T, local net.PacketC
 			_ctx, done := context.WithTimeout(ctx, time.Minute)
 			defer done()
 
-			detect := traversal2.New(int160.Random(), NewTraversalQuerier(q), traversal2.WithSeeds(q.ClosestGoodNodeInfos(minK, id)...))
+			localAddr, _ := netx.AddrPort(local.LocalAddr())
+			detect := traversal2.New(int160.Random(), NewTraversalQuerier(q), traversal2.WithSeeds(q.ClosestGoodNodeInfos(localAddr, minK, id)...))
 			m := map[netip.AddrPort]struct{}{}
 			for v := range detect.Results(_ctx) {
 				addr := netip.AddrPortFrom(v.IP.Addr(), port)
@@ -41,7 +43,7 @@ func AutoDetectIP(ctx context.Context, q *Server, id int160.T, local net.PacketC
 
 		for {
 			if gnodes := q.numGoodNodes(); gnodes < minK {
-				if !yield(*q.dynamicaddr.Load()) {
+				if !yield(q.DynamicAddrPort()) {
 					return
 				}
 

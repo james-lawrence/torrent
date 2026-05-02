@@ -17,7 +17,6 @@ import (
 	"github.com/james-lawrence/torrent/dht/traversal"
 	"github.com/james-lawrence/torrent/dht/traversal2"
 	"github.com/james-lawrence/torrent/dht/types"
-	"github.com/james-lawrence/torrent/internal/errorsx"
 )
 
 func mustListen(addr string) net.PacketConn {
@@ -28,12 +27,10 @@ func mustListen(addr string) net.PacketConn {
 	return ret
 }
 
-func backgroundServe(t *testing.T, s *dht.Server, pc net.PacketConn) {
-	orig := s.ID()
-	errorsx.Log(errorsx.Wrap(s.Serve(t.Context(), pc), "dht server shutdown"))
-	require.Eventually(t, func() bool {
-		return orig != s.ID()
-	}, time.Second, time.Millisecond)
+func backgroundServe(t *testing.T, s *dht.Server, pc net.PacketConn) dht.Binding {
+	b, err := s.ServeBinding(t.Context(), pc)
+	require.NoError(t, err)
+	return b
 }
 
 // TestLiveDHTComparison compares traversal2 against the old traversal using a

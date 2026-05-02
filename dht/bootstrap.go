@@ -12,27 +12,27 @@ import (
 
 type TraversalStats = traversal.Stats
 
-// Populates the node table.
-func (s *Server) Bootstrap(ctx context.Context) (_zero TraversalStats, err error) {
+// Bootstrap populates the routing table for this binding.
+func (b *socketBinding) Bootstrap(ctx context.Context, s *Server) (_zero TraversalStats, err error) {
 	s.mu.Lock()
-	if s.bootstrappingNow {
+	if b.bootstrappingNow {
 		s.mu.Unlock()
 		return _zero, errors.New("already bootstrapping")
 	}
-	s.bootstrappingNow = true
+	b.bootstrappingNow = true
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		s.bootstrappingNow = false
+		b.bootstrappingNow = false
 	}()
-	// Track number of responses, for STM use. (It's available via atomic in TraversalStats but that
-	// won't let wake up STM transactions that are observing the value.)
+
+	id := b.ID()
 	t := traversal.Start(traversal.OperationInput{
-		Target: s.id.Load().AsByteArray(),
+		Target: id.AsByteArray(),
 		K:      64,
 		DoQuery: func(ctx context.Context, addr krpc.NodeAddr) traversal.QueryResult {
-			return s.FindNode(ctx, NewAddr(addr.AddrPort), langx.Zero(s.id.Load()), QueryRateLimiting{}).TraversalQueryResult(addr)
+			return s.FindNode(ctx, NewAddr(addr.AddrPort), langx.Zero(&id), QueryRateLimiting{}).TraversalQueryResult(addr)
 		},
 		NodeFilter: s.TraversalNodeFilter,
 	})
@@ -53,10 +53,26 @@ func (s *Server) Bootstrap(ctx context.Context) (_zero TraversalStats, err error
 	}
 	t.Stop()
 	if err != nil {
-		// Could test for Stopped and return stats here but the interface doesn't tell the caller if
-		// we were successful in taking the stats. We could also take a snapshot instead.
 		return _zero, err
 	}
 	<-t.Stopped()
 	return *t.Stats(), nil
+}
+
+// Bootstrap populates all binding routing tables.
+func (s *Server) Bootstrap(ctx context.Context) (_zero TraversalStats, err error) {
+	s.mu.RLock()
+	bindings := make([]*socketBinding, len(s.bindings))
+	copy(bindings, s.bindings)
+	s.mu.RUnlock()
+
+	for _, b := range bindings {
+		stats, berr := b.Bootstrap(ctx, s)
+		if berr != nil {
+			err = berr
+			continue
+		}
+		_zero = stats
+	}
+	return _zero, err
 }

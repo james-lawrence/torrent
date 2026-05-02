@@ -131,8 +131,8 @@ func (cfg *ClientConfig) Storage() storage.ClientImpl {
 func (cfg *ClientConfig) AnnounceRequest(s *Client) tracker.Announce {
 	return tracker.Announce{
 		UserAgent: cfg.HTTPUserAgent,
-		ClientIp4: krpc.NewNodeAddrFromAddrPort(s.dht.AddrPort()),
-		ClientIp6: krpc.NewNodeAddrFromAddrPort(s.dht.AddrPort()),
+		ClientIp4: krpc.NewNodeAddrFromAddrPort(s.dht.DynamicAddrPort()),
+		ClientIp6: krpc.NewNodeAddrFromAddrPort(s.dht.DynamicAddrPort()),
 		Dialer:    cfg.dialer,
 	}
 }

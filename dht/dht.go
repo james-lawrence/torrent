@@ -68,6 +68,7 @@ func OptionNodeID(id int160.T) Option {
 	}
 }
 
+
 func OptionDynamicPort(fn PublicAddrPort) Option {
 	return func(sc *Server) {
 		sc.resolvepublicaddr = fn

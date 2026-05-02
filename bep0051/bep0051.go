@@ -79,7 +79,7 @@ type Endpoint struct {
 	s Sampler
 }
 
-func (t Endpoint) Handle(ctx context.Context, source dht.Addr, s *dht.Server, raw []byte, _ *krpc.Msg) error {
+func (t Endpoint) Handle(ctx context.Context, source dht.Addr, s *dht.Server, b dht.Binding, raw []byte, _ *krpc.Msg) error {
 	var (
 		m Request
 	)
@@ -90,24 +90,25 @@ func (t Endpoint) Handle(ctx context.Context, source dht.Addr, s *dht.Server, ra
 
 	ttl, total, sampled := t.s.Snapshot(128)
 
+	target := int160.FromByteArray(m.A.Target)
 	msg := Response{
 		T: m.T,
 		R: Sample{
-			ID:        s.ID().AsByteArray(),
+			ID:        b.ID().AsByteArray(),
 			Interval:  ttl,
 			Available: total,
 			Sample:    sampled,
-			Nodes:     s.MakeReturnNodes(int160.FromByteArray(m.A.Target), func(na krpc.NodeAddr) bool { return na.Addr().Is4() }),
-			Nodes6:    s.MakeReturnNodes(int160.FromByteArray(m.A.Target), func(krpc.NodeAddr) bool { return true }),
+			Nodes:     s.MakeReturnNodes(b, target, func(na krpc.NodeAddr) bool { return na.Addr().Is4() }),
+			Nodes6:    s.MakeReturnNodes(b, target, func(krpc.NodeAddr) bool { return true }),
 		},
 	}
 
-	b, err := bencode.Marshal(msg)
+	buf, err := bencode.Marshal(msg)
 	if err != nil {
 		return err
 	}
 
-	_, err = s.SendToNode(ctx, b, source, 1)
+	_, err = b.SendToNode(ctx, buf, source, 1)
 	return err
 }
 
@@ -116,7 +117,7 @@ func LatestSampleForNodeInfo(ctx context.Context, s *dht.Server, n krpc.NodeInfo
 		resp Response
 	)
 
-	qi, err := NewRequest(s.ID(), n.ID)
+	qi, err := NewRequest(s.ID(n.Addr.AddrPort), n.ID)
 	if err != nil {
 		return nil, errorsx.Wrapf(err, "unable to generate sample request: %s", n.ID)
 	}
