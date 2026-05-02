@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/hex"
+	"hash/crc32"
 	"io"
 	"math"
 	"math/big"
+	"net/netip"
 
 	"github.com/james-lawrence/torrent/internal/errorsx"
 )
@@ -238,4 +240,58 @@ func FromHexEncodedString(s string) (ret T, err error) {
 		return ret, err
 	}
 	return FromBytes(b), nil
+}
+
+// Secure returns a new T with the first 3 bytes re-derived from addr per BEP42.
+// The stable portion (id[3..19]) is preserved.
+func (me T) Secure(addr netip.Addr) T {
+	id := me.AsByteArray()
+	crc := crcAddr(addr, id[19])
+	id[0] = byte(crc >> 24 & 0xff)
+	id[1] = byte(crc >> 16 & 0xff)
+	id[2] = byte(crc>>8&0xf8) | id[2]&7
+	return FromByteArray(id)
+}
+
+// IsSecure returns whether the ID is valid for addr per BEP42.
+// Local-network addresses are always considered secure.
+func (me T) IsSecure(addr netip.Addr) bool {
+	if addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() {
+		return true
+	}
+	crc := crcAddr(addr, me.bits[19])
+	return me.bits[0] == byte(crc>>24&0xff) &&
+		me.bits[1] == byte(crc>>16&0xff) &&
+		me.bits[2]&0xf8 == byte(crc>>8&0xf8)
+}
+
+// StableSuffix returns an int160 whose first 3 bytes are zeroed and whose
+// remaining 17 bytes (id[3..19]) are the stable portion preserved by Secure.
+func StableSuffix(id T) T {
+	var s T
+	copy(s.bits[3:], id.bits[3:])
+	return s
+}
+
+func crcAddr(addr netip.Addr, rand uint8) uint32 {
+	if addr.Is4In6() {
+		addr = addr.Unmap()
+	}
+	var ip []byte
+	var mask []byte
+	if addr.Is4() {
+		a := addr.As4()
+		ip = []byte{a[0], a[1], a[2], a[3]}
+		mask = []byte{0x03, 0x0f, 0x3f, 0xff}
+	} else {
+		a := addr.As16()
+		ip = []byte{a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]}
+		mask = []byte{0x01, 0x03, 0x07, 0x0f, 0x1f, 0x3f, 0x7f, 0xff}
+	}
+	for i := range mask {
+		ip[i] &= mask[i]
+	}
+	r := rand & 7
+	ip[0] |= r << 5
+	return crc32.Checksum(ip, crc32.MakeTable(crc32.Castagnoli))
 }

@@ -32,7 +32,7 @@ func (n *node) hasAddrAndID(addr Addr, id int160.T) bool {
 }
 
 func (n *node) IsSecure() bool {
-	return NodeIdSecure(n.Id.AsByteArray(), n.Addr.IP())
+	return n.Id.IsSecure(n.Addr.AddrPort().Addr())
 }
 
 func (n *node) idString() string {

@@ -258,16 +258,10 @@ func NewServer(k int, options ...Option) (s *Server, err error) {
 
 func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
 	updateaddr := func(fixed int160.T, detected netip.AddrPort) {
-		var (
-			upd krpc.ID = fixed.AsByteArray()
-		)
-
-		SecureNodeId(&upd, detected.Addr().AsSlice())
-
-		s.logger().Println("updated", fixed, "->", upd, detected)
-
-		latest := int160.FromByteArray(upd)
+		latest := fixed.Secure(detected.Addr())
 		old := langx.Zero(s.id.Swap(&latest))
+
+		s.logger().Println("updated", fixed, "->", latest, detected)
 		if latest.Cmp(old) == 0 {
 			return
 		}
@@ -1337,7 +1331,7 @@ func (s *Server) TraversalNodeFilter(node addrMaybeId) bool {
 	if !node.Id.Ok {
 		return true
 	}
-	return NodeIdSecure(node.Id.Value.AsByteArray(), node.Addr.IP())
+	return node.Id.Value.IsSecure(node.Addr.AddrPort.Addr())
 }
 
 func validNodeAddr(addr net.Addr) bool {
