@@ -1,11 +1,14 @@
 package torrent
 
 import (
+	"cmp"
 	"errors"
+	"slices"
 
 	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
+	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/sockets"
 )
 
@@ -40,11 +43,19 @@ func (t binder) Options(opts ...BinderOption) binder {
 	return langx.Clone(t, opts...)
 }
 
+func cmpSockets(a, b sockets.Socket) int {
+	ap, _ := netx.AddrPort(a.Addr())
+	bp, _ := netx.AddrPort(b.Addr())
+	return cmp.Compare(netx.AddrPortPriority(ap), netx.AddrPortPriority(bp))
+}
+
 // Bind the client to available networks. consumes the result of NewClient.
 func (t binder) Bind(cl *Client, err error) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	slices.SortStableFunc(t.sockets, cmpSockets)
 
 	if len(t.sockets) == 0 {
 		cl.Close()

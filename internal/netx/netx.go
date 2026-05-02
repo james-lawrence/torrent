@@ -24,6 +24,23 @@ func (n DialerFn) Dial(ctx context.Context, addr string) (net.Conn, error) {
 	return n(ctx, addr)
 }
 
+// AddrPortPriority returns a sort key for a network address; lower binds first.
+// Order: public IPv6 (0) < private/ULA/link-local IPv6 (1) < public IPv4 (2) < everything else (3).
+func AddrPortPriority(ap netip.AddrPort) int {
+	addr := ap.Addr().Unmap()
+	isPublic := addr.IsGlobalUnicast() && !addr.IsPrivate()
+	switch {
+	case addr.Is6() && isPublic:
+		return 0
+	case addr.Is6():
+		return 1
+	case addr.Is4() && isPublic:
+		return 2
+	default:
+		return 3
+	}
+}
+
 func CmpAddrPort(a, b netip.AddrPort) int {
 	ap := netip.AddrPortFrom(netip.AddrFrom16(a.Addr().As16()), a.Port())
 	bp := netip.AddrPortFrom(netip.AddrFrom16(b.Addr().As16()), b.Port())

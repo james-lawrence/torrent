@@ -440,7 +440,7 @@ func (s *Server) processPacket(ctx context.Context, b []byte, addr Addr) {
 	// s.logger().Printf("received response for transaction %q from %v\n", d.T, addr)
 	go t.handleResponse(b, d)
 
-	s.updateNode(addr, d.SenderID(), !d.ReadOnly, func(n *node) {
+	_ = s.updateNode(addr, d.SenderID(), !d.ReadOnly, func(n *node) {
 		n.lastGotResponse = time.Now()
 		n.failedLastQuestionablePing = false
 		n.numReceivesFrom++
@@ -467,6 +467,7 @@ func (s *Server) serve(socket net.PacketConn) error {
 			readZeroPort.Add(1)
 			continue
 		}
+
 		blocked, err := func() (bool, error) {
 			s.mu.RLock()
 			defer s.mu.RUnlock()
