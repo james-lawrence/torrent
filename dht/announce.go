@@ -67,7 +67,7 @@ type AnnouncePeerOpts struct {
 }
 
 type addressable interface {
-	AddrPort() netip.AddrPort
+	AddrPort(source netip.AddrPort) netip.AddrPort
 }
 
 // Finish an Announce get_peers traversal with an announce of a local peer.
@@ -146,7 +146,7 @@ func (a *Announce) announceClosest(ctx context.Context) {
 }
 
 func (a *Announce) announcePeer(ctx context.Context, peer dhtutil.Elem) error {
-	port := a.announcePeerOpts.Addressable.AddrPort().Port()
+	port := a.announcePeerOpts.Addressable.AddrPort(peer.Addr.AddrPort).Port()
 	implied := a.announcePeerOpts.ImpliedPort
 	if port == 0 && !implied { // nothing to do in this case its invalid just ignore.
 		return nil

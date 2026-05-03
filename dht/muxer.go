@@ -50,7 +50,7 @@ func (t defaultMuxer) Handler(raw []byte, r *krpc.Msg) (pattern string, fn Handl
 }
 
 type Handler interface {
-	Handle(ctx context.Context, src Addr, srv *Server, raw []byte, msg *krpc.Msg) error
+	Handle(ctx context.Context, src Addr, srv *Server, b Binding, raw []byte, msg *krpc.Msg) error
 }
 
 type Muxer interface {
@@ -60,7 +60,7 @@ type Muxer interface {
 
 type UnimplementedHandler struct{}
 
-func (t UnimplementedHandler) Handle(ctx context.Context, source Addr, s *Server, raw []byte, m *krpc.Msg) error {
+func (t UnimplementedHandler) Handle(ctx context.Context, source Addr, s *Server, b Binding, raw []byte, m *krpc.Msg) error {
 	log.Println("unimplemented rpc method was received", m.Q, source.String())
 	// TODO: http://libtorrent.org/dht_extensions.html#forward-compatibility
 	return krpc.ErrorMethodUnknown
@@ -68,18 +68,17 @@ func (t UnimplementedHandler) Handle(ctx context.Context, source Addr, s *Server
 
 type HandlerPing struct{}
 
-func (t HandlerPing) Handle(ctx context.Context, src Addr, srv *Server, raw []byte, msg *krpc.Msg) error {
-	return srv.reply(ctx, src, msg.T, krpc.Return{})
+func (t HandlerPing) Handle(ctx context.Context, src Addr, srv *Server, b Binding, raw []byte, msg *krpc.Msg) error {
+	return srv.reply(ctx, b, src, msg.T, krpc.Return{})
 }
 
 type HandlerPeers struct{}
 
-func (t HandlerPeers) Handle(ctx context.Context, src Addr, srv *Server, raw []byte, msg *krpc.Msg) error {
+func (t HandlerPeers) Handle(ctx context.Context, src Addr, srv *Server, b Binding, raw []byte, msg *krpc.Msg) error {
 	var r krpc.Return
 
-	// Check for the naked m.A.Want deref below.
 	if msg.A == nil {
-		return srv.sendError(ctx, src, msg.T, krpcErrMissingArguments)
+		return srv.sendError(ctx, b, src, msg.T, krpcErrMissingArguments)
 	}
 
 	if ps := srv.peers; ps != nil {
@@ -88,17 +87,17 @@ func (t HandlerPeers) Handle(ctx context.Context, src Addr, srv *Server, raw []b
 	}
 
 	if len(r.Values) == 0 {
-		if err := srv.setReturnNodes(&r, *msg, src); err != nil {
+		if err := srv.setReturnNodes(b, &r, *msg, src); err != nil {
 			return err
 		}
 	}
 
-	return srv.reply(ctx, src, msg.T, r)
+	return srv.reply(ctx, b, src, msg.T, r)
 }
 
 type HandlerAnnounce struct{}
 
-func (t HandlerAnnounce) Handle(ctx context.Context, source Addr, s *Server, raw []byte, m *krpc.Msg) error {
+func (t HandlerAnnounce) Handle(ctx context.Context, source Addr, s *Server, b Binding, raw []byte, m *krpc.Msg) error {
 	if !s.validToken(m.A.Token, source) {
 		log.Println("invalid announce token received from:", source.String())
 		return nil
@@ -126,15 +125,15 @@ func (t HandlerAnnounce) Handle(ctx context.Context, source Addr, s *Server, raw
 		)
 	}
 
-	return s.reply(ctx, source, m.T, krpc.Return{})
+	return s.reply(ctx, b, source, m.T, krpc.Return{})
 }
 
 type Bep44Get struct{}
 
-func (t Bep44Get) Handle(ctx context.Context, source Addr, s *Server, raw []byte, m *krpc.Msg) error {
+func (t Bep44Get) Handle(ctx context.Context, source Addr, s *Server, b Binding, raw []byte, m *krpc.Msg) error {
 	var r krpc.Return
-	if err := s.setReturnNodes(&r, *m, source); err != nil {
-		s.sendError(ctx, source, m.T, *err)
+	if err := s.setReturnNodes(b, &r, *m, source); err != nil {
+		s.sendError(ctx, b, source, m.T, *err)
 		return err
 	}
 
@@ -142,7 +141,7 @@ func (t Bep44Get) Handle(ctx context.Context, source Addr, s *Server, raw []byte
 
 	item, err := s.store.Get(bep44.Target(m.A.Target))
 	if err == bep44.ErrItemNotFound {
-		return s.reply(ctx, source, m.T, r)
+		return s.reply(ctx, b, source, m.T, r)
 	}
 
 	if err != nil {
@@ -155,19 +154,19 @@ func (t Bep44Get) Handle(ctx context.Context, source Addr, s *Server, raw []byte
 	r.Seq = &item.Seq
 
 	if m.A.Seq != nil && item.Seq <= *m.A.Seq {
-		return s.reply(ctx, source, m.T, r)
+		return s.reply(ctx, b, source, m.T, r)
 	}
 
 	r.V = bencode.MustMarshal(item.V)
 	r.K = item.K
 	r.Sig = item.Sig
 
-	return s.reply(ctx, source, m.T, r)
+	return s.reply(ctx, b, source, m.T, r)
 }
 
 type Bep44Put struct{}
 
-func (t Bep44Put) Handle(ctx context.Context, source Addr, s *Server, raw []byte, m *krpc.Msg) error {
+func (t Bep44Put) Handle(ctx context.Context, source Addr, s *Server, b Binding, raw []byte, m *krpc.Msg) error {
 	if !s.validToken(m.A.Token, source) {
 		return ErrTokenInvalid
 	}
@@ -197,7 +196,7 @@ func (t Bep44Put) Handle(ctx context.Context, source Addr, s *Server, raw []byte
 		return kerr
 	}
 
-	return s.reply(ctx, source, m.T, krpc.Return{
-		ID: s.ID().AsByteArray(),
+	return s.reply(ctx, b, source, m.T, krpc.Return{
+		ID: b.ID().AsByteArray(),
 	})
 }

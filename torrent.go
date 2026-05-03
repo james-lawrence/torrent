@@ -88,7 +88,7 @@ func TuneReadPeerID(id *int160.T) Tuner {
 	return func(t *torrent) error {
 		t.rLock()
 		defer t.rUnlock()
-		*id = t.cln.dht.ID()
+		*id = t.cln.dht.ID(t.cln.dht.DynamicAddrPort())
 		return nil
 	}
 }
@@ -155,7 +155,7 @@ func TuneReadAnnounce(v *tracker.Announce) Tuner {
 func TuneClientPeer(cl *Client) Tuner {
 	return func(t *torrent) error {
 		ps := []Peer{}
-		id := cl.dht.ID()
+		id := cl.dht.ID(cl.dht.DynamicAddrPort())
 
 		for _, la := range cl.ListenAddrs() {
 			addrport := errorsx.Must(netx.AddrPort(la))
@@ -1332,20 +1332,20 @@ func (t *torrent) announceToDht(s *dht.Server, impliedPort bool) error {
 func (t *torrent) dhtAnnouncer(s *dht.Server) {
 	errdelay := time.Duration(0) // for the first run 0 delay to immediately find peers
 	for {
-		t.cln.config.debug().Println("dht ancouncer waiting for peers event", s.ID(), t.md.ID)
+		t.cln.config.debug().Println("dht ancouncer waiting for peers event", s.DynamicAddrPort(), t.md.ID)
 		select {
 		case <-t.closed:
 			return
 		case <-time.After(errdelay):
 		case <-t.wantPeersEvent:
-			log.Println("dht ancouncing peers wanted event", s.ID(), t.md.ID)
+			log.Println("dht ancouncing peers wanted event", s.DynamicAddrPort(), t.md.ID)
 		}
 
 		t.stats.DHTAnnounce.Add(1)
 
 		if err := t.announceToDht(s, false); err == nil {
 			errdelay = time.Minute // when we succeeded wait unless a wantPeersEvent comes in.
-			t.cln.config.debug().Println("dht ancouncing completed", s.ID(), t.md.ID)
+			t.cln.config.debug().Println("dht ancouncing completed", s.DynamicAddrPort(), t.md.ID)
 			t.openNewConns()
 			continue
 		} else if errors.Is(err, dht.ErrDHTNoInitialNodes) {
@@ -1509,7 +1509,7 @@ func (t *torrent) wantConns() bool {
 // Start the process of connecting to the given peer for the given torrent if
 // appropriate.
 func (t *torrent) initiateConn(ctx context.Context, peer Peer) {
-	if t.cln.dht.ID().Cmp(peer.ID) == 0 {
+	if t.cln.dht.ID(peer.AddrPort).Cmp(peer.ID) == 0 {
 		t.cln.config.debug().Println("skipping connection to self based on peer id")
 		return
 	}
@@ -1651,7 +1651,7 @@ func (t *torrent) ping(addr net.UDPAddr) {
 	}
 
 	go func() {
-		ret := dht.Ping3S(context.Background(), t.cln.dht, addr.AddrPort(), t.cln.dht.ID())
+		ret := dht.Ping3S(context.Background(), t.cln.dht, addr.AddrPort(), t.cln.dht.ID(addr.AddrPort()))
 		if errorsx.Ignore(ret.Err, context.DeadlineExceeded) != nil {
 			t.cln.config.debug().Println("failed to ping address", ret.Err)
 		}

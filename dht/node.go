@@ -5,7 +5,6 @@ import (
 
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
-	"github.com/james-lawrence/torrent/internal/langx"
 )
 
 type nodeKey struct {
@@ -21,10 +20,6 @@ type node struct {
 
 	numReceivesFrom            int
 	failedLastQuestionablePing bool
-}
-
-func (s *Server) IsQuestionable(n *node) bool {
-	return !s.IsGood(n) && !nodeIsBad(langx.Zero(s.id.Load()), n)
 }
 
 func (n *node) hasAddrAndID(addr Addr, id int160.T) bool {
@@ -53,11 +48,3 @@ func nodeclosest(target int160.T) func(a, b *node) int {
 	}
 }
 
-// Per the spec in BEP 5.
-func (s *Server) IsGood(n *node) bool {
-	if nodeIsBad(langx.Zero(s.id.Load()), n) {
-		return false
-	}
-	return time.Since(n.lastGotResponse) < 15*time.Minute ||
-		!n.lastGotResponse.IsZero() && time.Since(n.lastGotQuery) < 15*time.Minute
-}

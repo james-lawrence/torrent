@@ -273,6 +273,14 @@ func StableSuffix(id T) T {
 	return s
 }
 
+// SecurePrefix returns an int160 whose first 3 bytes are the secure prefix
+// (id[0..2]) and whose remaining bytes are zeroed.
+func SecurePrefix(id T) T {
+	var p T
+	copy(p.bits[:3], id.bits[:3])
+	return p
+}
+
 func crcAddr(addr netip.Addr, rand uint8) uint32 {
 	if addr.Is4In6() {
 		addr = addr.Unmap()

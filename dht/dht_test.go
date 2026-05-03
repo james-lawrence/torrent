@@ -74,24 +74,18 @@ func TestPing(t *testing.T) {
 	srv, err := NewServer(32)
 	require.NoError(t, err)
 	backgroundServe(t, srv, recvConn)
-	srvUdpAddr := func(s *Server) *net.UDPAddr {
-		return &net.UDPAddr{
-			IP:   s.Addr().(*net.UDPAddr).IP,
-			Port: s.Addr().(*net.UDPAddr).Port,
-		}
-	}
 	defer srv.Close()
 
 	srv0, err := NewServer(
 		32,
-		OptionBootstrapNodesFn(addrResolver(srvUdpAddr(srv).String())),
+		OptionBootstrapNodesFn(addrResolver(srv.DynamicAddrPort().String())),
 	)
 	require.NoError(t, err)
 	backgroundServe(t, srv0, mustListen("127.0.0.1:0"))
 	defer srv0.Close()
-	res := srv.Ping(srv0.AddrPort())
+	res := srv.Ping(srv0.DynamicAddrPort())
 	require.NoError(t, res.Err)
-	require.EqualValues(t, srv0.ID(), res.Reply.SenderID().Int160())
+	require.EqualValues(t, srv0.ID(srv0.DynamicAddrPort()), res.Reply.SenderID().Int160())
 }
 
 func TestServerCustomNodeId(t *testing.T) {
@@ -105,11 +99,11 @@ func TestServerCustomNodeId(t *testing.T) {
 		OptionNodeID(id),
 	)
 	require.NoError(t, err)
-	require.Equal(t, id, s.ID(), s.ID().String())
 	backgroundServe(t, s, mustListen(":0"))
 	defer s.Close()
 
-	assert.Equal(t, id.Prefix([]byte{0x0, 0x0, 0x0}), s.ID().Prefix([]byte{0x0, 0x0, 0x0}), s.ID().String())
+	gotID := s.ID(s.DynamicAddrPort())
+	assert.Equal(t, id.Prefix([]byte{0x0, 0x0, 0x0}), gotID.Prefix([]byte{0x0, 0x0, 0x0}), gotID.String())
 }
 
 func TestAnnounceTimeout(t *testing.T) {
@@ -167,7 +161,7 @@ func TestHook(t *testing.T) {
 	defer receiver.Close()
 	// Ping receiver from pinger to trigger hook. Should also receive a response.
 	t.Log("TestHook: Servers created, hook for ping established. Calling Ping.")
-	res := pinger.Ping(receiver.AddrPort())
+	res := pinger.Ping(receiver.DynamicAddrPort())
 	assert.NoError(t, res.Err)
 
 	// Await signal that hook has been called.

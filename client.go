@@ -189,7 +189,7 @@ func (cl *Client) Stop(t Metadata) (err error) {
 // this is method is odd given a client can be attached to multiple ports on different
 // listeners.
 func (cl *Client) LocalPort16() (port uint16) {
-	if port = cl.dht.AddrPort().Port(); port > 0 {
+	if port = cl.dht.DynamicAddrPort().Port(); port > 0 {
 		return port
 	}
 
@@ -262,11 +262,6 @@ func (cl *Client) BindDHT(d *dht.Server, s sockets.Socket) (err error) {
 
 	if pc, ok = s.(net.PacketConn); !ok {
 		cl.config.debug().Println("dht bind ignored: not a packet conn")
-		return nil
-	}
-
-	if cl.dht != nil {
-		cl.config.debug().Printf("dht server already attached %p - %v\n", cl.dht, pc.LocalAddr)
 		return nil
 	}
 
@@ -448,7 +443,7 @@ func (cl *Client) establishOutgoingConn(ctx context.Context, t *torrent, addr ne
 			return
 		}
 
-		err = errorsx.Wrapf(err, "outgoing conn failed %s - %s - %v - %v", t.md.ID, t.md.DisplayName, cl.dht.AddrPort(), addr)
+		err = errorsx.Wrapf(err, "outgoing conn failed %s - %s - %v - %v", t.md.ID, t.md.DisplayName, cl.dht.AddrPort(addr), addr)
 		if cause := errorsx.Ignore(err, context.DeadlineExceeded); cause != nil {
 			cl.config.debug().Println(cause)
 		}
@@ -499,11 +494,12 @@ func (cl *Client) outgoingConnection(ctx context.Context, t *torrent, p Peer) (e
 	// Since the remote address is almost never the same as the local bind address
 	// due to network topologies (NAT, LAN, WAN) we have to detect this situation
 	// from the origin of the connection and ban the address we connected to.
-	if c.PeerID == cl.dht.ID() {
+	remoteAddrPort, _ := netx.AddrPort(c.conn.RemoteAddr())
+	if c.PeerID == cl.dht.ID(remoteAddrPort) {
 		cause := connections.NewBanned(
 			c.conn,
 			true,
-			errorsx.Errorf("detected connection to self - %s vs %s - %s", c.PeerID, cl.dht.ID(), c.conn.RemoteAddr().String()),
+			errorsx.Errorf("detected connection to self - %s vs %s - %s", c.PeerID, cl.dht.ID(remoteAddrPort), c.conn.RemoteAddr().String()),
 		)
 		cl.config.Handshaker.Release(
 			c.conn,
@@ -547,8 +543,9 @@ func (cl *Client) initiateHandshakes(c *connection, t *torrent) (err error) {
 	}
 	c.setRW(rw)
 
+	outgoingRemote, _ := netx.AddrPort(c.conn.RemoteAddr())
 	ebits, info, err := pp.Handshake{
-		PeerID: cl.dht.ID().AsByteArray(),
+		PeerID: cl.dht.ID(outgoingRemote).AsByteArray(),
 		Bits:   cl.config.extensionbits,
 	}.Outgoing(c.rw(), t.md.ID.AsByteArray())
 
@@ -556,7 +553,7 @@ func (cl *Client) initiateHandshakes(c *connection, t *torrent) (err error) {
 		return errorsx.Wrapf(err, "bittorrent protocol handshake failure: %s", t.md.ID)
 	}
 
-	cl.config.debug().Println("initiated outgoing connection", cl.dht.ID(), "->", int160.FromByteArray(info.PeerID))
+	cl.config.debug().Println("initiated outgoing connection", cl.dht.ID(outgoingRemote), "->", int160.FromByteArray(info.PeerID))
 
 	c.PeerExtensionBytes = ebits
 	c.PeerID = int160.FromByteArray(info.PeerID)
@@ -589,8 +586,9 @@ func (cl *Client) receiveHandshakes(c *connection) (t *torrent, err error) {
 		cl.config.debug().Println("encryption handshake", err)
 	}
 
+	incomingRemote, _ := netx.AddrPort(c.conn.RemoteAddr())
 	ebits, info, err := pp.Handshake{
-		PeerID: cl.dht.ID().AsByteArray(),
+		PeerID: cl.dht.ID(incomingRemote).AsByteArray(),
 		Bits:   cl.config.extensionbits,
 	}.Incoming(buffered)
 
@@ -664,7 +662,7 @@ func (cl *Client) AddDHTNodes(nodes []string) {
 }
 
 func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr netip.AddrPort) (c *connection) {
-	c = newConnection(cl.config, nc, outgoing, remoteAddr, &cl.config.extensionbits, cl.LocalPort16(), cl.dht.AddrPort())
+	c = newConnection(cl.config, nc, outgoing, remoteAddr, &cl.config.extensionbits, cl.LocalPort16(), cl.dht.AddrPort(remoteAddr))
 	c.setRW(connStatsReadWriter{nc, c})
 	c.r = &rateLimitedReader{
 		l: cl.config.DownloadRateLimiter,
@@ -672,7 +670,7 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr netip.Add
 	}
 
 	if nc != nil {
-		cl.config.debug().Printf("initialized with remote %v|%v %v (outgoing=%t)\n", cl.dht.AddrPort(), nc.LocalAddr(), remoteAddr, outgoing)
+		cl.config.debug().Printf("initialized with remote %v|%v %v (outgoing=%t)\n", cl.dht.DynamicAddrPort(), nc.LocalAddr(), remoteAddr, outgoing)
 	}
 
 	return c
@@ -717,13 +715,13 @@ func (cl *Client) publicIP(peer netip.Addr) netip.Addr {
 	if peer.Is4() {
 		return netx.FirstAddrOrZero(
 			cl.findListenerIP(func(ip netip.Addr) bool { return ip.Is4() && ip.IsValid() }),
-			cl.dht.AddrPort().Addr(),
+			cl.dht.DynamicAddrPort().Addr(),
 		)
 	}
 
 	return netx.FirstAddrOrZero(
 		cl.findListenerIP(func(ip netip.Addr) bool { return ip.Is6() && ip.IsValid() }),
-		cl.dht.AddrPort().Addr(),
+		cl.dht.DynamicAddrPort().Addr(),
 	)
 }
 

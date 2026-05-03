@@ -6,10 +6,13 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/james-lawrence/torrent/internal/errorsx"
+	"github.com/james-lawrence/torrent/internal/langx"
+	"github.com/james-lawrence/torrent/internal/slicesx"
 	"golang.org/x/net/proxy"
 )
 
@@ -38,6 +41,36 @@ func AddrPortPriority(ap netip.AddrPort) int {
 		return 2
 	default:
 		return 3
+	}
+}
+
+// Reachable reports whether dst is reachable from a socket bound to from.
+// Reachability is determined by scope: loopback ↔ loopback only;
+// link-local ↔ link-local only; routed addresses (private + public) ↔ each
+// other. All scopes are family-locked (IPv4 ↔ IPv6 returns false).
+func Reachable(dst netip.AddrPort, from netip.AddrPort) bool {
+	d := dst.Addr().Unmap()
+	f := from.Addr().Unmap()
+	if !d.IsValid() || !f.IsValid() {
+		return false
+	}
+
+	dScope := addrScope(d)
+	if dScope != addrScope(f) {
+		return false
+	}
+
+	return d.Is4() == f.Is4()
+}
+
+func addrScope(addr netip.Addr) int {
+	switch {
+	case addr.IsLoopback():
+		return 0
+	case addr.IsLinkLocalUnicast():
+		return 1
+	default:
+		return 2
 	}
 }
 
@@ -251,4 +284,51 @@ func (t fakecontextdialer) DialContext(ctx context.Context, network, address str
 	case <-done:
 	}
 	return conn, err
+}
+
+// CmpAddrPortPriority compares two AddrPorts by priority using AddrPortPriority,
+// then breaks ties with raw address comparison. Lower value sorts first.
+func CmpAddrPortPriority(a, b netip.AddrPort) int {
+	pa := AddrPortPriority(a)
+	pb := AddrPortPriority(b)
+	if pa != pb {
+		return pa - pb
+	}
+	return CmpAddrPort(a, b)
+}
+
+// ComputeBestAddr returns the best routable local address for a bound listener.
+// When the listener is bound to an unspecified address (0.0.0.0 / ::),
+// it enumerates interface addresses and picks the highest-priority one.
+func ComputeBestAddr(bound net.Addr) netip.AddrPort {
+	ap := errorsx.Zero(AddrPort(bound))
+	if !ap.Addr().Unmap().IsUnspecified() {
+		return netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port())
+	}
+
+	ifaces, err := net.InterfaceAddrs()
+	if err != nil {
+		return ap
+	}
+
+	blen := ap.Addr().Unmap().BitLen()
+	ips := slicesx.MapTransform(func(n net.Addr) netip.AddrPort {
+		switch v := n.(type) {
+		case *net.IPNet:
+			addr, _ := netip.AddrFromSlice(v.IP)
+			return netip.AddrPortFrom(addr.Unmap(), ap.Port())
+		case *net.IPAddr:
+			addr, _ := netip.AddrFromSlice(v.IP)
+			return netip.AddrPortFrom(addr.Unmap(), ap.Port())
+		default:
+			return netip.AddrPortFrom(netip.Addr{}, ap.Port())
+		}
+	}, ifaces...)
+	ips = slicesx.Filter(func(v netip.AddrPort) bool {
+		return v.Addr().Unmap().BitLen() == blen
+	}, ips...)
+	slices.SortStableFunc(ips, CmpAddrPortPriority)
+	best := langx.FirstNonZero(ips...)
+	// log.Println("best local ip", bound.Network(), bound, ap, best)
+	return best
 }

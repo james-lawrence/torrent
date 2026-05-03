@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/james-lawrence/torrent/dht/int160"
 )
@@ -166,3 +167,16 @@ func (tbl *table) addNode(root int160.T, n *node) error {
 	tbl.addrs[ap][n.Id] = struct{}{}
 	return nil
 }
+
+func (tbl *table) isGood(root int160.T, n *node) bool {
+	if nodeIsBad(root, n) {
+		return false
+	}
+	return time.Since(n.lastGotResponse) < 15*time.Minute ||
+		!n.lastGotResponse.IsZero() && time.Since(n.lastGotQuery) < 15*time.Minute
+}
+
+func (tbl *table) isQuestionable(root int160.T, n *node) bool {
+	return !tbl.isGood(root, n) && !nodeIsBad(root, n)
+}
+

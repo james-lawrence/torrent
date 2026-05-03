@@ -23,6 +23,8 @@ func TestAddrPortPriority(t *testing.T) {
 		{"RFC1918 192.168/16", "192.168.1.1:0", 3},
 		{"link-local IPv4", "169.254.1.1:0", 3},
 		{"loopback IPv4", "127.0.0.1:0", 3},
+		{"unspecified IPv6", "[::]:0", 1},
+		{"unspecified IPv4", "0.0.0.0:0", 3},
 	}
 
 	for _, tc := range cases {

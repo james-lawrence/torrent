@@ -13,10 +13,8 @@ import (
 	"reflect"
 	"runtime/pprof"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
-	"text/tabwriter"
 	"time"
 
 	"github.com/anacrolix/generics"
@@ -24,6 +22,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/atomicx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/netx"
+	"github.com/james-lawrence/torrent/internal/slicesx"
 	"github.com/james-lawrence/torrent/iplist"
 	"github.com/james-lawrence/torrent/logonce"
 	"golang.org/x/time/rate"
@@ -42,6 +41,14 @@ type dnscacher interface {
 	LookupHost(ctx context.Context, host string) (addrs []string, err error)
 }
 
+// Binding represents the per-socket identity for one registered DHT socket.
+type Binding interface {
+	ID() int160.T
+	AddrPort() netip.AddrPort
+	SendToNode(ctx context.Context, buf []byte, node Addr, maximum int) (bool, error)
+	Routing() *table
+}
+
 // A Server defines parameters for a DHT node server that is able to send
 // queries, and respond to the ones from the network. Each node has a globally
 // unique identifier known as the "node ID." Node IDs are chosen at random
@@ -50,20 +57,19 @@ type dnscacher interface {
 // is unable to function properly. Use `NewServer(nil)` to initialize a
 // default node.
 type Server struct {
+	k           int
 	id          *atomic.Pointer[int160.T]
 	dynamicaddr *atomic.Pointer[netip.AddrPort]
-	socket      net.PacketConn
+	bindings    []*socketbinding
 
-	mu               sync.RWMutex
-	transactions     transactions.Dispatcher[*transaction]
-	table            *table
-	closed           chan struct{}
-	tokenServer      tokenServer // Manages tokens we issue to our queriers.
-	stats            ServerStats
-	announceto       []PeerAnnounce
-	dnscache         dnscacher
-	lastBootstrap    time.Time
-	bootstrappingNow bool
+	mu            sync.RWMutex
+	transactions  transactions.Dispatcher[*transaction]
+	closed        chan struct{}
+	tokenServer   tokenServer // Manages tokens we issue to our queriers.
+	stats         ServerStats
+	announceto    []PeerAnnounce
+	dnscache      dnscacher
+	lastBootstrap time.Time
 
 	resolvepublicaddr PublicAddrPort
 	// Hook received queries. Return false if you don't want to propagate to the default handlers.
@@ -95,82 +101,23 @@ type Server struct {
 }
 
 func (s *Server) numGoodNodes() (num int) {
-	s.table.forNodes(func(n *node) bool {
-		if s.IsGood(n) {
-			num++
-		}
-		return true
-	})
+	for _, b := range s.bindings {
+		root := b.ID()
+		b.table.forNodes(func(n *node) bool {
+			if b.table.isGood(root, n) {
+				num++
+			}
+			return true
+		})
+	}
 	return
 }
 
-func prettySince(t time.Time) string {
-	if t.IsZero() {
-		return "never"
-	}
-	d := time.Since(t)
-	d /= time.Second
-	d *= time.Second
-	return fmt.Sprintf("%s ago", d)
-}
-
-func (s *Server) WriteStatus(w io.Writer) {
-	fmt.Fprintf(w, "Listening on %s\n", s.Addr())
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	root := langx.Zero(s.id.Load())
-
-	fmt.Fprintf(w, "Nodes in table: %d good, %d total\n", s.numGoodNodes(), s.numNodes())
-	fmt.Fprintf(w, "Ongoing transactions: %d\n", s.transactions.NumActive())
-	fmt.Fprintf(w, "Server node ID: %s\n", root.String())
-	buckets := &s.table.buckets
-	for i := range s.table.buckets {
-		b := &buckets[i]
-		if b.Len() == 0 && b.lastChanged.IsZero() {
-			continue
-		}
-		fmt.Fprintf(w,
-			"b# %v: %v nodes, last updated: %v\n",
-			i, b.Len(), prettySince(b.lastChanged))
-		if b.Len() > 0 {
-			tw := tabwriter.NewWriter(w, 0, 0, 1, ' ', 0)
-			fmt.Fprintf(tw, "  node id\taddr\tlast query\tlast response\trecv\tdiscard\tflags\n")
-			// Bucket nodes ordered by distance from server ID.
-			nodes := slices.SortedFunc(b.NodeIter(), func(l *node, r *node) int {
-				return l.Id.Distance(root).Cmp(r.Id.Distance(root))
-			})
-			for _, n := range nodes {
-				var flags []string
-				if s.IsQuestionable(n) {
-					flags = append(flags, "q10e")
-				}
-				if nodeIsBad(root, n) {
-					flags = append(flags, "bad")
-				}
-				if s.IsGood(n) {
-					flags = append(flags, "good")
-				}
-				if n.IsSecure() {
-					flags = append(flags, "sec")
-				}
-				fmt.Fprintf(tw, "  %x\t%s\t%s\t%s\t%d\t%v\t%v\n",
-					n.Id.Bytes(),
-					n.Addr,
-					prettySince(n.lastGotQuery),
-					prettySince(n.lastGotResponse),
-					n.numReceivesFrom,
-					n.failedLastQuestionablePing,
-					strings.Join(flags, ","),
-				)
-			}
-			tw.Flush()
-		}
-	}
-	fmt.Fprintln(w)
-}
-
 func (s *Server) numNodes() (num int) {
-	return s.table.numNodes()
+	for _, b := range s.bindings {
+		num += b.table.numNodes()
+	}
+	return
 }
 
 // Stats returns statistics for the server.
@@ -184,17 +131,8 @@ func (s *Server) Stats() ServerStats {
 	return ss
 }
 
-// Addr returns the listen address for the server.
-// WARNING: Most usages should use AddrPort())
-func (s *Server) Addr() net.Addr {
-	if s == nil || s.socket == nil {
-		return nil
-	}
-
-	return s.socket.LocalAddr()
-}
-
-func (s *Server) AddrPort() netip.AddrPort {
+// DynamicAddrPort returns the server's best-known public address across all bindings.
+func (s *Server) DynamicAddrPort() netip.AddrPort {
 	if s == nil {
 		return netip.AddrPortFrom(netip.IPv6Unspecified(), 0)
 	}
@@ -205,6 +143,25 @@ func (s *Server) AddrPort() netip.AddrPort {
 	}
 
 	return addr
+}
+
+// AddrPort returns the public address of the binding matching source's address
+// family, falling back to the first binding.
+func (s *Server) AddrPort(source netip.AddrPort) netip.AddrPort {
+	if s == nil {
+		return netip.AddrPort{}
+	}
+	b := s.Binding(source)
+	if b == nil {
+		return netip.AddrPort{}
+	}
+	return b.AddrPort()
+}
+
+func (s *Server) numBindings() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.bindings)
 }
 
 type discard struct{}
@@ -227,18 +184,18 @@ func (t discard) Print(v ...any) {
 // NewServer initializes a new DHT node server.
 func NewServer(k int, options ...Option) (s *Server, err error) {
 	s = langx.Autoptr(langx.Clone(Server{
-		id:        atomicx.Pointer(int160.Random()),
-		blocklist: iplist.Zero(),
+		k:           k,
+		id:          atomicx.Pointer(int160.Random()),
+		dynamicaddr: atomicx.Pointer(netip.AddrPortFrom(netip.IPv6Unspecified(), 0)),
+		blocklist:   iplist.Zero(),
 		tokenServer: tokenServer{
 			maxIntervalDelta: 2,
 			interval:         5 * time.Minute,
 			secret:           make([]byte, 20),
 		},
 		dnscache:          net.DefaultResolver,
-		table:             newTable(k),
 		store:             bep44.NewWrapper(bep44.NewMemory(), 2*time.Hour),
 		closed:            make(chan struct{}),
-		dynamicaddr:       atomicx.Pointer(netip.AddrPortFrom(netip.IPv6Unspecified(), 0)),
 		resolvepublicaddr: PublicAddrPortFromPacketConn,
 		sendLimiter:       DefaultSendLimiter,
 		mux:               DefaultMuxer(),
@@ -256,49 +213,81 @@ func NewServer(k int, options ...Option) (s *Server, err error) {
 	return s, nil
 }
 
-func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
+func (s *Server) Binding(addr netip.AddrPort) *socketbinding {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.bindingLocked(addr)
+}
+
+func (s *Server) bindingLocked(addr netip.AddrPort) *socketbinding {
+	if len(s.bindings) == 0 {
+		return nil
+	}
+
+	for _, b := range s.bindings {
+		if netx.Reachable(addr, langx.Zero(b.dynamicaddr.Load())) {
+			return b
+		}
+	}
+
+	return nil
+}
+
+// ServeBinding starts serving on pc and returns the associated Binding once
+// the public address is resolved. Callers can use the Binding to observe
+// the per-socket node ID.
+func (s *Server) ServeBinding(ctx context.Context, pc net.PacketConn) (Binding, error) {
+	dedup := func(pc net.PacketConn) (*socketbinding, bool) {
+		incoming := errorsx.Zero(netx.AddrPort(pc.LocalAddr()))
+		return slicesx.Find(func(b *socketbinding) bool {
+			current := errorsx.Zero(netx.AddrPort(b.pc.LocalAddr()))
+			return current.Addr().Compare(incoming.Addr()) == 0
+		}, s.bindings...)
+	}
+
+	bestaddr := netx.ComputeBestAddr(pc.LocalAddr())
+	b := &socketbinding{
+		pc:          pc,
+		id:          atomicx.Pointer(langx.Zero(s.id.Load()).Secure(bestaddr.Addr())),
+		dynamicaddr: atomicx.Pointer(bestaddr),
+		table:       newTable(s.k),
+		log:         s.log,
+	}
+
+	s.mu.Lock()
+	_b, found := dedup(pc)
+	if !found {
+		s.bindings = append(s.bindings, b)
+	}
+	s.mu.Unlock()
+	if found {
+		return _b, nil
+	}
+
 	updateaddr := func(fixed int160.T, detected netip.AddrPort) {
 		latest := fixed.Secure(detected.Addr())
-		old := langx.Zero(s.id.Swap(&latest))
-
-		s.logger().Println("updated", fixed, "->", latest, detected)
+		old := langx.Zero(b.id.Swap(&latest))
 		if latest.Cmp(old) == 0 {
 			return
 		}
 
-		s.logger().Println("peer id changed", old, "->", latest)
-		s.dynamicaddr.Store(&detected)
-	}
-
-	safeclose := func(n net.PacketConn) error {
-		if n == nil {
-			return nil
+		s.logger().Println("binding id changed", old, "->", latest)
+		b.dynamicaddr.Store(&detected)
+		current := langx.Zero(s.dynamicaddr.Load())
+		if current.Port() == 0 || netx.AddrPortPriority(detected) < netx.AddrPortPriority(current) {
+			s.dynamicaddr.Store(&detected)
 		}
-
-		return n.Close()
 	}
 
-	s.mu.Lock()
-	tmp := s.socket
-	s.socket = pc
-	s.mu.Unlock()
-
-	if err := safeclose(tmp); err != nil {
-		return errorsx.Wrap(err, "failed to close old dht socket")
-	}
-
-	// static value to use as our base.
-	fixed := langx.Zero(s.id.Load())
-
+	fixed := langx.Zero(b.id.Load())
 	dctx, done := context.WithCancelCause(context.Background())
-	seq, err := s.resolvepublicaddr(dctx, s, fixed, pc)
+	seq, err := s.resolvepublicaddr(dctx, s, b, fixed, pc)
 	if err != nil {
 		s.logger().Println("failed to resolve", err)
 		done(nil)
-		return err
+		return nil, err
 	}
 
-	// resolve the public ip before attempting to move forward.
 	for detected := range seq {
 		updateaddr(fixed, detected)
 		break
@@ -309,12 +298,16 @@ func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
 			updateaddr(fixed, detected)
 		}
 	}()
-
 	go func() {
-		done(s.serveUntilClosed(pc))
+		done(s.serveUntilClosed(ctx, b))
 	}()
 
-	return nil
+	return b, nil
+}
+
+func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
+	_, err := s.ServeBinding(ctx, pc)
+	return err
 }
 
 func (s *Server) isClosed() bool {
@@ -347,8 +340,8 @@ func (s *Server) DetachAnnouncer(a PeerAnnounce) {
 	})
 }
 
-func (s *Server) serveUntilClosed(pc net.PacketConn) error {
-	err := s.serve(pc)
+func (s *Server) serveUntilClosed(ctx context.Context, b *socketbinding) error {
+	err := s.serve(ctx, b)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.isClosed() {
@@ -359,7 +352,7 @@ func (s *Server) serveUntilClosed(pc net.PacketConn) error {
 
 // Returns a description of the Server.
 func (s *Server) String() string {
-	return fmt.Sprintf("dht server on %s (node id %v)", s.socket.LocalAddr(), s.id)
+	return fmt.Sprintf("dht server on %s", langx.Zero(s.dynamicaddr.Load()))
 }
 
 // Packets to and from any address matching a range in the list are dropped.
@@ -373,7 +366,7 @@ func (s *Server) IPBlocklist() iplist.Ranger {
 	return s.blocklist
 }
 
-func (s *Server) processPacket(ctx context.Context, b []byte, addr Addr) {
+func (s *Server) processPacket(ctx context.Context, binding *socketbinding, b []byte, addr Addr) {
 	// log.Printf("got packet %q", b)
 	if len(b) < 2 || b[0] != 'd' {
 		// KRPC messages are bencoded dicts.
@@ -414,7 +407,7 @@ func (s *Server) processPacket(ctx context.Context, b []byte, addr Addr) {
 
 	if d.Y == krpc.YQuery {
 		s.logger().Printf("received query %q from %v\n", d.Q, addr)
-		s.handleQuery(ctx, addr, b, d)
+		s.handleQuery(ctx, binding, addr, b, d)
 		return
 	}
 
@@ -434,17 +427,17 @@ func (s *Server) processPacket(ctx context.Context, b []byte, addr Addr) {
 	// s.logger().Printf("received response for transaction %q from %v\n", d.T, addr)
 	go t.handleResponse(b, d)
 
-	_ = s.updateNode(addr, d.SenderID(), !d.ReadOnly, func(n *node) {
+	_ = binding.updateNode(addr, d.SenderID(), !d.ReadOnly, func(n *node) {
 		n.lastGotResponse = time.Now()
 		n.failedLastQuestionablePing = false
 		n.numReceivesFrom++
 	})
 }
 
-func (s *Server) serve(socket net.PacketConn) error {
+func (s *Server) serve(ctx context.Context, binding *socketbinding) error {
 	var b [0x10000]byte
 	for {
-		n, addr, err := socket.ReadFrom(b[:])
+		n, addr, err := binding.pc.ReadFrom(b[:])
 		if err != nil {
 			if ignoreReadFromError(err) {
 				continue
@@ -478,7 +471,7 @@ func (s *Server) serve(socket net.PacketConn) error {
 			continue
 		}
 
-		s.processPacket(context.Background(), b[:n], NewAddr(errorsx.Zero(netx.AddrPort(addr))))
+		s.processPacket(ctx, binding, b[:n], NewAddr(errorsx.Zero(netx.AddrPort(addr))))
 	}
 }
 
@@ -490,9 +483,12 @@ func (s *Server) ipBlocked(ip net.IP) (blocked bool) {
 // Adds directly to the node table.
 func (s *Server) AddNode(nis ...krpc.NodeInfo) error {
 	addnode := func(n krpc.NodeInfo) error {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return s.updateNode(NewAddr(n.Addr.AddrPort), &n.ID, true, func(*node) {})
+		addr := NewAddr(n.Addr.AddrPort)
+		b := s.Binding(n.Addr.AddrPort)
+		if b == nil {
+			return nil
+		}
+		return b.updateNode(addr, &n.ID, true, func(*node) {})
 	}
 
 	for _, ni := range nis {
@@ -524,8 +520,8 @@ func shouldReturnNodes6(queryWants []krpc.Want, querySource net.IP) bool {
 	return querySource.To4() == nil
 }
 
-func (s *Server) MakeReturnNodes(target int160.T, filter func(krpc.NodeAddr) bool) []krpc.NodeInfo {
-	return s.closestGoodNodeInfos(8, target, filter)
+func (s *Server) MakeReturnNodes(b Binding, target int160.T, filter func(krpc.NodeAddr) bool) []krpc.NodeInfo {
+	return s.closestGoodNodeInfos(b, 8, target, filter)
 }
 
 var krpcErrMissingArguments = krpc.Error{
@@ -564,27 +560,27 @@ func filterPeers(querySourceIp net.IP, queryWants []krpc.Want, allPeers []krpc.N
 	return
 }
 
-func (s *Server) setReturnNodes(r *krpc.Return, queryMsg krpc.Msg, querySource Addr) *krpc.Error {
+func (s *Server) setReturnNodes(b Binding, r *krpc.Return, queryMsg krpc.Msg, querySource Addr) *krpc.Error {
 	if queryMsg.A == nil {
 		return &krpcErrMissingArguments
 	}
 	target := int160.FromByteArray(queryMsg.A.InfoHash)
 	if shouldReturnNodes(queryMsg.A.Want, querySource.IP()) {
-		r.Nodes = s.MakeReturnNodes(target, func(na krpc.NodeAddr) bool { return na.Addr().Is4() })
+		r.Nodes = s.MakeReturnNodes(b, target, func(na krpc.NodeAddr) bool { return na.Addr().Is4() })
 	}
 	if shouldReturnNodes6(queryMsg.A.Want, querySource.IP()) {
-		r.Nodes6 = s.MakeReturnNodes(target, func(krpc.NodeAddr) bool { return true })
+		r.Nodes6 = s.MakeReturnNodes(b, target, func(krpc.NodeAddr) bool { return true })
 	}
 	return nil
 }
 
-func (s *Server) handleQuery(ctx context.Context, source Addr, raw []byte, m krpc.Msg) {
+func (s *Server) handleQuery(ctx context.Context, binding *socketbinding, source Addr, raw []byte, m krpc.Msg) {
 	var (
 		pattern string
 		fn      Handler
 	)
 
-	s.updateNode(source, m.SenderID(), !m.ReadOnly, func(n *node) {
+	_ = binding.updateNode(source, m.SenderID(), !m.ReadOnly, func(n *node) {
 		n.lastGotQuery = time.Now()
 		n.numReceivesFrom++
 	})
@@ -599,123 +595,19 @@ func (s *Server) handleQuery(ctx context.Context, source Addr, raw []byte, m krp
 		return
 	}
 
-	if err := fn.Handle(ctx, source, s, raw, &m); err != nil {
+	if err := fn.Handle(ctx, source, s, binding, raw, &m); err != nil {
 		log.Printf("query failed %s - %T - %v\n", source.String(), err, err)
 		if cause, ok := err.(krpc.Error); ok {
-			if err := s.sendError(ctx, source, m.T, cause); err != nil {
+			if err := s.sendError(ctx, binding, source, m.T, cause); err != nil {
 				log.Println("unable to return an error", err)
 			}
 		}
 		if cause, ok := err.(*krpc.Error); ok {
-			if err := s.sendError(ctx, source, m.T, *cause); err != nil {
+			if err := s.sendError(ctx, binding, source, m.T, *cause); err != nil {
 				log.Println("unable to return an error", err)
 			}
 		}
 	}
-}
-
-func (s *Server) sendError(ctx context.Context, addr Addr, t string, e krpc.Error) error {
-	m := krpc.Msg{
-		T: t,
-		Y: krpc.YError,
-		E: &e,
-	}
-	b, err := bencode.Marshal(m)
-	if err != nil {
-		return err
-	}
-	s.logger().Printf("sending error to %q: %v", addr, e)
-	_, err = s.SendToNode(ctx, b, addr, 1)
-	if err != nil {
-		s.logger().Printf("error replying to %q: %v", addr, err)
-		return err
-	}
-
-	return nil
-}
-
-func (s *Server) reply(ctx context.Context, addr Addr, t string, r krpc.Return) error {
-	r.ID = s.id.Load().AsByteArray()
-	m := krpc.Msg{
-		T:  t,
-		Y:  krpc.YResponse,
-		R:  &r,
-		IP: addr.KRPC(),
-	}
-	b := bencode.MustMarshal(m)
-	s.logger().Printf("replying to %s\n", addr)
-	_, err := s.SendToNode(ctx, b, addr, 1)
-	if err != nil {
-		s.logger().Printf("error replying to %s: %s\n", addr, err)
-		return err
-	}
-
-	return nil
-}
-
-// Adds a node if appropriate.
-func (s *Server) addNode(n *node) error {
-	root := langx.Zero(s.id.Load())
-	if nodeIsBad(root, n) {
-		return errors.New("node is bad")
-	}
-
-	b := s.table.bucketForID(root, n.Id)
-	if excess := s.table.dropN(root, b, max(0, b.Len()-s.table.k)); excess >= 0 {
-		return errors.New("no room in bucket")
-	}
-
-	if err := s.table.addNode(root, n); err != nil {
-		return fmt.Errorf("expected to add node: %w", err)
-	}
-
-	return nil
-}
-
-func (s *Server) NodeRespondedToPing(addr Addr, id int160.T) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	root := langx.Zero(s.id.Load())
-	if id == root {
-		return
-	}
-
-	b := s.table.bucketForID(root, id)
-	if b.GetNode(addr, id) == nil {
-		return
-	}
-	b.lastChanged = time.Now()
-}
-
-// Updates the node, adding it if appropriate.
-func (s *Server) updateNode(addr Addr, id *krpc.ID, tryAdd bool, update func(*node)) (err error) {
-	if id == nil {
-		return errors.New("id is nil")
-	}
-	root := langx.Zero(s.id.Load())
-	_id := int160.FromByteArray(*id)
-	n := s.table.getNode(root, addr, _id)
-	missing := n == nil
-
-	if missing {
-		if !tryAdd {
-			return errors.New("node not present and add flag false")
-		}
-		if _id == root {
-			return errors.New("can't store own id in routing table")
-		}
-		n = &node{nodeKey: nodeKey{
-			Id:   _id,
-			Addr: addr,
-		}}
-	}
-
-	update(n)
-
-	if !missing {
-		return nil
-	}
-	return s.addNode(n)
 }
 
 func nodeIsBad(root int160.T, n *node) bool {
@@ -769,7 +661,11 @@ func (s *Server) SendToNode(ctx context.Context, b []byte, node Addr, maximum in
 		return false, err
 	}
 
-	n, err := repeatsend(ctx, s.socket, node.Raw(), b, s.queryResendDelay(), maximum)
+	binding := s.Binding(node.AddrPort())
+	if binding == nil {
+		return false, fmt.Errorf("no socket available: %s", node.AddrPort())
+	}
+	n, err := repeatsend(ctx, binding.pc, node.Raw(), b, s.queryResendDelay(), maximum)
 	if err != nil {
 		return false, err
 	}
@@ -782,6 +678,32 @@ func (s *Server) SendToNode(ctx context.Context, b []byte, node Addr, maximum in
 	return wrote, nil
 }
 
+func (s *Server) sendError(ctx context.Context, b Binding, addr Addr, t string, e krpc.Error) error {
+	m := krpc.Msg{T: t, Y: krpc.YError, E: &e}
+	buf, err := bencode.Marshal(m)
+	if err != nil {
+		return err
+	}
+	s.logger().Printf("sending error to %q: %v", addr, e)
+	_, err = b.SendToNode(ctx, buf, addr, 1)
+	if err != nil {
+		s.logger().Printf("error replying to %q: %v", addr, err)
+	}
+	return err
+}
+
+func (s *Server) reply(ctx context.Context, b Binding, addr Addr, t string, r krpc.Return) error {
+	r.ID = b.ID().AsByteArray()
+	m := krpc.Msg{T: t, Y: krpc.YResponse, R: &r, IP: addr.KRPC()}
+	buf := bencode.MustMarshal(m)
+	s.logger().Printf("replying to %s\n", addr)
+	_, err := b.SendToNode(ctx, buf, addr, 1)
+	if err != nil {
+		s.logger().Printf("error replying to %s: %s\n", addr, err)
+	}
+	return err
+}
+
 func (s *Server) deleteTransaction(k transactionKey) {
 	if s.transactions.Have(k) {
 		s.transactions.Pop(k)
@@ -792,10 +714,13 @@ func (s *Server) addTransaction(k transactionKey, t *transaction) {
 	s.transactions.Add(k, t)
 }
 
-// ID returns the 20-byte server ID. This is the ID used to communicate with the
-// DHT network.
-func (s *Server) ID() int160.T {
-	return langx.Zero(s.id.Load())
+// ID returns the node ID for the binding matching the given source address.
+func (s *Server) ID(addr netip.AddrPort) int160.T {
+	b := s.Binding(addr)
+	if b == nil {
+		return int160.Zero()
+	}
+	return b.ID()
 }
 
 func (s *Server) createToken(addr Addr) string {
@@ -924,11 +849,13 @@ func (s *Server) Query(ctx context.Context, addr Addr, input QueryInput) (ret Qu
 
 // Sends a ping query to the address given.
 func (s *Server) PingQueryInput(ctx context.Context, node netip.AddrPort, qi QueryInput) QueryResult {
-	res := PingDuration(ctx, 30*time.Second, s, node, s.ID())
+	res := PingDuration(ctx, 30*time.Second, s, node, s.ID(node))
 	if res.Err == nil {
 		id := res.Reply.SenderID()
 		if id != nil {
-			s.NodeRespondedToPing(NewAddr(node), id.Int160())
+			if b := s.Binding(node); b != nil {
+				b.NodeRespondedToPing(NewAddr(node), id.Int160())
+			}
 		}
 	}
 
@@ -940,32 +867,6 @@ func (s *Server) Ping(node netip.AddrPort) QueryResult {
 	return s.PingQueryInput(context.Background(), node, QueryInput{})
 }
 
-// Put adds a new item to node. You need to call Get first for a write token.
-func (s *Server) Put(ctx context.Context, node Addr, i bep44.Put, token string, rl QueryRateLimiting) QueryResult {
-	if err := s.store.Put(i.ToItem()); err != nil {
-		return QueryResult{
-			Err: err,
-		}
-	}
-
-	qi, err := NewMessageRequest("put", &krpc.MsgArgs{
-		Cas:   i.Cas,
-		ID:    s.ID().AsByteArray(),
-		Salt:  i.Salt,
-		Seq:   &i.Seq,
-		Sig:   i.Sig,
-		Token: token,
-		V:     i.V,
-		K:     langx.Zero(i.K),
-	})
-
-	if err != nil {
-		return QueryResult{Err: err}
-	}
-
-	return s.Query(ctx, node, qi)
-}
-
 func (s *Server) announcePeer(
 	ctx context.Context,
 	node Addr, infoHash int160.T, port uint16, token string, impliedPort bool,
@@ -973,7 +874,7 @@ func (s *Server) announcePeer(
 	ret QueryResult,
 ) {
 
-	qi, err := NewAnnouncePeerRequest(s.ID().AsByteArray(), infoHash.AsByteArray(), port, token, impliedPort)
+	qi, err := NewAnnouncePeerRequest(s.ID(node.AddrPort()).AsByteArray(), infoHash.AsByteArray(), port, token, impliedPort)
 	if err != nil {
 		return NewQueryResultErr(err)
 	}
@@ -995,7 +896,7 @@ func (s *Server) announcePeer(
 // Sends a find_node query to addr. targetID is the node we're looking for. The Server makes use of
 // some of the response fields.
 func (s *Server) FindNode(ctx context.Context, addr Addr, targetID int160.T, rl QueryRateLimiting) (ret QueryResult) {
-	return FindNode(ctx, s, addr, s.ID().AsByteArray(), targetID, s.defaultWant)
+	return FindNode(ctx, s, addr, s.ID(addr.AddrPort()).AsByteArray(), targetID, s.defaultWant)
 }
 
 // Returns how many nodes are in the node table.
@@ -1014,18 +915,19 @@ func (s *Server) Nodes() (nis []krpc.NodeInfo) {
 
 // Returns non-bad nodes from the routing table.
 func (s *Server) notBadNodes() (nis []krpc.NodeInfo) {
-	root := langx.Zero(s.id.Load())
-	s.table.forNodes(func(n *node) bool {
-		if nodeIsBad(root, n) {
+	for _, b := range s.bindings {
+		root := b.ID()
+		b.table.forNodes(func(n *node) bool {
+			if nodeIsBad(root, n) {
+				return true
+			}
+			nis = append(nis, krpc.NodeInfo{
+				Addr: n.Addr.KRPC(),
+				ID:   n.Id.AsByteArray(),
+			})
 			return true
-		}
-
-		nis = append(nis, krpc.NodeInfo{
-			Addr: n.Addr.KRPC(),
-			ID:   n.Id.AsByteArray(),
 		})
-		return true
-	})
+	}
 	return
 }
 
@@ -1037,11 +939,9 @@ func (s *Server) Close() {
 		return
 	}
 	close(s.closed)
-	if s.socket == nil {
-		return
+	for _, b := range s.bindings {
+		go b.pc.Close()
 	}
-
-	go s.socket.Close()
 }
 
 func (s *Server) GetPeers(
@@ -1052,62 +952,45 @@ func (s *Server) GetPeers(
 	// reading of BEP 33 but there you go.
 	scrape bool,
 ) (ret QueryResult) {
-	return FindPeers(ctx, s, addr, s.ID().AsByteArray(), infoHash.AsByteArray(), scrape)
+	return FindPeers(ctx, s, addr, s.ID(addr.AddrPort()).AsByteArray(), infoHash.AsByteArray(), scrape)
 }
 
-// Get gets item information from a specific target ID. If seq is set to a specific value,
-// only items with seq bigger than the one provided will return a V, K and Sig, if any.
-// Get must be used to get a Put write token, when you want to write an item instead of read it.
-func (s *Server) Get(ctx context.Context, addr Addr, target bep44.Target, seq *int64, rl QueryRateLimiting) QueryResult {
-	qi, err := NewMessageRequest("get", &krpc.MsgArgs{
-		ID:     s.ID().AsByteArray(),
-		Target: target,
-		Seq:    seq,
-		Want:   []krpc.Want{krpc.WantNodes, krpc.WantNodes6},
-	})
-	if err != nil {
-		return NewQueryResultErr(err)
+func (s *Server) ClosestGoodNodeInfos(source netip.AddrPort, k int, targetID int160.T) []krpc.NodeInfo {
+	b := s.Binding(source)
+	if b == nil {
+		return nil
 	}
-
-	return s.Query(ctx, addr, qi)
-}
-
-func (s *Server) ClosestGoodNodeInfos(
-	k int,
-	targetID int160.T,
-) (
-	ret []krpc.NodeInfo,
-) {
-	return s.closestGoodNodeInfos(k, targetID, func(na krpc.NodeAddr) bool { return true })
+	return s.closestGoodNodeInfos(b, k, targetID, func(krpc.NodeAddr) bool { return true })
 }
 
 func (s *Server) closestGoodNodeInfos(
+	b Binding,
 	k int,
 	targetID int160.T,
 	filter func(krpc.NodeAddr) bool,
 ) (
 	ret []krpc.NodeInfo,
 ) {
-	for _, n := range s.closestNodes(k, targetID, func(n *node) bool {
-		return s.IsGood(n) && filter(n.NodeInfo().Addr)
+	root := b.ID()
+	tbl := b.Routing()
+	for _, n := range tbl.closestNodes(root, k, targetID, func(n *node) bool {
+		return tbl.isGood(root, n) && filter(n.NodeInfo().Addr)
 	}) {
 		ret = append(ret, n.NodeInfo())
 	}
 	return
 }
 
-func (s *Server) closestNodes(k int, target int160.T, filter func(*node) bool) []*node {
-	return s.table.closestNodes(langx.Zero(s.id.Load()), k, target, filter)
-}
-
 func (s *Server) TraversalStartingNodes() (nodes []addrMaybeId, err error) {
 	s.mu.RLock()
-	s.table.forNodes(func(n *node) bool {
-		nodes = append(nodes, addrMaybeId{
-			Addr: n.Addr.KRPC(),
-			Id:   generics.Some(n.Id)})
-		return true
-	})
+	for _, b := range s.bindings {
+		b.table.forNodes(func(n *node) bool {
+			nodes = append(nodes, addrMaybeId{
+				Addr: n.Addr.KRPC(),
+				Id:   generics.Some(n.Id)})
+			return true
+		})
+	}
 	s.mu.RUnlock()
 	if len(nodes) > 0 {
 		return nodes, nil
@@ -1158,21 +1041,8 @@ func (s *Server) PeerStore() peer_store.Interface {
 	return s.peers
 }
 
-func (s *Server) shouldStopRefreshingBucket(bucketIndex int) bool {
-	if s.isClosed() {
-		return true
-	}
-	b := &s.table.buckets[bucketIndex]
-	root := langx.Zero(s.id.Load())
-	// Stop if the bucket is full, and none of the nodes are bad.
-	return b.Len() == s.table.K() && b.EachNode(func(n *node) bool {
-		return !nodeIsBad(root, n)
-	})
-}
-
-func (s *Server) refreshBucket(bucketIndex int) *traversal.Stats {
-	s.mu.RLock()
-	id := s.table.randomIdForBucket(langx.Zero(s.id.Load()), bucketIndex)
+func (s *Server) refreshBucket(binding *socketbinding, bucketIndex int) *traversal.Stats {
+	id := binding.table.randomIdForBucket(binding.ID(), bucketIndex)
 	op := traversal.Start(traversal.OperationInput{
 		Target: id.AsByteArray(),
 		Alpha:  3,
@@ -1180,39 +1050,34 @@ func (s *Server) refreshBucket(bucketIndex int) *traversal.Stats {
 		// full bucket, since the Server will add nodes that respond to its table to replace the bad
 		// ones we're presumably refreshing. It might be possible to terminate the traversal early
 		// as soon as the bucket is good.
-		K: s.table.K(),
+		K: binding.table.K(),
 		DoQuery: func(ctx context.Context, addr krpc.NodeAddr) traversal.QueryResult {
 			res := s.FindNode(ctx, NewAddr(addr.AddrPort), id, QueryRateLimiting{})
-			err := res.Err
-			if err != nil && !errors.Is(err, ErrTransactionTimeout) {
-				s.logger().Printf("error doing find node while refreshing bucket: %v\n", err)
+			if err := res.Err; err != nil && !errors.Is(err, ErrTransactionTimeout) {
+				binding.logger().Printf("error doing find node while refreshing bucket: %v\n", err)
 			}
 			return res.TraversalQueryResult(addr)
 		},
 		NodeFilter: s.TraversalNodeFilter,
 	})
 	defer func() {
-		s.mu.RUnlock()
 		op.Stop()
 		<-op.Stopped()
 	}()
-	b := &s.table.buckets[bucketIndex]
+	b := &binding.table.buckets[bucketIndex]
 wait:
 	for {
-		if s.shouldStopRefreshingBucket(bucketIndex) {
+		if binding.shouldStopRefreshingBucket(bucketIndex) {
 			break wait
 		}
 		op.AddNodes(types.AddrMaybeIdSliceFromNodeInfoSlice(s.notBadNodes()))
 		bucketChanged := b.changed.Signaled()
-		s.mu.RUnlock()
 		select {
 		case <-op.Stalled():
-			s.mu.RLock()
 			break wait
 		case <-bucketChanged:
 		case <-s.closed:
 		}
-		s.mu.RLock()
 	}
 	return op.Stats()
 }
@@ -1225,29 +1090,6 @@ func (s *Server) shouldBootstrapUnlocked() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.shouldBootstrap()
-}
-
-func (s *Server) pingQuestionableNodesInBucket(bucketIndex int) {
-	b := &s.table.buckets[bucketIndex]
-	var wg sync.WaitGroup
-	b.EachNode(func(n *node) bool {
-		if s.IsQuestionable(n) {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				ctx, done := context.WithTimeout(context.Background(), 15*time.Second)
-				defer done()
-				err := s.questionableNodePing(ctx, n.Addr, n.Id.AsByteArray()).Err
-				if err != nil {
-					s.logger().Printf("error pinging questionable node in bucket %v: %v", bucketIndex, err)
-				}
-			}()
-		}
-		return true
-	})
-	s.mu.RUnlock()
-	wg.Wait()
-	s.mu.RLock()
 }
 
 // A routine that maintains the Server's routing table, by pinging questionable nodes, and
@@ -1271,53 +1113,32 @@ func (s *Server) TableMaintainer() {
 			}
 			logger.Printf("bucket refresh bootstrap stats: %v\n", stats)
 		}
+
 		s.mu.RLock()
-		for i := range s.table.buckets {
-			s.pingQuestionableNodesInBucket(i)
-			if s.shouldStopRefreshingBucket(i) {
-				continue
-			}
-			logger.Printf("refreshing bucket %v\n", i)
-			s.mu.RUnlock()
-			stats := s.refreshBucket(i)
-			logger.Printf("finished refreshing bucket %v: %v\n", i, stats)
-			s.mu.RLock()
-			if !s.shouldStopRefreshingBucket(i) {
-				// Presumably we couldn't fill the bucket anymore, so assume we're as deep in the
-				// available node space as we can go.
-				break
+		bindings := slices.Clone(s.bindings)
+		s.mu.RUnlock()
+		for _, binding := range bindings {
+			for i := range binding.table.buckets {
+				binding.pingQuestionableNodesInBucket(s, i)
+				if binding.shouldStopRefreshingBucket(i) {
+					continue
+				}
+				logger.Printf("refreshing bucket %v\n", i)
+				stats := s.refreshBucket(binding, i)
+				logger.Printf("finished refreshing bucket %v: %v\n", i, stats)
+				if !binding.shouldStopRefreshingBucket(i) {
+					// Presumably we couldn't fill the bucket anymore, so assume we're as deep in the
+					// available node space as we can go.
+					break
+				}
 			}
 		}
-		s.mu.RUnlock()
 		select {
 		case <-s.closed:
 			return
 		case <-time.After(time.Minute):
 		}
 	}
-}
-
-func (s *Server) questionableNodePing(ctx context.Context, addr Addr, id krpc.ID) QueryResult {
-	qi, err := NewPingRequest(s.ID())
-	if err != nil {
-		return NewQueryResultErr(err)
-	}
-
-	// A ping query that will be certain to try at least 3 times.
-	qi.NumTries = 3
-
-	res := s.Query(ctx, addr, qi)
-	if res.Err == nil && res.Reply.R != nil {
-		s.NodeRespondedToPing(addr, res.Reply.R.ID.Int160())
-	} else {
-		s.mu.Lock()
-		err := s.updateNode(addr, &id, false, func(n *node) {
-			n.failedLastQuestionablePing = true
-		})
-		s.mu.Unlock()
-		errorsx.Log(errorsx.Wrap(err, "failed to update questionable node"))
-	}
-	return res
 }
 
 // Whether we should consider a node for contact based on its address and possible ID.

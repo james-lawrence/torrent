@@ -8,16 +8,17 @@ import (
 	"github.com/james-lawrence/torrent/dht/traversal2"
 )
 
-func NewTraversalQuerier(s *Server) traversal2.Querier {
-	return querier{s: s}
+func NewTraversalQuerier(id int160.T, s Queryer) traversal2.Querier {
+	return querier{id: id, s: s}
 }
 
 type querier struct {
-	s *Server
+	id int160.T
+	s  Queryer
 }
 
 func (q querier) Query(ctx context.Context, addr krpc.NodeAddr, target int160.T, scrape bool) traversal2.QueryResult {
-	res := q.s.GetPeers(ctx, NewAddr(addr.AddrPort), target, scrape)
+	res := FindPeers(ctx, q.s, NewAddr(addr.AddrPort), q.id.AsByteArray(), target.AsByteArray(), scrape)
 	r := res.Reply.R
 
 	if r == nil {
