@@ -138,6 +138,7 @@ func (s *Server) DynamicAddrPort() netip.AddrPort {
 	}
 
 	addr := langx.Zero(s.dynamicaddr.Load())
+
 	if ip := addr.Addr(); ip.Is4In6() {
 		return netip.AddrPortFrom(ip.Unmap(), addr.Port())
 	}
@@ -247,8 +248,9 @@ func (s *Server) ServeBinding(ctx context.Context, pc net.PacketConn) (Binding, 
 
 	bestaddr := netx.ComputeBestAddr(pc.LocalAddr())
 	b := &socketbinding{
+		// its important that the id different than the actual id so that updateaddr works properly on first pass
 		pc:          pc,
-		id:          atomicx.Pointer(langx.Zero(s.id.Load()).Secure(bestaddr.Addr())),
+		id:          atomicx.Pointer(langx.Zero(s.id.Load())),
 		dynamicaddr: atomicx.Pointer(bestaddr),
 		table:       newTable(s.k),
 		log:         s.log,
@@ -274,6 +276,7 @@ func (s *Server) ServeBinding(ctx context.Context, pc net.PacketConn) (Binding, 
 		s.logger().Println("binding id changed", old, "->", latest)
 		b.dynamicaddr.Store(&detected)
 		current := langx.Zero(s.dynamicaddr.Load())
+
 		if current.Port() == 0 || netx.AddrPortPriority(detected) < netx.AddrPortPriority(current) {
 			s.dynamicaddr.Store(&detected)
 		}
