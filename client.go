@@ -265,11 +265,6 @@ func (cl *Client) BindDHT(d *dht.Server, s sockets.Socket) (err error) {
 		return nil
 	}
 
-	if cl.dht != nil {
-		cl.config.debug().Printf("dht server already attached %p - %v\n", cl.dht, pc.LocalAddr)
-		return nil
-	}
-
 	cl.config.debug().Printf("binding dht server to client %p - %v\n", d, pc.LocalAddr)
 	cl.lock()
 	// the check above isnt entirely sufficient to prevent changing the dht.

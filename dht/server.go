@@ -103,18 +103,17 @@ func (b *socketBinding) SendToNode(ctx context.Context, buf []byte, node Addr, m
 type Server struct {
 	k           int
 	id          *atomic.Pointer[int160.T]
-	bindings    []*socketBinding
 	dynamicaddr *atomic.Pointer[netip.AddrPort]
+	bindings    []*socketBinding
 
-	mu               sync.RWMutex
-	transactions     transactions.Dispatcher[*transaction]
-	closed           chan struct{}
-	tokenServer      tokenServer // Manages tokens we issue to our queriers.
-	stats            ServerStats
-	announceto       []PeerAnnounce
-	dnscache         dnscacher
-	lastBootstrap    time.Time
-	bootstrappingNow bool
+	mu            sync.RWMutex
+	transactions  transactions.Dispatcher[*transaction]
+	closed        chan struct{}
+	tokenServer   tokenServer // Manages tokens we issue to our queriers.
+	stats         ServerStats
+	announceto    []PeerAnnounce
+	dnscache      dnscacher
+	lastBootstrap time.Time
 
 	resolvepublicaddr PublicAddrPort
 	// Hook received queries. Return false if you don't want to propagate to the default handlers.
@@ -168,60 +167,81 @@ func prettySince(t time.Time) string {
 	return fmt.Sprintf("%s ago", d)
 }
 
-func (s *Server) WriteStatus(w io.Writer) {
+func Dump(s *Server, dst io.Writer) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	fmt.Fprintf(w, "Nodes in table: %d good, %d total\n", s.numGoodNodes(), s.numNodes())
-	fmt.Fprintf(w, "Ongoing transactions: %d\n", s.transactions.NumActive())
+	if _, err := fmt.Fprintf(dst, "DHT Server (node id %s)\n", s.id.Load()); err != nil {
+		return err
+	}
 
-	for _, binding := range s.bindings {
-		root := binding.ID()
-		fmt.Fprintf(w, "Listening on %s (node id %s)\n", binding.pc.LocalAddr(), root.String())
-		buckets := &binding.table.buckets
-		for i := range binding.table.buckets {
-			b := &buckets[i]
-			if b.Len() == 0 && b.lastChanged.IsZero() {
-				continue
-			}
-			fmt.Fprintf(w,
-				"b# %v: %v nodes, last updated: %v\n",
-				i, b.Len(), prettySince(b.lastChanged))
-			if b.Len() > 0 {
-				tw := tabwriter.NewWriter(w, 0, 0, 1, ' ', 0)
-				fmt.Fprintf(tw, "  node id\taddr\tlast query\tlast response\trecv\tdiscard\tflags\n")
-				nodes := slices.SortedFunc(b.NodeIter(), func(l *node, r *node) int {
-					return l.Id.Distance(root).Cmp(r.Id.Distance(root))
-				})
-				for _, n := range nodes {
-					var flags []string
-					if binding.table.isQuestionable(root, n) {
-						flags = append(flags, "q10e")
-					}
-					if nodeIsBad(root, n) {
-						flags = append(flags, "bad")
-					}
-					if binding.table.isGood(root, n) {
-						flags = append(flags, "good")
-					}
-					if n.IsSecure() {
-						flags = append(flags, "sec")
-					}
-					fmt.Fprintf(tw, "  %x\t%s\t%s\t%s\t%d\t%v\t%v\n",
-						n.Id.Bytes(),
-						n.Addr,
-						prettySince(n.lastGotQuery),
-						prettySince(n.lastGotResponse),
-						n.numReceivesFrom,
-						n.failedLastQuestionablePing,
-						strings.Join(flags, ","),
-					)
-				}
-				tw.Flush()
-			}
+	if _, err := fmt.Fprintf(dst, "Ongoing transactions: %d\n", s.transactions.NumActive()); err != nil {
+		return err
+	}
+
+	for _, b := range s.bindings {
+		if err := dumpBinding(b, dst); err != nil {
+			return err
 		}
 	}
-	fmt.Fprintln(w)
+	_, err := fmt.Fprintln(dst)
+	return err
+}
+
+func dumpBinding(b *socketBinding, dst io.Writer) error {
+	root := b.ID()
+	if _, err := fmt.Fprintf(dst, "Listening on %s (node id %s)\n", b.pc.LocalAddr(), root.String()); err != nil {
+		return err
+	}
+
+	for i := range b.table.buckets {
+		if err := dumpBucket(root, &b.table.buckets[i], i, b.table, dst); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func dumpBucket(root int160.T, b *bucket, index int, tbl *table, dst io.Writer) error {
+	if b.Len() == 0 && b.lastChanged.IsZero() {
+		return nil
+	}
+	if _, err := fmt.Fprintf(dst, "b# %v: %v nodes, last updated: %v\n", index, b.Len(), prettySince(b.lastChanged)); err != nil {
+		return err
+	}
+	if b.Len() == 0 {
+		return nil
+	}
+	tw := tabwriter.NewWriter(dst, 0, 0, 1, ' ', 0)
+	fmt.Fprintf(tw, "  node id\taddr\tlast query\tlast response\trecv\tdiscard\tflags\n")
+	nodes := slices.SortedFunc(b.NodeIter(), func(l *node, r *node) int {
+		return l.Id.Distance(root).Cmp(r.Id.Distance(root))
+	})
+	for _, n := range nodes {
+		var flags []string
+		if tbl.isQuestionable(root, n) {
+			flags = append(flags, "q10e")
+		}
+		if nodeIsBad(root, n) {
+			flags = append(flags, "bad")
+		}
+		if tbl.isGood(root, n) {
+			flags = append(flags, "good")
+		}
+		if n.IsSecure() {
+			flags = append(flags, "sec")
+		}
+		fmt.Fprintf(tw, "  %x\t%s\t%s\t%s\t%d\t%v\t%v\n",
+			n.Id.Bytes(),
+			n.Addr,
+			prettySince(n.lastGotQuery),
+			prettySince(n.lastGotResponse),
+			n.numReceivesFrom,
+			n.failedLastQuestionablePing,
+			strings.Join(flags, ","),
+		)
+	}
+	return tw.Flush()
 }
 
 func (s *Server) numNodes() (num int) {
@@ -258,11 +278,11 @@ func (s *Server) DynamicAddrPort() netip.AddrPort {
 // family, falling back to the first binding.
 func (s *Server) AddrPort(source netip.AddrPort) netip.AddrPort {
 	if s == nil {
-		return netip.AddrPortFrom(netip.IPv6Unspecified(), 0)
+		return netip.AddrPort{}
 	}
-	b := s.selectBinding(NewAddr(source))
+	b := s.selectBinding(source)
 	if b == nil {
-		return netip.AddrPortFrom(netip.IPv6Unspecified(), 0)
+		return netip.AddrPort{}
 	}
 	return b.AddrPort()
 }
@@ -322,36 +342,24 @@ func NewServer(k int, options ...Option) (s *Server, err error) {
 	return s, nil
 }
 
-func (s *Server) selectBinding(addr Addr) *socketBinding {
+func (s *Server) selectBinding(addr netip.AddrPort) *socketBinding {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.selectBindingLocked(addr)
 }
 
-func (s *Server) selectBindingLocked(addr Addr) *socketBinding {
-	// TODO document this function.
+func (s *Server) selectBindingLocked(addr netip.AddrPort) *socketBinding {
 	if len(s.bindings) == 0 {
 		return nil
 	}
-	destAddr := addr.AddrPort().Addr()
-	if destAddr.Is4In6() {
-		destAddr = destAddr.Unmap()
-	}
-	destIs4 := destAddr.Is4()
+
 	for _, b := range s.bindings {
-		ap, err := netip.ParseAddrPort(b.pc.LocalAddr().String())
-		if err != nil {
-			continue
-		}
-		localAddr := ap.Addr()
-		if localAddr.Is4In6() {
-			localAddr = localAddr.Unmap()
-		}
-		if localAddr.Is4() == destIs4 {
+		if netx.Reachable(addr, langx.Zero(b.dynamicaddr.Load())) {
 			return b
 		}
 	}
-	return s.bindings[0]
+
+	return nil
 }
 
 // ServeBinding starts serving on pc and returns the associated Binding once
@@ -361,7 +369,7 @@ func (s *Server) ServeBinding(ctx context.Context, pc net.PacketConn) (Binding, 
 	b := &socketBinding{
 		pc:          pc,
 		id:          atomicx.Pointer(langx.Zero(s.id.Load())),
-		dynamicaddr: atomicx.Pointer(netip.AddrPortFrom(netip.IPv6Unspecified(), 0)),
+		dynamicaddr: atomicx.Pointer(errorsx.Zero(netx.AddrPort(pc.LocalAddr()))),
 		table:       newTable(s.k),
 		log:         s.log,
 	}
@@ -589,9 +597,7 @@ func (s *Server) ipBlocked(ip net.IP) (blocked bool) {
 func (s *Server) AddNode(nis ...krpc.NodeInfo) error {
 	addnode := func(n krpc.NodeInfo) error {
 		addr := NewAddr(n.Addr.AddrPort)
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		b := s.selectBindingLocked(addr)
+		b := s.selectBinding(n.Addr.AddrPort)
 		if b == nil {
 			return nil
 		}
@@ -667,11 +673,10 @@ func filterPeers(querySourceIp net.IP, queryWants []krpc.Want, allPeers []krpc.N
 	return
 }
 
-func (s *Server) setReturnNodes(r *krpc.Return, queryMsg krpc.Msg, querySource Addr) *krpc.Error {
+func (s *Server) setReturnNodes(b Binding, r *krpc.Return, queryMsg krpc.Msg, querySource Addr) *krpc.Error {
 	if queryMsg.A == nil {
 		return &krpcErrMissingArguments
 	}
-	b := s.selectBinding(querySource)
 	target := int160.FromByteArray(queryMsg.A.InfoHash)
 	if shouldReturnNodes(queryMsg.A.Want, querySource.IP()) {
 		r.Nodes = s.MakeReturnNodes(b, target, func(na krpc.NodeAddr) bool { return na.Addr().Is4() })
@@ -831,7 +836,7 @@ func (s *Server) SendToNode(ctx context.Context, b []byte, node Addr, maximum in
 		return false, err
 	}
 
-	binding := s.selectBinding(node)
+	binding := s.selectBinding(node.AddrPort())
 	if binding == nil {
 		return false, errors.New("no socket available")
 	}
@@ -886,7 +891,7 @@ func (s *Server) addTransaction(k transactionKey, t *transaction) {
 
 // ID returns the node ID for the binding matching the given source address.
 func (s *Server) ID(addr netip.AddrPort) int160.T {
-	b := s.selectBinding(NewAddr(addr))
+	b := s.selectBinding(addr)
 	if b == nil {
 		return int160.Zero()
 	}
@@ -1023,7 +1028,7 @@ func (s *Server) PingQueryInput(ctx context.Context, node netip.AddrPort, qi Que
 	if res.Err == nil {
 		id := res.Reply.SenderID()
 		if id != nil {
-			if b := s.selectBinding(NewAddr(node)); b != nil {
+			if b := s.selectBinding(node); b != nil {
 				b.NodeRespondedToPing(NewAddr(node), id.Int160())
 			}
 		}
@@ -1126,7 +1131,7 @@ func (s *Server) GetPeers(
 }
 
 func (s *Server) ClosestGoodNodeInfos(source netip.AddrPort, k int, targetID int160.T) []krpc.NodeInfo {
-	b := s.selectBinding(NewAddr(source))
+	b := s.selectBinding(source)
 	if b == nil {
 		return nil
 	}
@@ -1314,6 +1319,7 @@ func (s *Server) TableMaintainer() {
 			}
 			logger.Printf("bucket refresh bootstrap stats: %v\n", stats)
 		}
+
 		s.mu.RLock()
 		bindings := slices.Clone(s.bindings)
 		s.mu.RUnlock()

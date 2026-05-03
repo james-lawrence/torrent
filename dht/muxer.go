@@ -87,7 +87,7 @@ func (t HandlerPeers) Handle(ctx context.Context, src Addr, srv *Server, b Bindi
 	}
 
 	if len(r.Values) == 0 {
-		if err := srv.setReturnNodes(&r, *msg, src); err != nil {
+		if err := srv.setReturnNodes(b, &r, *msg, src); err != nil {
 			return err
 		}
 	}
@@ -132,7 +132,7 @@ type Bep44Get struct{}
 
 func (t Bep44Get) Handle(ctx context.Context, source Addr, s *Server, b Binding, raw []byte, m *krpc.Msg) error {
 	var r krpc.Return
-	if err := s.setReturnNodes(&r, *m, source); err != nil {
+	if err := s.setReturnNodes(b, &r, *m, source); err != nil {
 		s.sendError(ctx, b, source, m.T, *err)
 		return err
 	}

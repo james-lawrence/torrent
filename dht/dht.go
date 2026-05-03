@@ -75,11 +75,19 @@ func OptionDynamicPort(fn PublicAddrPort) Option {
 	}
 }
 
+// OptionUPnP configures the server to use UPnP IGD port forwarding to resolve
+// its public address. IPv6 addresses fall back to AutoDetectIP because UPnP IGD
+// is an IPv4 NAT traversal protocol. IPv4-mapped IPv6 addresses (4-in-6) are
+// treated as IPv4 and still use UPnP.
 func OptionUPnP(sc *Server) {
 	sc.resolvepublicaddr = func(ctx context.Context, q *Server, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
 		addr, err := netx.AddrPort(local.LocalAddr())
 		if err != nil {
 			return nil, err
+		}
+
+		if addr.Addr().Unmap().Is6() {
+			return AutoDetectIP(ctx, q, id, local, addr.Port())
 		}
 
 		return UPnPPortForward(ctx, id.String(), addr.Port(), addr)

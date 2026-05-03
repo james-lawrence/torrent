@@ -32,7 +32,7 @@ type BEP0005FindNode struct{}
 
 func (t BEP0005FindNode) Handle(ctx context.Context, source Addr, s *Server, b Binding, raw []byte, m *krpc.Msg) error {
 	var r krpc.Return
-	if err := s.setReturnNodes(&r, *m, source); err != nil {
+	if err := s.setReturnNodes(b, &r, *m, source); err != nil {
 		return s.sendError(ctx, b, source, m.T, *err)
 	}
 	return s.reply(ctx, b, source, m.T, r)

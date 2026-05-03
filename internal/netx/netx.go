@@ -41,6 +41,34 @@ func AddrPortPriority(ap netip.AddrPort) int {
 	}
 }
 
+// Reachable reports whether dst is reachable from a socket bound to from.
+// Both addresses must share the same address family. Reachability is
+// determined by scope: loopback ↔ loopback only; link-local ↔ link-local
+// only; routed addresses (private + public) ↔ each other.
+func Reachable(dst netip.AddrPort, from netip.AddrPort) bool {
+	d := dst.Addr().Unmap()
+	f := from.Addr().Unmap()
+	if !d.IsValid() || !f.IsValid() {
+		return false
+	}
+	if d.Is4() != f.Is4() {
+		return false
+	}
+
+	return addrScope(d) == addrScope(f)
+}
+
+func addrScope(addr netip.Addr) int {
+	switch {
+	case addr.IsLoopback():
+		return 0
+	case addr.IsLinkLocalUnicast():
+		return 1
+	default:
+		return 2
+	}
+}
+
 func CmpAddrPort(a, b netip.AddrPort) int {
 	ap := netip.AddrPortFrom(netip.AddrFrom16(a.Addr().As16()), a.Port())
 	bp := netip.AddrPortFrom(netip.AddrFrom16(b.Addr().As16()), b.Port())
