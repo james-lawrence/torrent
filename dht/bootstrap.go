@@ -13,7 +13,7 @@ import (
 type TraversalStats = traversal.Stats
 
 // Bootstrap populates the routing table for this binding.
-func (b *socketBinding) Bootstrap(ctx context.Context, s *Server) (_zero TraversalStats, err error) {
+func (b *socketbinding) Bootstrap(ctx context.Context, s *Server) (_zero TraversalStats, err error) {
 	s.mu.Lock()
 	if b.bootstrappingNow {
 		s.mu.Unlock()
@@ -62,7 +62,7 @@ func (b *socketBinding) Bootstrap(ctx context.Context, s *Server) (_zero Travers
 // Bootstrap populates all binding routing tables.
 func (s *Server) Bootstrap(ctx context.Context) (_zero TraversalStats, err error) {
 	s.mu.RLock()
-	bindings := make([]*socketBinding, len(s.bindings))
+	bindings := make([]*socketbinding, len(s.bindings))
 	copy(bindings, s.bindings)
 	s.mu.RUnlock()
 

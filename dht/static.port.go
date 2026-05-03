@@ -4,7 +4,6 @@ import (
 	"context"
 	"iter"
 	"log"
-	"net"
 	"net/netip"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/netx"
 )
 
-func AutoDetectIP(ctx context.Context, q *Server, id int160.T, local net.PacketConn, port uint16) (iter.Seq[netip.AddrPort], error) {
+func AutoDetectIP(ctx context.Context, sc *Server, b Binding, id int160.T, bestaddr netip.AddrPort, port uint16) (iter.Seq[netip.AddrPort], error) {
 	return func(yield func(netip.AddrPort) bool) {
 		const (
 			minK       = 8
@@ -22,19 +21,28 @@ func AutoDetectIP(ctx context.Context, q *Server, id int160.T, local net.PacketC
 			lease      = time.Hour
 		)
 
+		b := sc.Binding(bestaddr)
+
 		collect := func() (map[netip.AddrPort]struct{}, error) {
 			_ctx, done := context.WithTimeout(ctx, time.Minute)
 			defer done()
 
-			localAddr, _ := netx.AddrPort(local.LocalAddr())
-			detect := traversal2.New(int160.Random(), NewTraversalQuerier(q), traversal2.WithSeeds(q.ClosestGoodNodeInfos(localAddr, minK, id)...))
+			detect := traversal2.New(
+				int160.Random(),
+				NewTraversalQuerier(b.ID(), sc),
+				traversal2.WithSeeds(sc.ClosestGoodNodeInfos(bestaddr, minK, id)...),
+			)
 			m := map[netip.AddrPort]struct{}{}
 			for v := range detect.Results(_ctx) {
 				addr := netip.AddrPortFrom(v.IP.Addr(), port)
-				if !addr.IsValid() {
+				if !addr.IsValid() || !netx.Reachable(addr, bestaddr) {
 					continue
 				}
 
+				if !netx.Reachable(addr, bestaddr) {
+					log.Println(bestaddr, "ignoring unreachable node:", addr)
+					continue
+				}
 				m[addr] = struct{}{}
 			}
 
@@ -42,12 +50,12 @@ func AutoDetectIP(ctx context.Context, q *Server, id int160.T, local net.PacketC
 		}
 
 		for {
-			if gnodes := q.numGoodNodes(); gnodes < minK {
-				if !yield(q.DynamicAddrPort()) {
+			if gnodes := sc.numGoodNodes(); gnodes < minK {
+				if !yield(b.AddrPort()) {
 					return
 				}
 
-				time.Sleep(200 * time.Millisecond)
+				time.Sleep(time.Second)
 				continue
 			}
 

@@ -33,7 +33,7 @@ func TestServe_MultiSocket(t *testing.T) {
 	t.Cleanup(s.Close)
 
 	backgroundServe(t, s, mustListenUDP(t, "127.0.0.1:0"))
-	backgroundServe(t, s, mustListenUDP(t, "127.0.0.1:0"))
+	backgroundServe(t, s, mustListenUDP(t, "127.0.0.2:0"))
 
 	require.Equal(t, 2, s.numBindings())
 }
@@ -176,6 +176,89 @@ func TestAddNode_NoBindingForScope(t *testing.T) {
 	}
 	require.NoError(t, s.AddNode(ni))
 	require.Equal(t, 0, b4.Routing().numNodes())
+}
+
+// TestSocketBinding_DynamicAddrEnforcesIPFamily verifies that a binding's
+// dynamicaddr gates node addition to only accept addresses in the same IP
+// family (IPv4 vs IPv6). The dynamicaddr is the binding's resolved public
+// address, and bindingLocked uses netx.Reachable(addr, dynamicaddr) to find
+// the right binding — Reachable returns false when the source and target
+// addresses differ in IP family for loopback and link-local scopes.
+func TestSocketBinding_DynamicAddrEnforcesIPFamily(t *testing.T) {
+	s, err := NewServer(8)
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+
+	b4 := backgroundServe(t, s, mustListenUDP(t, "127.0.0.1:0"))
+	b6 := backgroundServe(t, s, mustListenUDP(t, "[::1]:0"))
+
+	// Verify the bindings have different IP families in their dynamicaddr.
+	require.True(t, b4.AddrPort().Addr().Is4())
+	require.True(t, b6.AddrPort().Addr().Is6())
+
+	// An IPv4 node is only added to the IPv4 binding's table.
+	ni4 := krpc.NodeInfo{
+		ID:   int160.Random().AsByteArray(),
+		Addr: krpc.NewNodeAddrFromAddrPort(netip.MustParseAddrPort("127.0.0.10:6881")),
+	}
+	require.NoError(t, s.AddNode(ni4))
+	require.Equal(t, 1, b4.Routing().numNodes())
+	require.Equal(t, 0, b6.Routing().numNodes())
+
+	// An IPv6 node is only added to the IPv6 binding's table.
+	ni6 := krpc.NodeInfo{
+		ID:   int160.Random().AsByteArray(),
+		Addr: krpc.NewNodeAddrFromAddrPort(netip.MustParseAddrPort("[::1]:6881")),
+	}
+	require.NoError(t, s.AddNode(ni6))
+	require.Equal(t, 1, b4.Routing().numNodes())
+	require.Equal(t, 1, b6.Routing().numNodes())
+
+	// An IPv4-in-IPv6 node → Reachable() unmaps it → routed to IPv4 binding.
+	ni4in6 := krpc.NodeInfo{
+		ID:   int160.Random().AsByteArray(),
+		Addr: krpc.NewNodeAddrFromAddrPort(netip.MustParseAddrPort("[::ffff:127.0.0.10]:6881")),
+	}
+	require.NoError(t, s.AddNode(ni4in6))
+	require.Equal(t, 2, b4.Routing().numNodes())
+	require.Equal(t, 1, b6.Routing().numNodes())
+}
+
+// TestSocketBinding_IP6OnlyDynamicAddrEnforcesIPFamily verifies that an IPv6-only
+// server rejects IPv4 (including IPv4-in-IPv6) nodes.
+func TestSocketBinding_IP6OnlyDynamicAddrEnforcesIPFamily(t *testing.T) {
+	s, err := NewServer(8)
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+
+	b6 := backgroundServe(t, s, mustListenUDP(t, "[::1]:0"))
+
+	// Verify the bindings have different IP families in their dynamicaddr.
+	require.True(t, b6.AddrPort().Addr().Is6())
+
+	// An IPv4 node is only added to the IPv4 binding's table.
+	ni4 := krpc.NodeInfo{
+		ID:   int160.Random().AsByteArray(),
+		Addr: krpc.NewNodeAddrFromAddrPort(netip.MustParseAddrPort("127.0.0.10:6881")),
+	}
+	require.NoError(t, s.AddNode(ni4))
+	require.Equal(t, 0, b6.Routing().numNodes())
+
+	// An IPv6 node is only added to the IPv6 binding's table.
+	ni6 := krpc.NodeInfo{
+		ID:   int160.Random().AsByteArray(),
+		Addr: krpc.NewNodeAddrFromAddrPort(netip.MustParseAddrPort("[::1]:6881")),
+	}
+	require.NoError(t, s.AddNode(ni6))
+	require.Equal(t, 1, b6.Routing().numNodes())
+
+	// An IPv4-in-IPv6 node → Reachable() unmaps it → no binding → not added.
+	ni4in6 := krpc.NodeInfo{
+		ID:   int160.Random().AsByteArray(),
+		Addr: krpc.NewNodeAddrFromAddrPort(netip.MustParseAddrPort("[::ffff:127.0.0.10]:6881")),
+	}
+	require.NoError(t, s.AddNode(ni4in6))
+	require.Equal(t, 1, b6.Routing().numNodes())
 }
 
 func TestReply_UsesBindingID(t *testing.T) {

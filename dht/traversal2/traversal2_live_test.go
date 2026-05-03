@@ -83,7 +83,7 @@ func TestLiveDHTComparison(t *testing.T) {
 	t.Run("new", func(t *testing.T) {
 		var results []krpc.NodeAddr
 
-		tr := traversal2.New(target, dht.NewTraversalQuerier(srv), traversal2.WithK(8), traversal2.WithSeeds(seeds...))
+		tr := traversal2.New(target, dht.NewTraversalQuerier(srv.ID(srv.DynamicAddrPort()), srv), traversal2.WithK(8), traversal2.WithSeeds(seeds...))
 		next, done := iter.Pull(tr.Each(ctx))
 		defer done()
 

@@ -42,13 +42,10 @@ func (t PeerAnnounceFn) Announced(peerid int160.T, ip net.IP, port uint16, portO
 	t(peerid, ip, port, portOk)
 }
 
-type PublicAddrPort func(ctx context.Context, q *Server, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error)
+type PublicAddrPort func(ctx context.Context, sc *Server, q Binding, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error)
 
-func PublicAddrPortFromPacketConn(ctx context.Context, q *Server, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
-	addr, err := netx.AddrPort(local.LocalAddr())
-	if err != nil {
-		return nil, err
-	}
+func PublicAddrPortFromPacketConn(ctx context.Context, sc *Server, q Binding, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
+	addr := netx.ComputeBestAddr(local.LocalAddr())
 
 	return func(yield func(netip.AddrPort) bool) {
 		if !yield(addr) {
@@ -68,7 +65,6 @@ func OptionNodeID(id int160.T) Option {
 	}
 }
 
-
 func OptionDynamicPort(fn PublicAddrPort) Option {
 	return func(sc *Server) {
 		sc.resolvepublicaddr = fn
@@ -80,14 +76,11 @@ func OptionDynamicPort(fn PublicAddrPort) Option {
 // is an IPv4 NAT traversal protocol. IPv4-mapped IPv6 addresses (4-in-6) are
 // treated as IPv4 and still use UPnP.
 func OptionUPnP(sc *Server) {
-	sc.resolvepublicaddr = func(ctx context.Context, q *Server, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
-		addr, err := netx.AddrPort(local.LocalAddr())
-		if err != nil {
-			return nil, err
-		}
+	sc.resolvepublicaddr = func(ctx context.Context, sc *Server, q Binding, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
+		addr := netx.ComputeBestAddr(local.LocalAddr())
 
 		if addr.Addr().Unmap().Is6() {
-			return AutoDetectIP(ctx, q, id, local, addr.Port())
+			return AutoDetectIP(ctx, sc, q, id, addr, addr.Port())
 		}
 
 		return UPnPPortForward(ctx, id.String(), addr.Port(), addr)
@@ -96,8 +89,8 @@ func OptionUPnP(sc *Server) {
 
 func OptionStaticPort(port uint16) Option {
 	return func(sc *Server) {
-		sc.resolvepublicaddr = func(ctx context.Context, q *Server, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
-			return AutoDetectIP(ctx, q, id, local, port)
+		sc.resolvepublicaddr = func(ctx context.Context, sc *Server, q Binding, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
+			return AutoDetectIP(ctx, sc, q, id, netx.ComputeBestAddr(local.LocalAddr()), port)
 		}
 	}
 }

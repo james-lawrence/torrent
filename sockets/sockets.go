@@ -1,19 +1,13 @@
 package sockets
 
 import (
-	"cmp"
 	"context"
-	"log"
 	"net"
 	"net/netip"
-	"slices"
 	"sync/atomic"
 	"time"
 
-	"github.com/james-lawrence/torrent/internal/errorsx"
-	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/netx"
-	"github.com/james-lawrence/torrent/internal/slicesx"
 )
 
 const addrCacheTTL = 5 * time.Minute
@@ -22,41 +16,6 @@ type cachedAddr struct {
 	addr    netip.AddrPort
 	netaddr net.Addr
 	ts      time.Time
-}
-
-func cmpaddrport(a, b netip.AddrPort) int {
-	return cmp.Compare(netx.AddrPortPriority(a), netx.AddrPortPriority(b))
-}
-
-// computeBestAddr returns the best routable local address for a bound listener.
-// When the listener is bound to an unspecified address (0.0.0.0 / ::),
-// it enumerates interface addresses and picks the highest-priority one.
-func computeBestAddr(bound net.Addr) netip.AddrPort {
-	ap := errorsx.Zero(netx.AddrPort(bound))
-	defer log.Println("DERP DERP", ap)
-	if !ap.Addr().Unmap().IsUnspecified() {
-		return netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port())
-	}
-
-	ifaces, err := net.InterfaceAddrs()
-	if err != nil {
-		return ap
-	}
-
-	ips := slicesx.MapTransform(func(n net.Addr) netip.AddrPort {
-		switch v := n.(type) {
-		case *net.IPNet:
-			addr, _ := netip.AddrFromSlice(v.IP)
-			return netip.AddrPortFrom(addr.Unmap(), ap.Port())
-		case *net.IPAddr:
-			addr, _ := netip.AddrFromSlice(v.IP)
-			return netip.AddrPortFrom(addr.Unmap(), ap.Port())
-		default:
-			return netip.AddrPortFrom(netip.Addr{}, ap.Port())
-		}
-	}, ifaces...)
-	slices.SortStableFunc(ips, cmpaddrport)
-	return langx.FirstNonZero(ips...)
 }
 
 func addrOf(ap netip.AddrPort, network string) net.Addr {
@@ -105,7 +64,7 @@ func (t *packetconnSocket) Addr() net.Addr {
 		return c.netaddr
 	}
 	bound := t.packetlistener.Addr()
-	ap := computeBestAddr(bound)
+	ap := netx.ComputeBestAddr(bound)
 	na := addrOf(ap, bound.Network())
 	t.cached.Store(&cachedAddr{addr: ap, netaddr: na, ts: time.Now()})
 	return na
@@ -128,7 +87,7 @@ func (t *socket) Addr() net.Addr {
 		return c.netaddr
 	}
 	bound := t.Listener.Addr()
-	ap := computeBestAddr(bound)
+	ap := netx.ComputeBestAddr(bound)
 	na := addrOf(ap, bound.Network())
 	t.cached.Store(&cachedAddr{addr: ap, netaddr: na, ts: time.Now()})
 	return na
