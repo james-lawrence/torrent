@@ -150,6 +150,16 @@ func TuneReadAnnounce(v *tracker.Announce) Tuner {
 	}
 }
 
+// TuneReadPeers reads the torrent's known swarm peers (active, pending, half-open).
+func TuneReadPeers(peers *[]Peer) Tuner {
+	return func(t *torrent) error {
+		t.rLock()
+		defer t.rUnlock()
+		*peers = t.KnownSwarm()
+		return nil
+	}
+}
+
 // TuneClientPeer adds a trusted, pending peer for each of the Client's addresses.
 // used for tests.
 func TuneClientPeer(cl *Client) Tuner {

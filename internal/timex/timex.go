@@ -2,6 +2,7 @@ package timex
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math"
 	"reflect"
@@ -238,4 +239,15 @@ func _jsonsacodec(v reflect.Value, m func(time.Time) time.Time) {
 	default:
 		// do nothing
 	}
+}
+
+// Human returns a human-readable relative time string (e.g., "5m30s ago", "never").
+func Human(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	d := time.Since(t)
+	d /= time.Second
+	d *= time.Second
+	return fmt.Sprintf("%s ago", d)
 }
