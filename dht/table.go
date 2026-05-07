@@ -3,6 +3,7 @@ package dht
 import (
 	"errors"
 	"fmt"
+	"iter"
 	"net/netip"
 	"slices"
 	"sync"
@@ -100,6 +101,18 @@ func (tbl *table) bucketIndex(root, id int160.T) int {
 	return index
 }
 
+func (tbl *table) each() iter.Seq[*node] {
+	return func(yield func(*node) bool) {
+		for i := range tbl.buckets {
+			for n := range tbl.buckets[i].NodeIter() {
+				if !yield(n) {
+					return
+				}
+			}
+		}
+	}
+}
+
 func (tbl *table) forNodes(f func(*node) bool) bool {
 	for i := range tbl.buckets {
 		if !tbl.buckets[i].EachNode(f) {
@@ -172,6 +185,7 @@ func (tbl *table) isGood(root int160.T, n *node) bool {
 	if nodeIsBad(root, n) {
 		return false
 	}
+
 	return time.Since(n.lastGotResponse) < 15*time.Minute ||
 		!n.lastGotResponse.IsZero() && time.Since(n.lastGotQuery) < 15*time.Minute
 }
@@ -179,4 +193,3 @@ func (tbl *table) isGood(root int160.T, n *node) bool {
 func (tbl *table) isQuestionable(root int160.T, n *node) bool {
 	return !tbl.isGood(root, n) && !nodeIsBad(root, n)
 }
-

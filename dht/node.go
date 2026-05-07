@@ -3,8 +3,10 @@ package dht
 import (
 	"time"
 
+	"github.com/anacrolix/generics"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
+	"github.com/james-lawrence/torrent/dht/types"
 )
 
 type nodeKey struct {
@@ -35,11 +37,17 @@ func (n *node) idString() string {
 }
 
 func (n *node) NodeInfo() (ret krpc.NodeInfo) {
-	ret.Addr = n.Addr.KRPC()
-	if n := copy(ret.ID[:], n.idString()); n != 20 {
-		panic(n)
+	return krpc.NodeInfo{
+		Addr: n.Addr.KRPC(),
+		ID:   n.Id.AsByteArray(),
 	}
-	return
+}
+
+func (n *node) MaybeId() types.AddrMaybeId {
+	return types.AddrMaybeId{
+		Addr: n.Addr.KRPC(),
+		Id:   generics.OptionFromTuple(n.Id, n.Id.IsZero()),
+	}
 }
 
 func nodeclosest(target int160.T) func(a, b *node) int {
@@ -47,4 +55,3 @@ func nodeclosest(target int160.T) func(a, b *node) int {
 		return int160.CmpTo(target, a.Id, b.Id)
 	}
 }
-

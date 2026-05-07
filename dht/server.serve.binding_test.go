@@ -2,6 +2,7 @@ package dht
 
 import (
 	"net"
+	"net/netip"
 	"testing"
 
 	"github.com/james-lawrence/torrent/internal/netx"
@@ -64,6 +65,9 @@ func TestServe(t *testing.T) {
 		err = s.Serve(t.Context(), pc)
 		require.NoError(t, err)
 		require.Equal(t, 2, s.numBindings())
+
+		require.True(t, s.AddrPort(netip.MustParseAddrPort("8.8.8.8:12345")).Addr().Is4())
+		require.True(t, s.AddrPort(netip.MustParseAddrPort("[2a00:1370:81ac:820:4dea:ca75:322:3d54]:28935")).Addr().Is6())
 	})
 
 	t.Run("ipv6 socket with failed ipv4 binding still succeeds", func(t *testing.T) {

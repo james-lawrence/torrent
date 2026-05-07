@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"net"
 	"net/netip"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/james-lawrence/torrent/dht/krpc"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
+	"github.com/james-lawrence/torrent/internal/netx"
 )
 
 type socketbinding struct {
@@ -91,11 +93,32 @@ func (b *socketbinding) NodeRespondedToPing(addr Addr, id int160.T) {
 	bkt.lastChanged = time.Now()
 }
 
+// Returns non-bad nodes from the routing table.
+func (b *socketbinding) notBadNodes() iter.Seq[*node] {
+	return func(yield func(*node) bool) {
+		root := b.ID()
+		for n := range b.table.each() {
+			if nodeIsBad(root, n) {
+				continue
+			}
+
+			if !yield(n) {
+				return
+			}
+		}
+	}
+}
+
 // updateNode updates the node in this binding's routing table, adding it if appropriate.
 func (b *socketbinding) updateNode(addr Addr, id *krpc.ID, tryAdd bool, update func(*node)) (err error) {
 	if id == nil {
 		return errors.New("id is nil")
 	}
+
+	if bestaddr := b.AddrPort(); !netx.Reachable(addr.AddrPort(), bestaddr) {
+		return fmt.Errorf("node not allowed in this table: %s - %s", bestaddr, addr.AddrPort())
+	}
+
 	root := langx.Zero(b.id.Load())
 	_id := int160.FromByteArray(*id)
 	n := b.table.getNode(root, addr, _id)
@@ -119,6 +142,7 @@ func (b *socketbinding) updateNode(addr Addr, id *krpc.ID, tryAdd bool, update f
 	if !missing {
 		return nil
 	}
+
 	return b.addNode(n)
 }
 

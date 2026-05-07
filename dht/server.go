@@ -17,7 +17,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anacrolix/generics"
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/internal/atomicx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
@@ -282,7 +281,8 @@ func (s *Server) serveBinding(ctx context.Context, pc net.PacketConn, bestaddr n
 			return
 		}
 
-		s.logger().Println("binding id changed", old, "->", latest)
+		b.logger().Println("binding id changed", bestaddr, detected, old, "->", latest)
+
 		b.dynamicaddr.Store(&detected)
 		current := langx.Zero(s.dynamicaddr.Load())
 
@@ -293,7 +293,7 @@ func (s *Server) serveBinding(ctx context.Context, pc net.PacketConn, bestaddr n
 
 	fixed := langx.Zero(b.id.Load())
 	dctx, done := context.WithCancelCause(context.Background())
-	seq, err := s.resolvepublicaddr(dctx, s, b, fixed, pc)
+	seq, err := s.resolvepublicaddr(dctx, s, b, fixed, bestaddr, pc)
 	if err != nil {
 		s.logger().Println("failed to resolve", err)
 		done(nil)
@@ -788,20 +788,7 @@ func (me QueryResult) TraversalQueryResult(addr krpc.NodeAddr) (ret traversal.Qu
 	return
 }
 
-// Rate-limiting to be applied to writes for a given query. Queries occur inside transactions that
-// will attempt to send several times. If the STM rate-limiting helpers are used, the first send is
-// often already accounted for in the rate-limiting machinery before the query method that does the
-// IO is invoked.
-type QueryRateLimiting struct {
-	// Don't rate-limit the first send for a query.
-	NotFirst bool
-	// Don't rate-limit any sends for a query. Note that there's still built-in waits before retries.
-	NotAny        bool
-	WaitOnRetries bool
-	NoWaitFirst   bool
-}
-
-// The zero value for this uses reasonable/traditional defaults on Server methods.
+// The zero value for QueryInput uses reasonable/traditional defaults on Server methods.
 type QueryInput struct {
 	Method   string
 	Tid      string
@@ -895,8 +882,12 @@ func (s *Server) announcePeer(
 ) (
 	ret QueryResult,
 ) {
+	b := s.Binding(node.AddrPort())
+	if b == nil {
+		return NewQueryResultErr(fmt.Errorf("no socket available: %s", node.AddrPort()))
+	}
 
-	qi, err := NewAnnouncePeerRequest(s.ID(node.AddrPort()).AsByteArray(), infoHash.AsByteArray(), port, token, impliedPort)
+	qi, err := NewAnnouncePeerRequest(b.ID().AsByteArray(), infoHash.AsByteArray(), port, token, impliedPort)
 	if err != nil {
 		return NewQueryResultErr(err)
 	}
@@ -915,12 +906,6 @@ func (s *Server) announcePeer(
 	return
 }
 
-// Sends a find_node query to addr. targetID is the node we're looking for. The Server makes use of
-// some of the response fields.
-func (s *Server) FindNode(ctx context.Context, addr Addr, targetID int160.T, rl QueryRateLimiting) (ret QueryResult) {
-	return FindNode(ctx, s, addr, s.ID(addr.AddrPort()).AsByteArray(), targetID, s.defaultWant)
-}
-
 // Returns how many nodes are in the node table.
 func (s *Server) NumNodes() int {
 	s.mu.Lock()
@@ -932,25 +917,13 @@ func (s *Server) NumNodes() int {
 func (s *Server) Nodes() (nis []krpc.NodeInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.notBadNodes()
-}
-
-// Returns non-bad nodes from the routing table.
-func (s *Server) notBadNodes() (nis []krpc.NodeInfo) {
 	for _, b := range s.bindings {
-		root := b.ID()
-		b.table.forNodes(func(n *node) bool {
-			if nodeIsBad(root, n) {
-				return true
-			}
-			nis = append(nis, krpc.NodeInfo{
-				Addr: n.Addr.KRPC(),
-				ID:   n.Id.AsByteArray(),
-			})
-			return true
-		})
+		for n := range b.notBadNodes() {
+			nis = append(nis, n.NodeInfo())
+		}
 	}
-	return
+
+	return nis
 }
 
 // Stops the server network activity. This is all that's required to clean-up a Server.
@@ -1003,13 +976,11 @@ func (s *Server) closestGoodNodeInfos(
 	return
 }
 
-func (s *Server) TraversalStartingNodes() (nodes []addrMaybeId, err error) {
+func (s *Server) TraversalStartingNodes() (nodes []types.AddrMaybeId, err error) {
 	s.mu.RLock()
 	for _, b := range s.bindings {
 		b.table.forNodes(func(n *node) bool {
-			nodes = append(nodes, addrMaybeId{
-				Addr: n.Addr.KRPC(),
-				Id:   generics.Some(n.Id)})
+			nodes = append(nodes, n.MaybeId())
 			return true
 		})
 	}
@@ -1030,7 +1001,7 @@ func (s *Server) TraversalStartingNodes() (nodes []addrMaybeId, err error) {
 		}
 
 		for _, a := range addrs {
-			nodes = append(nodes, addrMaybeId{Addr: a.KRPC()})
+			nodes = append(nodes, types.AddrMaybeId{Addr: a.KRPC()})
 		}
 	}
 
@@ -1074,7 +1045,7 @@ func (s *Server) refreshBucket(binding *socketbinding, bucketIndex int) *travers
 		// as soon as the bucket is good.
 		K: binding.table.K(),
 		DoQuery: func(ctx context.Context, addr krpc.NodeAddr) traversal.QueryResult {
-			res := s.FindNode(ctx, NewAddr(addr.AddrPort), id, QueryRateLimiting{})
+			res := FindNode(ctx, s, NewAddr(addr.AddrPort), s.ID(addr.AddrPort).AsByteArray(), id, s.defaultWant)
 			if err := res.Err; err != nil && !errors.Is(err, ErrTransactionTimeout) {
 				binding.logger().Printf("error doing find node while refreshing bucket: %v\n", err)
 			}
@@ -1092,7 +1063,11 @@ wait:
 		if binding.shouldStopRefreshingBucket(bucketIndex) {
 			break wait
 		}
-		op.AddNodes(types.AddrMaybeIdSliceFromNodeInfoSlice(s.notBadNodes()))
+
+		nodes := slicesx.MapTransform(func(n *node) types.AddrMaybeId {
+			return n.MaybeId()
+		}, slices.Collect(binding.notBadNodes())...)
+		op.AddNodes(nodes)
 		bucketChanged := b.changed.Signaled()
 		select {
 		case <-op.Stalled():
@@ -1118,17 +1093,17 @@ func (s *Server) shouldBootstrapUnlocked() bool {
 // refreshing buckets. This should be invoked on a running Server when the caller is satisfied with
 // having set it up. It is not necessary to explicitly Bootstrap the Server once this routine has
 // started.
-func (s *Server) TableMaintainer() {
+func (s *Server) TableMaintainer(ctx context.Context) {
 	freq := rate.NewLimiter(rate.Every(5*time.Minute), 1)
 	logger := s.logger()
 	for {
-		if err := freq.Wait(context.Background()); err != nil {
+		if err := freq.Wait(ctx); err != nil {
 			log.Println("table maintenance failed", err)
 			return
 		}
 
 		if s.shouldBootstrapUnlocked() {
-			stats, err := s.Bootstrap(context.Background())
+			stats, err := s.Bootstrap(ctx)
 			if err != nil {
 				log.Printf("error bootstrapping during bucket refresh: %v\n", err)
 				continue
@@ -1164,16 +1139,19 @@ func (s *Server) TableMaintainer() {
 }
 
 // Whether we should consider a node for contact based on its address and possible ID.
-func (s *Server) TraversalNodeFilter(node addrMaybeId) bool {
+func (s *Server) TraversalNodeFilter(node types.AddrMaybeId) bool {
 	if !validNodeAddr(node.Addr.UDP()) {
 		return false
 	}
+
 	if s.ipBlocked(node.Addr.IP()) {
 		return false
 	}
+
 	if !node.Id.Ok {
 		return true
 	}
+
 	return node.Id.Value.IsSecure(node.Addr.AddrPort.Addr())
 }
 

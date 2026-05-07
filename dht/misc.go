@@ -5,7 +5,6 @@ import (
 	"net"
 
 	"github.com/james-lawrence/torrent/dht/int160"
-	"github.com/james-lawrence/torrent/dht/types"
 )
 
 func mustListen(addr string) net.PacketConn {
@@ -22,8 +21,6 @@ func addrResolver(addr string) func(context.Context, dnscacher) ([]Addr, error) 
 		return []Addr{NewAddr(ua.AddrPort())}, err
 	}
 }
-
-type addrMaybeId = types.AddrMaybeId
 
 func randomIdInBucket(rootId int160.T, bucketIndex int) int160.T {
 	id := int160.Random()

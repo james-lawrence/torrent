@@ -32,7 +32,7 @@ func (b *socketbinding) Bootstrap(ctx context.Context, s *Server) (_zero Travers
 		Target: id.AsByteArray(),
 		K:      64,
 		DoQuery: func(ctx context.Context, addr krpc.NodeAddr) traversal.QueryResult {
-			return s.FindNode(ctx, NewAddr(addr.AddrPort), langx.Zero(&id), QueryRateLimiting{}).TraversalQueryResult(addr)
+			return FindNode(ctx, s, NewAddr(addr.AddrPort), s.ID(addr.AddrPort).AsByteArray(), langx.Zero(&id), s.defaultWant).TraversalQueryResult(addr)
 		},
 		NodeFilter: s.TraversalNodeFilter,
 	})
