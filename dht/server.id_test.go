@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,7 +19,7 @@ func mustNewServer(t *testing.T, opts ...Option) *Server {
 }
 
 func backgroundServe(t *testing.T, s *Server, pc net.PacketConn) Binding {
-	b, err := s.ServeBinding(t.Context(), pc)
+	b, err := s.ServeBinding(t.Context(), pc, netx.ComputeBestAddr(pc.LocalAddr()))
 	require.NoError(t, err)
 	return b
 }
@@ -45,7 +46,7 @@ func TestServerID(t *testing.T) {
 				pc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 				require.NoError(t, err)
 				t.Cleanup(func() { _ = pc.Close() })
-				_, err = s.ServeBinding(t.Context(), pc)
+				_, err = s.ServeBinding(t.Context(), pc, netx.ComputeBestAddr(pc.LocalAddr()))
 				require.NoError(t, err)
 				return s
 			},
@@ -59,7 +60,7 @@ func TestServerID(t *testing.T) {
 				pc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 				require.NoError(t, err)
 				t.Cleanup(func() { _ = pc.Close() })
-				_, err = s.ServeBinding(t.Context(), pc)
+				_, err = s.ServeBinding(t.Context(), pc, netx.ComputeBestAddr(pc.LocalAddr()))
 				require.NoError(t, err)
 				return s
 			},
@@ -73,7 +74,7 @@ func TestServerID(t *testing.T) {
 				pc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 				require.NoError(t, err)
 				t.Cleanup(func() { _ = pc.Close() })
-				_, err = s.ServeBinding(t.Context(), pc)
+				_, err = s.ServeBinding(t.Context(), pc, netx.ComputeBestAddr(pc.LocalAddr()))
 				require.NoError(t, err)
 				return s
 			},

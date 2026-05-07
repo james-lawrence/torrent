@@ -237,8 +237,12 @@ func (s *Server) bindingLocked(addr netip.AddrPort) *socketbinding {
 // ServeBinding starts serving on pc and returns the associated Binding once
 // the public address is resolved. Callers can use the Binding to observe
 // the per-socket node ID.
-func (s *Server) ServeBinding(ctx context.Context, pc net.PacketConn) (Binding, error) {
-	dedup := func(pc net.PacketConn) (*socketbinding, bool) {
+func (s *Server) ServeBinding(ctx context.Context, pc net.PacketConn, bestaddr netip.AddrPort) (Binding, error) {
+	return s.serveBinding(ctx, pc, bestaddr, true)
+}
+
+func (s *Server) serveBinding(ctx context.Context, pc net.PacketConn, bestaddr netip.AddrPort, dedup bool) (Binding, error) {
+	_dedup := func(pc net.PacketConn) (*socketbinding, bool) {
 		incoming := errorsx.Zero(netx.AddrPort(pc.LocalAddr()))
 		return slicesx.Find(func(b *socketbinding) bool {
 			current := errorsx.Zero(netx.AddrPort(b.pc.LocalAddr()))
@@ -246,7 +250,6 @@ func (s *Server) ServeBinding(ctx context.Context, pc net.PacketConn) (Binding, 
 		}, s.bindings...)
 	}
 
-	bestaddr := netx.ComputeBestAddr(pc.LocalAddr())
 	b := &socketbinding{
 		// its important that the id different than the actual id so that updateaddr works properly on first pass
 		pc:          pc,
@@ -256,14 +259,20 @@ func (s *Server) ServeBinding(ctx context.Context, pc net.PacketConn) (Binding, 
 		log:         s.log,
 	}
 
-	s.mu.Lock()
-	_b, found := dedup(pc)
-	if !found {
+	if dedup {
+		s.mu.Lock()
+		_b, found := _dedup(pc)
+		if !found {
+			s.bindings = append(s.bindings, b)
+		}
+		s.mu.Unlock()
+		if found {
+			return _b, nil
+		}
+	} else {
+		s.mu.Lock()
 		s.bindings = append(s.bindings, b)
-	}
-	s.mu.Unlock()
-	if found {
-		return _b, nil
+		s.mu.Unlock()
 	}
 
 	updateaddr := func(fixed int160.T, detected netip.AddrPort) {
@@ -309,8 +318,18 @@ func (s *Server) ServeBinding(ctx context.Context, pc net.PacketConn) (Binding, 
 }
 
 func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
-	_, err := s.ServeBinding(ctx, pc)
-	return err
+	bestaddr := netx.ComputeBestAddr(pc.LocalAddr())
+	if _, err := s.ServeBinding(ctx, pc, bestaddr); err != nil {
+		return err
+	}
+
+	// TODO: dualstack socket check instead of just assuming all ip6 is dual stack.
+	if bestaddr.Addr().Unmap().Is6() {
+		_, err := s.serveBinding(ctx, pc, netx.ComputeBestAddr4(pc.LocalAddr()), false)
+		errorsx.Log(errorsx.Wrap(err, "failed to bind ip4 for an dual stack ipv6 socket binding"))
+	}
+
+	return nil
 }
 
 func (s *Server) isClosed() bool {

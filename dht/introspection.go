@@ -49,7 +49,7 @@ func Dump(s *Server, dst io.Writer) error {
 
 func dumpBinding(b *socketbinding, dst io.Writer) error {
 	root := b.ID()
-	id := string([]rune(int160.SecurePrefix(root).String())[:5])
+	id := string([]rune(int160.SecurePrefix(root).String())[:6])
 	if _, err := fmt.Fprintf(dst, "binding %s - listen(%s) public(%s) nodes(%d)\n", id, b.pc.LocalAddr(), b.AddrPort(), b.Routing().numNodes()); err != nil {
 		return err
 	}

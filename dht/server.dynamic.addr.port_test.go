@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,7 +29,7 @@ func TestDynamicAddrPort(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = pc.Close() })
 
-		_, err = s.ServeBinding(t.Context(), pc)
+		_, err = s.ServeBinding(t.Context(), pc, netx.ComputeBestAddr(pc.LocalAddr()))
 		require.NoError(t, err)
 
 		got := s.DynamicAddrPort()
@@ -49,7 +50,7 @@ func TestDynamicAddrPort(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = pc.Close() })
 
-		_, err = s.ServeBinding(t.Context(), pc)
+		_, err = s.ServeBinding(t.Context(), pc, netx.ComputeBestAddr(pc.LocalAddr()))
 		require.NoError(t, err)
 
 		dap := s.DynamicAddrPort()

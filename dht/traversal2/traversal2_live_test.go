@@ -17,6 +17,7 @@ import (
 	"github.com/james-lawrence/torrent/dht/traversal"
 	"github.com/james-lawrence/torrent/dht/traversal2"
 	"github.com/james-lawrence/torrent/dht/types"
+	"github.com/james-lawrence/torrent/internal/netx"
 )
 
 func mustListen(addr string) net.PacketConn {
@@ -28,7 +29,7 @@ func mustListen(addr string) net.PacketConn {
 }
 
 func backgroundServe(t *testing.T, s *dht.Server, pc net.PacketConn) dht.Binding {
-	b, err := s.ServeBinding(t.Context(), pc)
+	b, err := s.ServeBinding(t.Context(), pc, netx.ComputeBestAddr(pc.LocalAddr()))
 	require.NoError(t, err)
 	return b
 }

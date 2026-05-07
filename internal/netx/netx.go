@@ -80,7 +80,9 @@ func CmpAddrPort(a, b netip.AddrPort) int {
 	return ap.Compare(bp)
 }
 
-// NetPort returns the port of the network address,
+// NetPort returns the port of the network address.
+// It handles net.TCPAddr, net.UDPAddr, and any address whose String()
+// method returns a host:port string parsable by net.SplitHostPort.
 func NetPort(addr net.Addr) (port int, err error) {
 	if addr == nil {
 		return 0, errorsx.New("NetPort: nil net.Addr received")
@@ -137,6 +139,8 @@ func NetIP(addr net.Addr) (ip net.IP, err error) {
 	}
 }
 
+// NetIPOrNil returns the IP address of the network address, or nil if the
+// address cannot be parsed. Errors are logged and silently dropped.
 func NetIPOrNil(addr net.Addr) (ip net.IP) {
 	ip, err := NetIP(addr)
 	if err != nil {
@@ -181,6 +185,9 @@ func NetIPPort(addr net.Addr) (ip net.IP, port int, err error) {
 	}
 }
 
+// AddrPort returns the netip.AddrPort representation of a net.Addr.
+// It handles net.TCPAddr, net.UDPAddr, and any address whose String()
+// method returns a valid "ip:port" string.
 func AddrPort(addr net.Addr) (_ netip.AddrPort, err error) {
 	if addr == nil {
 		return netip.AddrPort{}, errorsx.New("NetIPPort: nil net.Addr received")
@@ -196,6 +203,8 @@ func AddrPort(addr net.Addr) (_ netip.AddrPort, err error) {
 	}
 }
 
+// AddrFromIP converts a net.IP into a netip.Addr, unmapped to IPv4.
+// Returns IPv6 unspecified address if ip is nil.
 func AddrFromIP(ip net.IP) netip.Addr {
 	if ip == nil {
 		return netip.IPv6Unspecified().Unmap()
@@ -204,6 +213,8 @@ func AddrFromIP(ip net.IP) netip.Addr {
 	return netip.AddrFrom16([16]byte(ip.To16())).Unmap()
 }
 
+// IP4FromAddr returns the 4-byte IPv4 representation of an address that is
+// either IPv4 or IPv4-mapped IPv6. Returns nil otherwise.
 func IP4FromAddr(a netip.Addr) net.IP {
 	if a.Is4() || a.Is4In6() {
 		tmp := a.As4()
@@ -213,6 +224,8 @@ func IP4FromAddr(a netip.Addr) net.IP {
 	return nil
 }
 
+// IP6FromAddr returns the 16-byte IPv6 representation of an address that is
+// IPv6 (not IPv4 or IPv4-mapped). Returns nil otherwise.
 func IP6FromAddr(a netip.Addr) net.IP {
 	if a.Is6() {
 		tmp := a.As16()
@@ -222,6 +235,8 @@ func IP6FromAddr(a netip.Addr) net.IP {
 	return nil
 }
 
+// FirstAddrOrZero returns the first valid, non-unspecified address from the
+// given list, or a zero netip.Addr if none qualify.
 func FirstAddrOrZero(addrs ...netip.Addr) netip.Addr {
 	for _, a := range addrs {
 		if a.IsValid() && !a.IsUnspecified() {
@@ -232,12 +247,14 @@ func FirstAddrOrZero(addrs ...netip.Addr) netip.Addr {
 	return netip.Addr{}
 }
 
+// IsAddrInUse reports whether err indicates that a network address is already
+// in use (e.g. during a port binding failure).
 func IsAddrInUse(err error) bool {
 	return strings.Contains(err.Error(), "address already in use")
 }
 
-// debfault the port if its not present in the hostport string.
-// assumes: host:port syntax.
+// DefaultPort ensures hostport includes a port. If the port segment is
+// missing, fallback is appended using host:port syntax.
 func DefaultPort(hostport string, fallback int) string {
 	host, _, ok := strings.Cut(hostport, ":")
 	if ok {
@@ -247,6 +264,8 @@ func DefaultPort(hostport string, fallback int) string {
 	return fmt.Sprintf("%s:%d", host, fallback)
 }
 
+// ProxyDialer returns a proxy.ContextDialer configured from the environment.
+// It delegates to proxy.FromEnvironment to discover the appropriate proxy.
 func ProxyDialer() proxy.ContextDialer {
 	return proxyContextDialer(proxy.FromEnvironment())
 }
@@ -306,12 +325,35 @@ func ComputeBestAddr(bound net.Addr) netip.AddrPort {
 		return netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port())
 	}
 
+	blen := ap.Addr().Unmap().BitLen()
+	return computeBestAddr(ap, func(v netip.AddrPort) bool {
+		return v.Addr().Unmap().BitLen() == blen
+	})
+}
+
+// ComputeBestAddr4 returns the best routable local IPv4 address for a bound
+// listener. When the listener is bound to an unspecified address (0.0.0.0),
+// it enumerates interface addresses and picks the highest-priority IPv4 one.
+// When bound to a specific address, the address is returned unchanged.
+func ComputeBestAddr4(bound net.Addr) netip.AddrPort {
+	ap := errorsx.Zero(AddrPort(bound))
+	if !ap.Addr().Unmap().IsUnspecified() {
+		return netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port())
+	}
+
+	return computeBestAddr(ap, func(v netip.AddrPort) bool {
+		return v.Addr().Unmap().Is4()
+	})
+}
+
+// computeBestAddr is like ComputeBestAddr but accepts a custom filter
+// to narrow candidate addresses. The filter replaces the default bit-length check.
+func computeBestAddr(ap netip.AddrPort, filter func(netip.AddrPort) bool) netip.AddrPort {
 	ifaces, err := net.InterfaceAddrs()
 	if err != nil {
 		return ap
 	}
 
-	blen := ap.Addr().Unmap().BitLen()
 	ips := slicesx.MapTransform(func(n net.Addr) netip.AddrPort {
 		switch v := n.(type) {
 		case *net.IPNet:
@@ -324,11 +366,9 @@ func ComputeBestAddr(bound net.Addr) netip.AddrPort {
 			return netip.AddrPortFrom(netip.Addr{}, ap.Port())
 		}
 	}, ifaces...)
-	ips = slicesx.Filter(func(v netip.AddrPort) bool {
-		return v.Addr().Unmap().BitLen() == blen
-	}, ips...)
+
+	ips = slicesx.Filter(filter, ips...)
 	slices.SortStableFunc(ips, CmpAddrPortPriority)
 	best := langx.FirstNonZero(ips...)
-	// log.Println("best local ip", bound.Network(), bound, ap, best)
 	return best
 }

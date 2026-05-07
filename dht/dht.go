@@ -45,10 +45,8 @@ func (t PeerAnnounceFn) Announced(peerid int160.T, ip net.IP, port uint16, portO
 type PublicAddrPort func(ctx context.Context, sc *Server, q Binding, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error)
 
 func PublicAddrPortFromPacketConn(ctx context.Context, sc *Server, q Binding, id int160.T, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
-	addr := netx.ComputeBestAddr(local.LocalAddr())
-
 	return func(yield func(netip.AddrPort) bool) {
-		if !yield(addr) {
+		if !yield(q.AddrPort()) {
 			return
 		}
 

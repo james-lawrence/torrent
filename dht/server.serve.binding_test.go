@@ -4,6 +4,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,9 +15,9 @@ func TestServeBinding(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = pc.Close() })
 
-		b1, err := s.ServeBinding(t.Context(), pc)
+		b1, err := s.ServeBinding(t.Context(), pc, netx.ComputeBestAddr(pc.LocalAddr()))
 		require.NoError(t, err)
-		b2, err := s.ServeBinding(t.Context(), pc)
+		b2, err := s.ServeBinding(t.Context(), pc, netx.ComputeBestAddr(pc.LocalAddr()))
 		require.NoError(t, err)
 		require.Equal(t, 1, s.numBindings())
 		require.Same(t, b1, b2)
@@ -33,11 +34,46 @@ func TestServeBinding(t *testing.T) {
 			_ = pc2.Close()
 		})
 
-		b1, err := s.ServeBinding(t.Context(), pc1)
+		b1, err := s.ServeBinding(t.Context(), pc1, netx.ComputeBestAddr(pc1.LocalAddr()))
 		require.NoError(t, err)
-		b2, err := s.ServeBinding(t.Context(), pc2)
+		b2, err := s.ServeBinding(t.Context(), pc2, netx.ComputeBestAddr(pc2.LocalAddr()))
 		require.NoError(t, err)
 		require.Equal(t, 2, s.numBindings())
 		require.NotEqual(t, b1.AddrPort(), b2.AddrPort())
+	})
+}
+
+func TestServe(t *testing.T) {
+	t.Run("ipv4 socket creates a single binding", func(t *testing.T) {
+		s := mustNewServer(t)
+		pc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = pc.Close() })
+
+		err = s.Serve(t.Context(), pc)
+		require.NoError(t, err)
+		require.Equal(t, 1, s.numBindings())
+	})
+
+	t.Run("ipv6 socket creates two bindings (ipv6 + ipv4)", func(t *testing.T) {
+		s := mustNewServer(t)
+		pc, err := net.ListenUDP("udp6", &net.UDPAddr{IP: net.ParseIP("::"), Port: 0})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = pc.Close() })
+
+		err = s.Serve(t.Context(), pc)
+		require.NoError(t, err)
+		require.Equal(t, 2, s.numBindings())
+	})
+
+	t.Run("ipv6 socket with failed ipv4 binding still succeeds", func(t *testing.T) {
+		s := mustNewServer(t)
+		pc, err := net.ListenUDP("udp6", &net.UDPAddr{IP: net.ParseIP("::1"), Port: 0})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = pc.Close() })
+
+		err = s.Serve(t.Context(), pc)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, s.numBindings(), 1)
 	})
 }
