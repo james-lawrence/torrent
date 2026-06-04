@@ -379,6 +379,10 @@ func TuneSeeding(t *torrent) error {
 }
 
 func TuneComplete(t *torrent) error {
+	defer log.Println("DERP DERP DERP")
+	if t.chunks.Incomplete() {
+		return nil
+	}
 	t.pieceStateChanges.Publish(TorrentComplete{})
 	return nil
 }
@@ -473,17 +477,19 @@ func DownloadRange(ctx context.Context, m Torrent, off int64, length int64, opti
 }
 
 func Verify(ctx context.Context, t Torrent) error {
+	defer log.Println("checkpoint")
 	if err := t.Tune(TuneNewConns); err != nil {
 		return err
 	}
-
+	log.Println("checkpoint")
 	select {
 	case <-t.GotInfo():
+		log.Println("checkpoint")
 	case <-ctx.Done():
 		return errorsx.Compact(context.Cause(ctx), ctx.Err())
 	}
-
-	return t.Tune(TuneVerifyFull)
+	log.Println("checkpoint")
+	return t.Tune(TuneVerifyFull, TuneComplete)
 }
 
 // returns a bitmap of the verified data within the storage implementation.

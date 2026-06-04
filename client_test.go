@@ -1290,3 +1290,84 @@ func TestTorrentCompleteEventOnSeeder(t *testing.T) {
 		t.Fatal("expected TorrentComplete event after seeder download")
 	}
 }
+
+func TestVerifyTorrentComplete(t *testing.T) {
+	t.Run("publishes when complete", func(t *testing.T) {
+		ctx, done := testx.Context(t)
+		defer done()
+
+		seeddir := t.TempDir()
+		info, _, err := torrenttest.Random(seeddir, 64*bytesx.KiB)
+		require.NoError(t, err)
+
+		sstore := storage.NewFile(seeddir)
+		defer sstore.Close()
+
+		md, err := torrent.NewFromInfo(info, torrent.OptionStorage(sstore))
+		require.NoError(t, err)
+
+		cl, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingSeedConfig(t, seeddir)))
+		require.NoError(t, err)
+		defer cl.Close()
+
+		var sub pubsub.Subscription
+		completed := make(chan struct{}, 1)
+
+		tor, _, err := cl.Start(md, torrent.TuneSubscribe(&sub))
+		require.NoError(t, err)
+		defer sub.Close()
+
+		go func() {
+			for v := range sub.Values {
+				if _, ok := v.(torrent.TorrentComplete); ok {
+					completed <- struct{}{}
+					return
+				}
+			}
+		}()
+
+		require.NoError(t, torrent.Verify(ctx, tor))
+
+		select {
+		case <-completed:
+		case <-ctx.Done():
+			t.Fatal("expected TorrentComplete event after verify")
+		}
+	})
+
+	t.Run("skips when incomplete", func(t *testing.T) {
+		ctx, done := testx.Context(t)
+		defer done()
+
+		seeddir := t.TempDir()
+		info, _, err := torrenttest.Random(seeddir, 64*bytesx.KiB)
+		require.NoError(t, err)
+
+		emptydir := t.TempDir()
+		md, err := torrent.NewFromInfo(info, torrent.OptionStorage(storage.NewFile(emptydir)))
+		require.NoError(t, err)
+
+		cl, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingLeechConfig(t, emptydir)))
+		require.NoError(t, err)
+		defer cl.Close()
+
+		var sub pubsub.Subscription
+		tor, _, err := cl.Start(md, torrent.TuneSubscribe(&sub))
+		require.NoError(t, err)
+		defer sub.Close()
+
+		require.NoError(t, torrent.Verify(ctx, tor))
+
+		timeout := time.After(100 * time.Millisecond)
+		for {
+			select {
+			case v := <-sub.Values:
+				if _, ok := v.(torrent.TorrentComplete); ok {
+					t.Fatal("unexpected TorrentComplete when torrent is incomplete")
+				}
+			case <-timeout:
+				return
+			}
+		}
+	})
+}
