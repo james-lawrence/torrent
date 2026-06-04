@@ -18,6 +18,21 @@ type cachedAddr struct {
 	ts      time.Time
 }
 
+type config struct {
+	computeBestAddr func(net.Addr) netip.AddrPort
+}
+
+// Option configures a Socket.
+type Option func(*config)
+
+// OptionComputeBestAddr overrides the function used to determine the best
+// local address to advertise for this socket. Defaults to netx.ComputeBestAddr.
+func OptionComputeBestAddr(fn func(net.Addr) netip.AddrPort) Option {
+	return func(c *config) {
+		c.computeBestAddr = fn
+	}
+}
+
 func addrOf(ap netip.AddrPort, network string) net.Addr {
 	ip := net.IP(ap.Addr().AsSlice())
 	port := int(ap.Port())
@@ -30,12 +45,17 @@ func addrOf(ap netip.AddrPort, network string) net.Addr {
 }
 
 // New creates a socket from a net listener and dialer.
-func New(l net.Listener, d netx.Dialer) Socket {
-	if l, ok := l.(packetlistener); ok {
-		return &packetconnSocket{packetlistener: l, dialer: d}
+func New(l net.Listener, d netx.Dialer, options ...Option) Socket {
+	cfg := config{computeBestAddr: netx.ComputeBestAddr}
+	for _, o := range options {
+		o(&cfg)
 	}
 
-	return &socket{Listener: l, dialer: d}
+	if l, ok := l.(packetlistener); ok {
+		return &packetconnSocket{packetlistener: l, dialer: d, config: cfg}
+	}
+
+	return &socket{Listener: l, dialer: d, config: cfg}
 }
 
 // Socket for torrent clients
@@ -56,6 +76,7 @@ type packetconnSocket struct {
 	packetlistener
 	dialer netx.Dialer
 	cached atomic.Pointer[cachedAddr]
+	config
 }
 
 // Addr returns the best available local address for this socket.
@@ -64,7 +85,7 @@ func (t *packetconnSocket) Addr() net.Addr {
 		return c.netaddr
 	}
 	bound := t.packetlistener.Addr()
-	ap := netx.ComputeBestAddr(bound)
+	ap := t.computeBestAddr(bound)
 	na := addrOf(ap, bound.Network())
 	t.cached.Store(&cachedAddr{addr: ap, netaddr: na, ts: time.Now()})
 	return na
@@ -79,6 +100,7 @@ type socket struct {
 	net.Listener
 	dialer netx.Dialer
 	cached atomic.Pointer[cachedAddr]
+	config
 }
 
 // Addr returns the best available local address for this socket.
@@ -87,7 +109,7 @@ func (t *socket) Addr() net.Addr {
 		return c.netaddr
 	}
 	bound := t.Listener.Addr()
-	ap := netx.ComputeBestAddr(bound)
+	ap := t.computeBestAddr(bound)
 	na := addrOf(ap, bound.Network())
 	t.cached.Store(&cachedAddr{addr: ap, netaddr: na, ts: time.Now()})
 	return na
