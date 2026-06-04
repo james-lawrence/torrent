@@ -68,6 +68,12 @@ func OptionDynamicPort(fn PublicAddrPort) Option {
 	}
 }
 
+func OptionComputeBestAddr(fn func(net.Addr) netip.AddrPort) Option {
+	return func(sc *Server) {
+		sc.computeBestAddr = fn
+	}
+}
+
 // OptionUPnP configures the server to use UPnP IGD port forwarding to resolve
 // its public address. IPv6 addresses fall back to AutoDetectIP because UPnP IGD
 // is an IPv4 NAT traversal protocol. IPv4-mapped IPv6 addresses (4-in-6) are
@@ -179,7 +185,6 @@ var DefaultGlobalBootstrapHostPorts = []string{
 	"router.bittorrent.com:6881",
 	"dht.transmissionbt.com:6881",
 	"dht.aelitis.com:6881",
-	"router.silotis.us:6881",
 	"dht.libtorrent.org:25401",
 }
 

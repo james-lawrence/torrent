@@ -71,6 +71,7 @@ type Server struct {
 	lastBootstrap time.Time
 
 	resolvepublicaddr PublicAddrPort
+	computeBestAddr   func(net.Addr) netip.AddrPort
 	// Hook received queries. Return false if you don't want to propagate to the default handlers.
 	hookQuery HookQuery
 	// Called when a peer successfully announces to us.
@@ -197,6 +198,7 @@ func NewServer(k int, options ...Option) (s *Server, err error) {
 		store:             bep44.NewWrapper(bep44.NewMemory(), 2*time.Hour),
 		closed:            make(chan struct{}),
 		resolvepublicaddr: PublicAddrPortFromPacketConn,
+		computeBestAddr:   netx.ComputeBestAddr,
 		sendLimiter:       DefaultSendLimiter,
 		mux:               DefaultMuxer(),
 		queryResendDelay:  defaultQueryResendDelay,
@@ -318,7 +320,7 @@ func (s *Server) serveBinding(ctx context.Context, pc net.PacketConn, bestaddr n
 }
 
 func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
-	bestaddr := netx.ComputeBestAddr(pc.LocalAddr())
+	bestaddr := s.computeBestAddr(pc.LocalAddr())
 	if _, err := s.ServeBinding(ctx, pc, bestaddr); err != nil {
 		return err
 	}
