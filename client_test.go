@@ -21,10 +21,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
 
+	"github.com/anacrolix/missinggo/pubsub"
+
 	"github.com/james-lawrence/torrent"
 	"github.com/james-lawrence/torrent/autobind"
 	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/torrenttest"
 	"github.com/james-lawrence/torrent/torrenttestx"
 
 	"github.com/james-lawrence/torrent/bencode"
@@ -1184,4 +1187,106 @@ func TestProtocolSwarmManagement(t *testing.T) {
 			}, 5*time.Second, 25*time.Millisecond)
 		}
 	})
+}
+
+func TestTorrentCompleteEventOnDownload(t *testing.T) {
+	ctx, done := testx.Context(t)
+	defer done()
+
+	seeddir := t.TempDir()
+	info, _, err := torrenttest.Random(seeddir, 64*bytesx.KiB)
+	require.NoError(t, err)
+
+	sstore := storage.NewFile(seeddir)
+	defer sstore.Close()
+
+	md, err := torrent.NewFromInfo(info, torrent.OptionStorage(sstore))
+	require.NoError(t, err)
+
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingSeedConfig(t, seeddir)))
+	require.NoError(t, err)
+	defer seeder.Close()
+
+	seederTorrent, _, err := seeder.Start(md, torrent.TuneVerifyFull)
+	require.NoError(t, err)
+	_, err = torrent.DownloadInto(ctx, io.Discard, seederTorrent)
+	require.NoError(t, err)
+
+	leechdir := t.TempDir()
+	lstore := storage.NewFile(leechdir)
+	defer lstore.Close()
+
+	lmd, err := torrent.NewFromInfo(info, torrent.OptionStorage(lstore))
+	require.NoError(t, err)
+
+	leecher, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingLeechConfig(t, leechdir)))
+	require.NoError(t, err)
+	defer leecher.Close()
+
+	var sub pubsub.Subscription
+	ltor, _, err := leecher.Start(lmd, torrent.TuneSubscribe(&sub))
+	require.NoError(t, err)
+	defer sub.Close()
+
+	completed := make(chan struct{}, 1)
+	go func() {
+		for v := range sub.Values {
+			if _, ok := v.(torrent.TorrentComplete); ok {
+				completed <- struct{}{}
+				return
+			}
+		}
+	}()
+
+	_, err = torrent.DownloadInto(ctx, io.Discard, ltor, torrent.TuneClientPeer(seeder))
+	require.NoError(t, err)
+
+	select {
+	case <-completed:
+	case <-ctx.Done():
+		t.Fatal("expected TorrentComplete event after download")
+	}
+}
+
+func TestTorrentCompleteEventOnSeeder(t *testing.T) {
+	ctx, done := testx.Context(t)
+	defer done()
+
+	seeddir := t.TempDir()
+	info, _, err := torrenttest.Random(seeddir, 64*bytesx.KiB)
+	require.NoError(t, err)
+
+	sstore := storage.NewFile(seeddir)
+	defer sstore.Close()
+
+	md, err := torrent.NewFromInfo(info, torrent.OptionStorage(sstore))
+	require.NoError(t, err)
+
+	seeder, err := torrenttestx.Autosocket(t).Bind(torrent.NewClient(TestingSeedConfig(t, seeddir)))
+	require.NoError(t, err)
+	defer seeder.Close()
+
+	var sub pubsub.Subscription
+	seederTorrent, _, err := seeder.Start(md, torrent.TuneVerifyFull, torrent.TuneSubscribe(&sub))
+	require.NoError(t, err)
+	defer sub.Close()
+
+	completed := make(chan struct{}, 1)
+	go func() {
+		for v := range sub.Values {
+			if _, ok := v.(torrent.TorrentComplete); ok {
+				completed <- struct{}{}
+				return
+			}
+		}
+	}()
+
+	_, err = torrent.DownloadInto(ctx, io.Discard, seederTorrent)
+	require.NoError(t, err)
+
+	select {
+	case <-completed:
+	case <-ctx.Done():
+		t.Fatal("expected TorrentComplete event after seeder download")
+	}
 }
