@@ -16,7 +16,6 @@ import (
 	"github.com/james-lawrence/torrent/internal/userx"
 	"github.com/james-lawrence/torrent/storage"
 	"github.com/james-lawrence/torrent/tracker"
-	"github.com/james-lawrence/torrent/x/conntrack"
 	"golang.org/x/exp/constraints"
 	"golang.org/x/time/rate"
 
@@ -111,8 +110,6 @@ type ClientConfig struct {
 	// Don't add connections that have the same peer ID as an existing
 	// connection for a given Torrent.
 	dropDuplicatePeerIds bool
-
-	ConnTracker *conntrack.Instance
 
 	Handshaker connections.Handshaker
 
@@ -380,7 +377,6 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		dialRateLimiter:                rate.NewLimiter(rate.Limit(32), 128),
 		acceptRateLimiter:              rate.NewLimiter(rate.Limit(runtime.NumCPU()), runtime.NumCPU()),
 		dialPoolSize:                   uint16(runtime.NumCPU()),
-		ConnTracker:                    conntrack.NewInstance(),
 		HeaderObfuscationPolicy: HeaderObfuscationPolicy{
 			Preferred: false,
 			Required:  false,
