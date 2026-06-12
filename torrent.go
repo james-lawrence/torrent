@@ -379,7 +379,6 @@ func TuneSeeding(t *torrent) error {
 }
 
 func TuneComplete(t *torrent) error {
-	defer log.Println("DERP DERP DERP")
 	if t.chunks.Incomplete() {
 		return nil
 	}
@@ -809,9 +808,7 @@ func (t *torrent) KnownSwarm() (ks []Peer) {
 
 func (t *torrent) setChunkSize(size uint64) {
 	t.md.ChunkSize = size
-	// potential bug here use to be '*t.chunks = *newChunks(...)' change to straight assignment to deal with
-	// Unlock called on a non-locked mutex.
-	*t.chunks = *newChunks(size, langx.FirstNonZero(t.info, metainfo.NewInfo()), chunkoptMutex(t.chunks.mu), chunkoptCond(t.chunks.cond), chunkoptCompleted(t.chunks.completed))
+	resetChunks(t.chunks, size, langx.FirstNonZero(t.info, metainfo.NewInfo()))
 }
 
 // There's a connection to that address already.

@@ -79,12 +79,6 @@ func chunkoptCond(cond *sync.Cond) chunkopt {
 	}
 }
 
-func chunkoptMutex(mu *sync.RWMutex) chunkopt {
-	return func(c *chunks) {
-		c.mu = mu
-	}
-}
-
 func chunkoptCompleted(completed *roaring.Bitmap) chunkopt {
 	return func(c *chunks) {
 		c.completed = completed
@@ -97,35 +91,54 @@ func newChunks(clength uint64, m *metainfo.Info, options ...chunkopt) *chunks {
 	}
 
 	p := langx.Autoptr(langx.Clone(chunks{
-		cond:        sync.NewCond(&sync.Mutex{}),
-		mu:          &sync.RWMutex{},
-		meta:        m,
-		pieces:      uint64(m.NumPieces()),
-		cmaximum:    numChunks(m.TotalLength(), m.PieceLength, int64(clength)),
-		clength:     int64(clength),
-		gracePeriod: 2 * time.Minute,
-		outstanding: make(map[uint64]request),
-		missing:     roaring.New(),
-		unverified:  roaring.New(),
-		failed:      roaring.New(),
-		completed:   roaring.New(),
-		pool: &sync.Pool{
-			New: func() interface{} {
-				b := make([]byte, clength)
-				return &b
+		chunkstate: chunkstate{
+			meta:        m,
+			pieces:      uint64(m.NumPieces()),
+			cmaximum:    numChunks(m.TotalLength(), m.PieceLength, int64(clength)),
+			clength:     int64(clength),
+			gracePeriod: 2 * time.Minute,
+			outstanding: make(map[uint64]request),
+			missing:     roaring.New(),
+			unverified:  roaring.New(),
+			failed:      roaring.New(),
+			completed:   roaring.New(),
+			pool: &sync.Pool{
+				New: func() interface{} {
+					b := make([]byte, clength)
+					return &b
+				},
 			},
 		},
+		cond: sync.NewCond(&sync.Mutex{}),
+		mu:   &sync.RWMutex{},
 	}, options...))
 
 	// log.Printf("%p - TOTAL LENGTH %d LENGTH %d NUMCHUNKS %d - CHUNK LENGTH %d - PIECE LEGNTH %d\n", p, p.meta.TotalLength(), p.meta.Length, p.cmaximum, p.clength, p.meta.PieceLength)
 	return p
 }
 
-// chunks manages retrieving specific chunks of the torrent. its concurrent safe,
-// and automatically recovers chunks that were requested but not received.
-// the goal here is to have a single source of truth for what chunks are outstanding.
-type chunks struct {
-	cond *sync.Cond
+// resetChunks rebuilds orig's state for a new chunk size / metainfo,
+// preserving its completed bitmap. orig's mutex and cond are left untouched
+// (never overwritten) so that goroutines blocked acquiring them via orig.mu
+// or orig.cond.L are unaffected. Locks orig.mu for the duration of the
+// rebuild, so it is safe to call concurrently with other *chunks methods.
+func resetChunks(orig *chunks, clength uint64, m *metainfo.Info) *chunks {
+	orig.mu.Lock()
+	defer orig.mu.Unlock()
+
+	fresh := newChunks(clength, m, chunkoptCompleted(orig.completed))
+	orig.chunkstate = fresh.chunkstate
+
+	return orig
+}
+
+// chunkstate is the rebuildable state of a chunks. it is embedded separately
+// from chunks' mutex/cond so resetChunks can replace it wholesale
+// (orig.chunkstate = fresh.chunkstate) under orig.mu without ever writing to
+// the mu/cond fields themselves - code locking those reads them without
+// holding orig.mu, so overwriting them (even with identical values) would
+// race.
+type chunkstate struct {
 	meta *metainfo.Info
 
 	pieces uint64
@@ -163,8 +176,16 @@ type chunks struct {
 
 	// buffer pool for storing chunks
 	pool *sync.Pool
+}
 
-	mu *sync.RWMutex
+// chunks manages retrieving specific chunks of the torrent. its concurrent safe,
+// and automatically recovers chunks that were requested but not received.
+// the goal here is to have a single source of truth for what chunks are outstanding.
+type chunks struct {
+	chunkstate
+
+	cond *sync.Cond
+	mu   *sync.RWMutex
 }
 
 type peeked struct {

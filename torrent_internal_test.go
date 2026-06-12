@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,6 +54,38 @@ func TestTorrentString(t *testing.T) {
 	if s != "0000000000000000000000000000000000000000" {
 		t.FailNow()
 	}
+}
+
+// TestSetChunkSizeRace exercises setChunkSize concurrently with operations
+// that mutate the chunks bitmaps, mirroring how tuneMerge can resize chunks
+// while digest verification goroutines are calling chunks.Complete. Run with
+// -race to detect unsynchronized access to *chunks fields.
+func TestSetChunkSizeRace(t *testing.T) {
+	info := tinyTorrentInfo()
+	tor := &torrent{info: info, chunks: quickpopulate(newChunks(defaultChunkSize, info))}
+	pieces := tor.chunks.pieces
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			tor.setChunkSize(uint64(1 + i%4))
+		}
+	}()
+
+	for pid := uint64(0); pid < pieces; pid++ {
+		wg.Add(1)
+		go func(pid uint64) {
+			defer wg.Done()
+			for i := 0; i < 100; i++ {
+				tor.chunks.Complete(pid)
+			}
+		}(pid)
+	}
+
+	wg.Wait()
 }
 
 // // This benchmark is from the observation that a lot of overlapping Readers on
