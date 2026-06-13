@@ -58,15 +58,17 @@ func (t bitmapfilestore) Read(id int160.T) (*roaring.Bitmap, error) {
 		return nil, errorsx.Wrapf(err, "unable to read bitmap from %s", p)
 	}
 
-	if verr := bm.Validate(); verr != nil {
+	if verr := bm.Validate(); verr == nil {
+		return bm, nil
+	} else {
 		log.Println("discarding corrupted bitmap cache", p, verr)
-		if err := t.Delete(id); err != nil {
-			log.Println("unable to remove corrupted bitmap cache", p, err)
-		}
-		return roaring.New(), nil
 	}
 
-	return bm, nil
+	if err := t.Delete(id); err != nil {
+		log.Println("unable to remove corrupted bitmap cache", p, err)
+	}
+
+	return roaring.New(), nil
 }
 
 func (t bitmapfilestore) Write(id int160.T, bitmap *roaring.Bitmap) error {
