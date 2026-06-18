@@ -115,7 +115,7 @@ func (t HandlerAnnounce) Handle(ctx context.Context, source Addr, s *Server, b B
 	}
 
 	for _, h := range s.announceto {
-		go h.Announced(int160.FromByteArray(m.A.InfoHash), source.IP(), port, portOk)
+		go h.Announced(int160.FromByteArray(m.A.InfoHash), source.AddrPort(), portOk)
 	}
 
 	if ps := s.peers; ps != nil {

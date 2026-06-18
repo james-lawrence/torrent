@@ -31,14 +31,14 @@ type transactionKey = transactions.Key
 type StartingNodesGetter func(ctx context.Context, dcache dnscacher) ([]Addr, error)
 
 type PeerAnnounce interface {
-	Announced(peerid int160.T, ip net.IP, port uint16, portOk bool)
+	Announced(peerid int160.T, source netip.AddrPort, portOk bool)
 }
 
-type HookQuery func(query *krpc.Msg, source net.Addr) (propagate bool)
-type PeerAnnounceFn func(peerid int160.T, ip net.IP, port uint16, portOk bool)
+type HookQuery func(source netip.AddrPort, query *krpc.Msg) (propagate bool)
+type PeerAnnounceFn func(peerid int160.T, source netip.AddrPort, portOk bool)
 
-func (t PeerAnnounceFn) Announced(peerid int160.T, ip net.IP, port uint16, portOk bool) {
-	t(peerid, ip, port, portOk)
+func (t PeerAnnounceFn) Announced(peerid int160.T, source netip.AddrPort, portOk bool) {
+	t(peerid, source, portOk)
 }
 
 type PublicAddrPort func(ctx context.Context, sc *Server, q Binding, id int160.T, bestaddr netip.AddrPort, local net.PacketConn) (iter.Seq[netip.AddrPort], error)
@@ -148,6 +148,16 @@ func OptionOnQuery(m HookQuery) Option {
 		sc.hookQuery = m
 	}
 }
+
+// OptionOnAnnouncePeer registers a PeerAnnounce to be notified whenever a peer
+// successfully announces to this server. Equivalent to calling AttachAnnouncer
+// at construction time.
+func OptionOnAnnouncePeer(m PeerAnnounce) Option {
+	return func(sc *Server) {
+		sc.announceto = append(sc.announceto, m)
+	}
+}
+
 func OptionQueryResendDelay(d time.Duration) Option {
 	return func(s *Server) {
 		s.queryResendDelay = func() time.Duration { return d }

@@ -676,7 +676,7 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr netip.Add
 	return c
 }
 
-func (cl *Client) onDHTAnnouncePeer(id int160.T, ip net.IP, port uint16, portOk bool) {
+func (cl *Client) onDHTAnnouncePeer(id int160.T, source netip.AddrPort, portOk bool) {
 	cl.lock()
 	defer cl.unlock()
 
@@ -688,8 +688,8 @@ func (cl *Client) onDHTAnnouncePeer(id int160.T, ip net.IP, port uint16, portOk 
 
 	t.addPeers(NewPeerDeprecated(
 		int160.Zero(),
-		ip,
-		port,
+		net.IP(source.Addr().AsSlice()),
+		source.Port(),
 		PeerOptionSource(peerSourceDhtAnnouncePeer),
 	))
 }

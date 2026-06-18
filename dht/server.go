@@ -74,8 +74,6 @@ type Server struct {
 	computeBestAddr   func(net.Addr) netip.AddrPort
 	// Hook received queries. Return false if you don't want to propagate to the default handlers.
 	hookQuery HookQuery
-	// Called when a peer successfully announces to us.
-	hookAnnouncePeer PeerAnnounce
 	// How long to wait before resending queries that haven't received a response. Defaults to 2s.
 	// After the last send, a query is aborted after this time.
 	queryResendDelay func() time.Duration
@@ -204,8 +202,7 @@ func NewServer(k int, options ...Option) (s *Server, err error) {
 		queryResendDelay:  defaultQueryResendDelay,
 		defaultWant:       []krpc.Want{krpc.WantNodes, krpc.WantNodes6},
 		log:               discard{},
-		hookQuery:         func(query *krpc.Msg, source net.Addr) (propagate bool) { return true },
-		hookAnnouncePeer:  PeerAnnounceFn(func(peerid int160.T, ip net.IP, port uint16, portOk bool) {}),
+		hookQuery:         func(source netip.AddrPort, query *krpc.Msg) (propagate bool) { return true },
 	}, options...))
 
 	if _, err = rand.Read(s.tokenServer.secret); err != nil {
@@ -609,7 +606,7 @@ func (s *Server) handleQuery(ctx context.Context, binding *socketbinding, source
 		n.numReceivesFrom++
 	})
 
-	propagate := s.hookQuery(&m, source.Raw())
+	propagate := s.hookQuery(source.AddrPort(), &m)
 	if !propagate {
 		return
 	}

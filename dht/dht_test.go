@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/big"
 	"net"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -145,7 +146,7 @@ func TestHook(t *testing.T) {
 		OptionBootstrapFixedAddrs(
 			NewAddr(pconn.LocalAddr().(*net.UDPAddr).AddrPort()),
 		),
-		OptionOnQuery(func(m *krpc.Msg, addr net.Addr) bool {
+		OptionOnQuery(func(addr netip.AddrPort, m *krpc.Msg) bool {
 			t.Logf("receiver got msg: %v", m)
 			if m.Q == "ping" {
 				select {
@@ -173,6 +174,50 @@ func TestHook(t *testing.T) {
 		t.Log("TestHook: Sender received response from pinged hook server, so normal execution resumed.")
 	case <-time.After(time.Second * 1):
 		t.Error("Failed to see evidence of ping hook being called after 2 seconds.")
+	}
+}
+
+func TestOnAnnouncePeerHook(t *testing.T) {
+	rconn := mustListen("127.0.0.1:0")
+	pconn := mustListen("127.0.0.1:0")
+
+	wantInfoHash := int160.Random()
+	wantPort := uint16(6881)
+	hookCalled := make(chan struct{}, 1)
+
+	receiver, err := NewServer(
+		32,
+		OptionOnAnnouncePeer(PeerAnnounceFn(func(peerid int160.T, source netip.AddrPort, portOk bool) {
+			t.Logf("receiver hook invoked: peerid=%v source=%v portOk=%v", peerid, source, portOk)
+			if peerid == wantInfoHash && portOk {
+				select {
+				case hookCalled <- struct{}{}:
+				default:
+				}
+			}
+		})),
+	)
+	require.NoError(t, err)
+	backgroundServe(t, receiver, rconn)
+	defer receiver.Close()
+
+	announcer, err := NewServer(32)
+	require.NoError(t, err)
+	backgroundServe(t, announcer, pconn)
+	defer announcer.Close()
+
+	announcerAddr := NewAddr(pconn.LocalAddr().(*net.UDPAddr).AddrPort())
+	receiverAddr := NewAddr(rconn.LocalAddr().(*net.UDPAddr).AddrPort())
+	token := receiver.createToken(announcerAddr)
+
+	res := announcer.announcePeer(t.Context(), receiverAddr, wantInfoHash, wantPort, token, false)
+	assert.NoError(t, res.Err)
+
+	select {
+	case <-hookCalled:
+		t.Log("TestOnAnnouncePeerHook: hookAnnouncePeer was invoked for the announce_peer query.")
+	case <-time.After(time.Second):
+		t.Error("hookAnnouncePeer was not invoked for incoming announce_peer query")
 	}
 }
 
