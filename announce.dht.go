@@ -3,7 +3,6 @@ package torrent
 import (
 	"context"
 	"iter"
-	"log"
 
 	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -12,8 +11,8 @@ import (
 )
 
 func DHTAnnounceOnce(ctx context.Context, d *dht.Server, id int160.T) (err error) {
-	log.Println("dht announced initiated", id, d.DynamicAddrPort())
-	defer log.Println("dht announced completed", id, d.DynamicAddrPort())
+	// log.Println("dht announced initiated", id, d.DynamicAddrPort())
+	// defer log.Println("dht announced completed", id, d.DynamicAddrPort())
 	announced, err := d.AnnounceTraversal(ctx, id, dht.AnnouncePeer(d, false))
 	if err != nil {
 		return errorsx.Wrapf(err, "dht failed to announce: %s", id)
@@ -27,7 +26,7 @@ func DHTAnnounceOnce(ctx context.Context, d *dht.Server, id int160.T) (err error
 			// log.Println("announce dht peers", id, len(pv.Peers), pv.Peers[:min(len(pv.Peers), 5)])
 			continue
 		case <-announced.Finished():
-			log.Println("announce dht finished", id)
+			// log.Println("announce dht finished", id)
 			return nil
 		case <-ctx.Done():
 			return context.Cause(ctx)
