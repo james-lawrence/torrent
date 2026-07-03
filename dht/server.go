@@ -126,6 +126,11 @@ func (s *Server) Stats() ServerStats {
 	ss.GoodNodes = s.numGoodNodes()
 	ss.Nodes = s.numNodes()
 	ss.OutstandingTransactions = s.transactions.NumActive()
+	ss.BoundAddrs = make([]netip.AddrPort, 0, len(s.bindings))
+	for _, b := range s.bindings {
+		ss.BoundAddrs = append(ss.BoundAddrs, b.LocalAddr())
+	}
+	ss.PublicAddr = s.DynamicAddrPort()
 	return ss
 }
 

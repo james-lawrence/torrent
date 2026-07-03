@@ -125,6 +125,16 @@ func OptionBootstrapNodesNone(sc *Server) {
 	sc.bootstrap = nil
 }
 
+func OptionBootstrapAddrPort(addrs ...netip.AddrPort) Option {
+	return OptionBootstrapNodesFn(func(ctx context.Context, dcache dnscacher) (res []Addr, err error) {
+		res = make([]Addr, 0, len(addrs))
+		for _, p := range addrs {
+			res = append(res, NewAddr(p))
+		}
+		return res, nil
+	})
+}
+
 func OptionBootstrapFixedAddrs(addrs ...Addr) Option {
 	return OptionBootstrapNodesFn(func(ctx context.Context, dcache dnscacher) (res []Addr, err error) {
 		return addrs, nil
@@ -186,6 +196,10 @@ type ServerStats struct {
 	// Nodes that have been blocked.
 	BadNodes                 uint
 	OutboundQueriesAttempted int64
+	// Local addresses the server's sockets are bound to.
+	BoundAddrs []netip.AddrPort
+	// Best-known public address across all bindings.
+	PublicAddr netip.AddrPort
 }
 
 type Peer = krpc.NodeAddr

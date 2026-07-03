@@ -39,6 +39,11 @@ func (b *socketbinding) ID() int160.T {
 	return langx.Zero(b.id.Load())
 }
 
+// LocalAddr returns the address the underlying socket is bound to.
+func (b *socketbinding) LocalAddr() netip.AddrPort {
+	return errorsx.Zero(netx.AddrPort(b.pc.LocalAddr()))
+}
+
 func (b *socketbinding) AddrPort() netip.AddrPort {
 	addr := langx.Zero(b.dynamicaddr.Load())
 	if ip := addr.Addr(); ip.Is4In6() {

@@ -42,6 +42,33 @@ func TestServeBinding(t *testing.T) {
 		require.Equal(t, 2, s.numBindings())
 		require.NotEqual(t, b1.AddrPort(), b2.AddrPort())
 	})
+
+	t.Run("stats reports the bound addresses", func(t *testing.T) {
+		s := mustNewServer(t)
+		pc1, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+		require.NoError(t, err)
+		pc2, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.2"), Port: 0})
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_ = pc1.Close()
+			_ = pc2.Close()
+		})
+
+		_, err = s.ServeBinding(t.Context(), pc1, netx.ComputeBestAddr(pc1.LocalAddr()))
+		require.NoError(t, err)
+		_, err = s.ServeBinding(t.Context(), pc2, netx.ComputeBestAddr(pc2.LocalAddr()))
+		require.NoError(t, err)
+
+		ap1, err := netx.AddrPort(pc1.LocalAddr())
+		require.NoError(t, err)
+		ap2, err := netx.AddrPort(pc2.LocalAddr())
+		require.NoError(t, err)
+
+		bound := s.Stats().BoundAddrs
+		require.Len(t, bound, 2)
+		require.Contains(t, bound, ap1)
+		require.Contains(t, bound, ap2)
+	})
 }
 
 func TestServe(t *testing.T) {
