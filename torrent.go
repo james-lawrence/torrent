@@ -1357,7 +1357,7 @@ func (t *torrent) dhtAnnouncer(s *dht.Server) {
 			return
 		case <-time.After(errdelay):
 		case <-t.wantPeersEvent:
-			log.Println("dht ancouncing peers wanted event", s.DynamicAddrPort(), t.md.ID)
+			t.cln.config.debug().Println("dht ancouncing peers wanted event", s.DynamicAddrPort(), t.md.ID)
 		}
 
 		t.stats.DHTAnnounce.Add(1)
