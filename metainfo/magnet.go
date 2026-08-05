@@ -7,7 +7,31 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/james-lawrence/torrent/dht/int160"
 )
+
+type MagnetOption func(*Magnet)
+
+func MagnetOptionTrackers(trackers ...string) MagnetOption {
+	return func(m *Magnet) {
+		m.Trackers = append(m.Trackers, trackers...)
+	}
+}
+
+func MagnetOptionDisplayName(name string) MagnetOption {
+	return func(m *Magnet) {
+		m.DisplayName = name
+	}
+}
+
+func NewMagnetFromInfohash(b []byte, options ...MagnetOption) Magnet {
+	m := Magnet{InfoHash: Hash(int160.FromBytes(b).AsByteArray())}
+	for _, opt := range options {
+		opt(&m)
+	}
+	return m
+}
 
 // Magnet link components.
 type Magnet struct {

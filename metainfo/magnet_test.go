@@ -20,7 +20,7 @@ var (
 )
 
 func init() {
-	hex.Decode(exampleMagnet.InfoHash[:], []byte("51340689c960f0778a4387aef9b4b52fd08390cd"))
+	_, _ = hex.Decode(exampleMagnet.InfoHash[:], []byte("51340689c960f0778a4387aef9b4b52fd08390cd"))
 }
 
 // Converting from our Magnet type to URL string.
@@ -44,6 +44,7 @@ func TestParseMagnetURI(t *testing.T) {
 
 	// Checking if the magnet instance struct is built correctly from parsing
 	m, err = ParseMagnetURI(exampleMagnetURI)
+	require.NoError(t, err)
 	assert.EqualValues(t, exampleMagnet, m)
 
 	// empty string URI case
@@ -66,7 +67,6 @@ func TestParseMagnetURI(t *testing.T) {
 	if err == nil {
 		t.Errorf("Failed to detect broken Magnet URI: %v", uri)
 	}
-
 }
 
 func TestMagnetize(t *testing.T) {
@@ -102,6 +102,31 @@ func TestMagnetize(t *testing.T) {
 			t.Errorf("Magnet does not contain expected tracker: %s", expected)
 		}
 	}
+}
+
+func TestNewMagnetFromInfohash(t *testing.T) {
+	ih := make([]byte, 20)
+	_, err := hex.Decode(ih, []byte("51340689c960f0778a4387aef9b4b52fd08390cd"))
+	require.NoError(t, err)
+
+	m := NewMagnetFromInfohash(ih)
+	assert.Equal(t, exampleMagnet.InfoHash, m.InfoHash)
+	assert.Empty(t, m.DisplayName)
+	assert.Empty(t, m.Trackers)
+
+	m = NewMagnetFromInfohash(ih, MagnetOptionDisplayName("Shit Movie (1985) 1337p - Eru"))
+	assert.Equal(t, "Shit Movie (1985) 1337p - Eru", m.DisplayName)
+
+	m = NewMagnetFromInfohash(ih, MagnetOptionTrackers("http://http.was.great!", "udp://anti.piracy.honeypot:6969"))
+	assert.Equal(t, []string{"http://http.was.great!", "udp://anti.piracy.honeypot:6969"}, m.Trackers)
+
+	m = NewMagnetFromInfohash(
+		ih,
+		MagnetOptionDisplayName("Shit Movie (1985) 1337p - Eru"),
+		MagnetOptionTrackers("http://http.was.great!"),
+		MagnetOptionTrackers("udp://anti.piracy.honeypot:6969"),
+	)
+	assert.Equal(t, exampleMagnet, m)
 }
 
 func contains(haystack []string, needle string) bool {
