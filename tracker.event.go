@@ -152,12 +152,12 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 			return
 		}
 
-		if totalpeers > 0 && failed == nil {
-			log.Println("announce succeeded, but there are no peers", t.Metadata().ID.String(), len(trackers))
+		if totalpeers == 0 && failed == nil {
+			log.Println("announce succeeded, but there are no peers", t.Metadata().ID.String(), t.Metadata().DisplayName, totalpeers, len(trackers))
 			continue
 		}
 
-		t.cln.config.debug().Println("announce sleeping for maximum delay", t.Metadata().ID.String(), delay)
+		t.cln.config.debug().Println("announce sleeping for maximum delay", t.Metadata().ID.String(), t.Metadata().DisplayName, delay)
 		time.Sleep(delay)
 		delay = mindelay
 
