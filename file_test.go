@@ -6,6 +6,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// FilesOf exposes Files() for external tests, since Files isn't part of the
+// public Torrent interface.
+func FilesOf(t Torrent) []*File {
+	return t.(*torrent).Files()
+}
+
 func TestFileExclusivePieces(t *testing.T) {
 	for _, _case := range []struct {
 		off, size, pieceSize int64

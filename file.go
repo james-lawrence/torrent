@@ -99,7 +99,7 @@ func byteRegionExclusivePieces(off, size, pieceSize int64) (begin, end int) {
 // NewReader returns a reader for the file.
 func (f *File) NewReader() Reader {
 	tr := reader{
-		TorrentImpl: f.t.storage,
+		TorrentImpl: f.t.Storage(),
 		offset:      f.Offset(),
 		length:      f.Length(),
 	}

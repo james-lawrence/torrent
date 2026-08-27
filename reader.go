@@ -25,10 +25,13 @@ type blockingreader struct {
 	closed *atomic.Bool
 }
 
+// Close marks this reader closed, unblocking any of its in-flight reads with
+// io.ErrClosedPipe. It does not close the underlying storage, which is owned
+// by the torrent and may still be in use by other readers or downloads.
 func (t *blockingreader) Close() error {
 	defer t.c.cond.Broadcast()
 	t.closed.Store(true)
-	return t.TorrentImpl.Close()
+	return nil
 }
 
 func (t *blockingreader) ReadAt(p []byte, offset int64) (n int, err error) {
@@ -40,17 +43,18 @@ func (t *blockingreader) ReadAt(p []byte, offset int64) (n int, err error) {
 	pid := uint64(t.c.meta.OffsetToIndex(offset))
 
 	t.c.cond.L.Lock()
+	defer t.c.cond.L.Unlock()
 	for allowed = t.c.DataAvailableForOffset(offset); allowed < 0; allowed = t.c.DataAvailableForOffset(offset) {
+		if t.closed.Load() {
+			return 0, io.ErrClosedPipe
+		}
+
 		if t.c.ChunksAvailable(pid) && onceb.CompareAndSwap(true, false) {
 			t.d.Enqueue(pid)
 		}
 
 		t.c.cond.Wait()
-		if t.closed.Load() {
-			return 0, io.ErrClosedPipe
-		}
 	}
-	t.c.cond.L.Unlock()
 
 	allowed = min(allowed, int64(len(p)))
 	return t.TorrentImpl.ReadAt(p[:allowed], offset)
@@ -83,10 +87,19 @@ type reader struct {
 var _ io.ReadCloser = &reader{}
 
 func (r *reader) Read(b []byte) (n int, err error) {
-	// log.Println("read initiated", r.pos, r.length)
-	n, err = r.ReadAt(b, r.pos)
-	atomic.AddInt64(&r.pos, int64(n)) // npos
-	// log.Println("read completed", npos, r.length)
+	pos := atomic.LoadInt64(&r.pos)
+
+	remaining := r.length - pos
+	if remaining <= 0 {
+		return 0, io.EOF
+	}
+
+	if int64(len(b)) > remaining {
+		b = b[:remaining]
+	}
+
+	n, err = r.TorrentImpl.ReadAt(b, r.offset+pos)
+	atomic.AddInt64(&r.pos, int64(n))
 	return n, err
 }
 
