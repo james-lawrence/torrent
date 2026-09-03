@@ -11,7 +11,10 @@ import (
 	"github.com/james-lawrence/torrent/bencode"
 	pp "github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/internal/cryptox"
 	"github.com/james-lawrence/torrent/internal/testutil"
+	"github.com/james-lawrence/torrent/metainfo"
+	"github.com/james-lawrence/torrent/torrenttest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -86,6 +89,26 @@ func TestSetChunkSizeRace(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+// TestBytesLeftLastPieceShorterThanNominal exercises a torrent whose only
+// piece is shorter than the nominal piece length (the common case for small
+// torrents, where PieceLength is chosen independent of TotalLength).
+// bytesLeft/bytesCompleted must account for each piece's real length rather
+// than assuming every completed piece is exactly PieceLength bytes.
+func TestBytesLeftLastPieceShorterThanNominal(t *testing.T) {
+	info, _, err := torrenttest.Seeded(t.TempDir(), 100, cryptox.NewChaCha8(t.Name()), metainfo.OptionPieceLength(1024))
+	require.NoError(t, err)
+
+	tor := &torrent{info: info, chunks: newChunks(defaultChunkSize, info)}
+	require.EqualValues(t, 1, tor.chunks.pieces, "sanity: total length below piece length means a single piece")
+
+	require.EqualValues(t, 100, tor.bytesLeft(), "nothing completed yet: everything is left")
+
+	tor.chunks.Complete(0)
+
+	require.EqualValues(t, 0, tor.bytesLeft(), "the only piece is complete: nothing should be left, regardless of nominal piece length")
+	require.EqualValues(t, 100, tor.bytesCompleted())
 }
 
 // // This benchmark is from the observation that a lot of overlapping Readers on

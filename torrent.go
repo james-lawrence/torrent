@@ -1045,7 +1045,14 @@ func (t *torrent) bytesLeft() (left int64) {
 
 	s := t.chunks.Snapshot(&Stats{})
 
-	return t.info.TotalLength() - ((int64(s.Unverified) * int64(t.chunks.clength)) + (int64(s.Completed) * int64(t.info.PieceLength)))
+	// every completed piece is assumed to be a full PieceLength, except the
+	// last piece of the torrent, which is frequently shorter.
+	completed := int64(s.Completed) * int64(t.info.PieceLength)
+	if pieces := t.chunks.pieces; pieces > 0 && t.chunks.ChunksComplete(pieces-1) {
+		completed -= int64(t.info.PieceLength) - int64(t.pieceLength(pieces-1))
+	}
+
+	return t.info.TotalLength() - ((int64(s.Unverified) * int64(t.chunks.clength)) + completed)
 }
 
 func (t *torrent) usualPieceSize() int {
