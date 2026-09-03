@@ -742,17 +742,18 @@ func (t *chunks) Validate(pid uint64) {
 	t.unverified.AddRange(t.Range(pid))
 }
 
-func (t *chunks) Hashed(pid uint64, cause error) {
+func (t *chunks) Hashed(pid uint64, cause error) (completed bool) {
 	if t == nil {
 		panic("chunks should never be nil for hashed function call")
 	}
 
 	if cause == nil {
-		t.Complete(pid)
-		return
+		return t.Complete(pid)
 	}
 
 	t.ChunksFailed(pid)
+
+	return false
 }
 
 func (t *chunks) Complete(pid uint64) (changed bool) {
@@ -769,13 +770,11 @@ func (t *chunks) Complete(pid uint64) (changed bool) {
 		cidx := t.requestCID(r)
 		delete(t.outstanding, r.Digest)
 
-		tmp := t.missing.CheckedRemove(uint32(cidx))
-		tmp = tmp || t.unverified.CheckedRemove(uint32(cidx))
-		changed = changed || tmp
+		t.missing.Remove(uint32(cidx))
+		t.unverified.Remove(uint32(cidx))
 	}
 
-	t.completed.AddInt(int(pid))
-	return changed
+	return t.completed.CheckedAdd(uint32(pid))
 }
 
 // Failed returns the union of the current failures and the provided completed mapping.

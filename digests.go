@@ -22,9 +22,8 @@ func newDigestsFromTorrent(t *torrent) digests {
 		func(idx int, cause error) func() {
 			// log.Printf("hashed %d - %v\n", idx, cause)
 			// log.Printf("hashed %p %d / %d - %v", t.chunks, idx+1, t.chunks.pieces, cause)
-			t.chunks.Hashed(uint64(idx), cause)
 
-			if cause == nil {
+			if t.chunks.Hashed(uint64(idx), cause) {
 				if p := t.piece(idx); p != nil {
 					n := p.Length()
 					t.stats.BytesValidated.Add(n)

@@ -63,4 +63,13 @@ func TestDigestFailureDoesNotInflateBytesValidated(t *testing.T) {
 	tt.digests.Enqueue(0)
 	tt.digests.Wait()
 	require.Equal(t, tt.info.Piece(0).Length(), tt.stats.BytesValidated.Int64(), "a successful digest must count exactly the piece's real length, once")
+
+	// a piece can legitimately be digest-checked more than once for the same
+	// completed data - e.g. BitTorrent endgame mode racing two peer
+	// connections to deliver the same last chunk can enqueue the same piece
+	// index twice. a redundant re-check of already-complete data must not
+	// double-count BytesValidated.
+	tt.digests.Enqueue(0)
+	tt.digests.Wait()
+	require.Equal(t, tt.info.Piece(0).Length(), tt.stats.BytesValidated.Int64(), "re-checking an already-complete piece must not double-count BytesValidated")
 }

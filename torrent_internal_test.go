@@ -78,11 +78,11 @@ func TestSetChunkSizeRace(t *testing.T) {
 		}
 	}()
 
-	for pid := uint64(0); pid < pieces; pid++ {
+	for pid := range pieces {
 		wg.Add(1)
 		go func(pid uint64) {
 			defer wg.Done()
-			for i := 0; i < 100; i++ {
+			for range 100 {
 				tor.chunks.Complete(pid)
 			}
 		}(pid)
