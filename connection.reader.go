@@ -290,10 +290,6 @@ func (t _connreaderClosed) Update(ctx context.Context, _ *cstate.Shared) (r csta
 }
 
 func connreaderidle(ws *readerstate) cstate.T {
-	if ws.needsresponse.CompareAndSwap(true, false) {
-		return connreaderactive(ws)
-	}
-
 	now := time.Now()
 	keepalive := now.Add(ws.keepAliveTimeout / 2)
 
@@ -302,7 +298,14 @@ func connreaderidle(ws *readerstate) cstate.T {
 		langx.Zero(ws.uploadavailable.Load()),
 	))
 
+	// A pending peer request (needsresponse) must not bypass an
+	// already-computed, not-yet-elapsed upload rate-limit backoff
+	// (uploadavailable) - otherwise an eager peer that keeps sending
+	// requests can perpetually force us straight back into upload(),
+	// starving our own rate limiter of the uninterrupted time it needs to
+	// actually refill and never let a chunk send succeed.
 	if mind <= 0 {
+		ws.needsresponse.CompareAndSwap(true, false)
 		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle uploads(%t) pending(%d) - %s\n", ws.connection, ws.t.seeding(), !ws.Choked, len(ws.PeerRequests), mind)
 		return connreaderactive(ws)
 	}
