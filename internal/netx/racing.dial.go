@@ -22,11 +22,18 @@ func NewRacing(n uint16) *RacingDialer {
 
 			c, err := w.network.Dial(dctx, w.address)
 			if err == nil {
-				select {
-				case <-ctx.Done():
-					errorsx.Log(c.Close())
-				case w.fastest <- c:
+				// fastest is buffered (cap 1) and only ever drained once by
+				// Dial, so a losing racer that completes after the winner
+				// has already been consumed can still find the buffer
+				// empty and race a select on <-ctx.Done() vs w.fastest<-c -
+				// Go picks pseudo-randomly between ready cases, so without
+				// this CAS a losing connection can silently land in the
+				// buffer instead of being closed, leaking it.
+				if w.claimed.CompareAndSwap(false, true) {
+					w.fastest <- c
 					w.done(nil)
+				} else {
+					errorsx.Log(c.Close())
 				}
 
 				if w.outstanding.Add(^uint32(0)) == 0 {
@@ -60,6 +67,7 @@ func initRacingDial(address string, d time.Duration, n uint64, done context.Canc
 		failure:     atomicx.Pointer[error](nil),
 		done:        done,
 		outstanding: atomicx.Uint32(n),
+		claimed:     atomicx.Bool(false),
 	}
 }
 
@@ -71,6 +79,7 @@ type racingdialworkload struct {
 	failure     *atomic.Pointer[error]
 	fastest     chan net.Conn
 	outstanding *atomic.Uint32
+	claimed     *atomic.Bool
 }
 
 type RacingDialer struct {

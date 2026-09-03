@@ -3,12 +3,23 @@ package netx
 import (
 	"context"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/stretchr/testify/require"
 )
+
+type closeTrackingConn struct {
+	net.Conn
+	closed atomic.Bool
+}
+
+func (c *closeTrackingConn) Close() error {
+	c.closed.Store(true)
+	return nil
+}
 
 func TestRacingDialer_Dial(t *testing.T) {
 	t.Run("immediate success from first network wins", func(t *testing.T) {
@@ -119,6 +130,42 @@ func TestRacingDialer_Dial(t *testing.T) {
 		conn, err := dialer.Dial(ctx, timeout, address, stallingNetwork, stallingNetwork)
 		require.Nil(t, conn)
 		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("losing racer's connection is closed instead of leaked", func(t *testing.T) {
+		// fastest is a buffered channel (cap 1) drained exactly once by
+		// Dial. A racer that succeeds after the winner has already been
+		// consumed finds that buffer empty again, so without a winner-take-
+		// all guard, select{case <-ctx.Done(): ...; case w.fastest<-c: ...}
+		// can still pick the send (Go chooses pseudo-randomly among ready
+		// cases), silently leaking the losing connection into a channel
+		// nobody reads from again instead of closing it. Repeat enough
+		// times that the old, racy code fails reliably.
+		for i := 0; i < 50; i++ {
+			dialer := NewRacing(10)
+			timeout := 200 * time.Millisecond
+
+			winner := &closeTrackingConn{}
+			loser := &closeTrackingConn{}
+
+			winnerNetwork := DialerFn(func(ctx context.Context, addr string) (net.Conn, error) {
+				return winner, nil
+			})
+
+			loserNetwork := DialerFn(func(ctx context.Context, addr string) (net.Conn, error) {
+				// let the winner get consumed by Dial first, then complete
+				// - simulating a slower transport that still succeeds after
+				// losing the race.
+				time.Sleep(20 * time.Millisecond)
+				return loser, nil
+			})
+
+			conn, err := dialer.Dial(t.Context(), timeout, "addr", winnerNetwork, loserNetwork)
+			require.NoError(t, err)
+			require.Same(t, net.Conn(winner), conn)
+
+			require.Eventually(t, func() bool { return loser.closed.Load() }, time.Second, time.Millisecond, "losing racer's connection must be closed, not leaked")
+		}
 	})
 
 	t.Run("no networks provided", func(t *testing.T) {
