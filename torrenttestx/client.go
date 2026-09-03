@@ -17,6 +17,38 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// bindMatchingTCP binds a TCP listener on the same port number as the
+// already-bound uTP socket u. There's no atomicity between the two binds -
+// the uTP socket's ephemeral port can be reused by another process/goroutine
+// (e.g. a just-finished test iteration's lingering listener) between when
+// the OS assigns it and when we try to claim the matching TCP port - so this
+// retries on a bind failure with a fresh uTP+TCP pair rather than failing
+// (or, if the race resolves silently instead of erroring, wiring up peers
+// that never actually exchange data) outright.
+func bindMatchingTCP(t *testing.T) (utpx.Socket, net.Listener) {
+	const maxattempts = 10
+
+	for attempt := 1; ; attempt++ {
+		u, err := utpx.New("udp4", "localhost:")
+		require.NoError(t, err)
+
+		addr, ok := u.Addr().(*net.UDPAddr)
+		if !ok {
+			return u, nil
+		}
+
+		l, err := net.Listen("tcp4", fmt.Sprintf("localhost:%d", addr.Port))
+		if err == nil {
+			return u, l
+		}
+
+		u.Close()
+		if attempt == maxattempts {
+			require.NoError(t, err)
+		}
+	}
+}
+
 func Autosocket(t *testing.T) torrent.Binder {
 	var (
 		bindings []sockets.Socket
@@ -24,14 +56,10 @@ func Autosocket(t *testing.T) torrent.Binder {
 	_dht, err := dht.NewServer(32)
 	require.NoError(t, err)
 
-	s, err := utpx.New("udp4", "localhost:")
-	require.NoError(t, err)
-	bindings = append(bindings, sockets.New(s, s))
-
-	if addr, ok := s.Addr().(*net.UDPAddr); ok {
-		s, err := net.Listen("tcp4", fmt.Sprintf("localhost:%d", addr.Port))
-		require.NoError(t, err)
-		bindings = append(bindings, sockets.New(s, &net.Dialer{}))
+	u, l := bindMatchingTCP(t)
+	bindings = append(bindings, sockets.New(u, u))
+	if l != nil {
+		bindings = append(bindings, sockets.New(l, &net.Dialer{}))
 	}
 
 	return torrent.NewSocketsBind(bindings...).Options(
