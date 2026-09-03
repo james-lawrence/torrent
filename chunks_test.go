@@ -13,6 +13,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/cryptox"
 	"github.com/james-lawrence/torrent/internal/testutil"
 	"github.com/james-lawrence/torrent/metainfo"
+	"github.com/james-lawrence/torrent/torrenttest"
 )
 
 // returns a 16KiB torrent with 1 KiB pieces.
@@ -342,6 +343,27 @@ func TestChunksFailed(t *testing.T) {
 	union := c.Failed(touched)
 	assert.Equal(t, uint64(len(reqs)), union.GetCardinality())
 	assert.Equal(t, uint64(0), c.failed.GetCardinality())
+}
+
+func TestChunksFailedThenRetryClearsUnverified(t *testing.T) {
+	info, _, err := torrenttest.Seeded(t.TempDir(), 13, cryptox.NewChaCha8(t.Name()), metainfo.OptionPieceLength(5))
+	require.NoError(t, err)
+
+	c := quickpopulate(newChunks(1, info))
+
+	reqs, err := c.Pop(5, c.missing.Clone())
+	require.NoError(t, err)
+	for _, r := range reqs {
+		require.NoError(t, c.Verify(r))
+	}
+	require.True(t, c.Available(reqs[0]), "sanity: piece 0 should be provisionally available after Verify")
+
+	c.ChunksFailed(0)
+	require.False(t, c.Available(reqs[0]), "a chunk from a failed piece must not be reported as already-available")
+	require.False(t, c.ChunksReadable(0), "a failed piece must not be reported as readable")
+
+	c.ChunksRetry(0)
+	require.False(t, c.Available(reqs[0]), "retry must not leave the chunk misclassified as available")
 }
 
 func TestChunksPop(t *testing.T) {

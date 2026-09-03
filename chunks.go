@@ -575,6 +575,7 @@ func (t *chunks) retry(r request) {
 	cidx := t.requestCID(r)
 
 	delete(t.outstanding, r.Digest)
+	t.unverified.Remove(uint32(cidx))
 	t.missing.AddInt(cidx)
 
 }
@@ -807,7 +808,10 @@ func (t *chunks) ChunksFailed(pid uint64) {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.failed.AddRange(t.Range(pid))
+
+	min, max := t.Range(pid)
+	t.unverified.RemoveRange(min, max)
+	t.failed.AddRange(min, max)
 }
 
 func (t *chunks) String() string {

@@ -73,7 +73,7 @@ func TrackerEvent(ctx context.Context, l Torrent, announceuri string, options ..
 		port,
 		infoid,
 		tracker.AnnounceOptionKey,
-		tracker.AnnounceOptionDownloaded(s.BytesReadUsefulData.Int64()),
+		tracker.AnnounceOptionDownloaded(s.BytesValidated.Int64()),
 		tracker.AnnounceOptionUploaded(s.BytesWrittenData.n),
 		tracker.AnnounceOptionRemaining(remaining),
 		langx.Compose(options...),

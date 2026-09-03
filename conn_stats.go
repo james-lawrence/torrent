@@ -25,6 +25,12 @@ type ConnStats struct {
 	BytesReadData       count
 	BytesReadUsefulData count
 
+	// Bytes confirmed via successful piece hash verification. Unlike
+	// BytesReadUsefulData (credited optimistically on receipt, before
+	// verification), this only increases once a piece's SHA1 matches - it is
+	// the value reported to trackers as BEP3 "downloaded".
+	BytesValidated count
+
 	ChunksWritten count
 
 	ChunksRead       count

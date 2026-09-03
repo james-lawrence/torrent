@@ -17,6 +17,8 @@ import (
 )
 
 // Greeting torrent
+//
+// Deprecated: dead code, use torrenttest.Seeded/Random/Tree instead.
 var Greeting = Torrent{
 	Files: []File{{
 		Data: GreetingFileContents,
@@ -25,12 +27,16 @@ var Greeting = Torrent{
 }
 
 // various constants.
+//
+// Deprecated: dead code, use torrenttest.Seeded/Random/Tree instead.
 const (
 	GreetingFileContents = "hello, world\n"
 	GreetingFileName     = "greeting"
 )
 
 // CreateDummyTorrentData in the given directory.
+//
+// Deprecated: dead code, use torrenttest.Seeded/Random/Tree instead.
 func CreateDummyTorrentData(dirName string) string {
 	f, err := os.Create(filepath.Join(dirName))
 	errorsx.Panic(err)
@@ -42,12 +48,16 @@ func CreateDummyTorrentData(dirName string) string {
 }
 
 // GreetingMetaInfo ...
+//
+// Deprecated: dead code, use torrenttest.Seeded/Random/Tree instead.
 func GreetingMetaInfo() *metainfo.MetaInfo {
 	return Greeting.Metainfo(5)
 }
 
 // GreetingTestTorrent a temporary directory containing the completed "greeting" torrent,
 // and a corresponding metainfo describing it.
+//
+// Deprecated: dead code, use torrenttest.Seeded/Random/Tree instead.
 func GreetingTestTorrent(dir string) (metaInfo *metainfo.MetaInfo) {
 	info := GreetingMetaInfo()
 	dst := filepath.Join(dir, info.HashInfoBytes().String())
