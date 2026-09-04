@@ -19,7 +19,6 @@ import (
 	"github.com/RoaringBitmap/roaring/v2"
 	"github.com/anacrolix/missinggo/pubsub"
 	"github.com/anacrolix/missinggo/slices"
-	"github.com/james-lawrence/torrent/bep0009"
 	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/atomicx"
@@ -48,11 +47,11 @@ func TuneNoop(t *torrent) error {
 // TuneMaxConnections adjust the maximum connections allowed for a torrent.
 func TuneMaxConnections(max int) Tuner {
 	return func(t *torrent) error {
-		t.maxEstablishedConns = max
+		t.maxEstablishedConns.Store(int32(max))
 
 		cset := t.conns.list()
 		wcs := slices.HeapInterface(cset, worseConn)
-		for drop := len(cset) - t.maxEstablishedConns; drop > -1 && wcs.Len() > 0; drop-- {
+		for drop := len(cset) - max; drop > -1 && wcs.Len() > 0; drop-- {
 			t.cln.config.debug().Println("dropping connection", drop, wcs.Len())
 			t.dropConnection(wcs.Pop().(*connection))
 			t.cln.config.debug().Println("dropped connection", drop, wcs.Len())
@@ -353,7 +352,7 @@ func TuneVerifySample(n uint64) Tuner {
 		t.digests.Wait()
 
 		// if everything validated assume the torrent is good and mark it as fully complete.
-		if t.chunks.failed.IsEmpty() {
+		if t.chunks.FailedEmpty() {
 			t.chunks.fill(t.chunks.completed, t.chunks.pieces)
 			t.chunks.zero(t.chunks.unverified)
 			t.chunks.zero(t.chunks.missing)
@@ -524,7 +523,7 @@ func zeroTorrent(md Metadata, options ...Tuner) *torrent {
 		}),
 		conns:                   newconnset(2 * defaultMaxEstablishedConns),
 		pieceStateChanges:       pubsub.NewPubSub(),
-		maxEstablishedConns:     defaultMaxEstablishedConns,
+		maxEstablishedConns:     atomicx.Int32(defaultMaxEstablishedConns),
 		duplicateRequestTimeout: time.Second,
 		pex:                     newPex(),
 		storage:                 storage.NewZero(),
@@ -555,7 +554,7 @@ func newTorrent(cl *Client, src Metadata, options ...Tuner) *torrent {
 		conns:                   newconnset(2 * defaultMaxEstablishedConns),
 		pieceStateChanges:       pubsub.NewPubSub(),
 		storageOpener:           storage.NewClient(langx.DefaultIfZero(cl.config.defaultStorage, src.Storage)),
-		maxEstablishedConns:     defaultMaxEstablishedConns,
+		maxEstablishedConns:     atomicx.Int32(defaultMaxEstablishedConns),
 		duplicateRequestTimeout: time.Second,
 		chunks:                  newChunks(langx.DefaultIfZero(defaultChunkSize, src.ChunkSize), metainfo.NewInfo(), chunkoptCond(chunkcond)),
 		pex:                     newPex(),
@@ -669,7 +668,12 @@ type torrent struct {
 	// open (not-closed) connections only.
 	conns *conns
 
-	maxEstablishedConns int
+	// maxEstablishedConns is read from every connection-setup goroutine
+	// (addConnection) and written from TuneMaxConnections, which runs on
+	// whatever arbitrary goroutine calls Tune - atomic rather than a plain
+	// int guarded by t._mu, since none of TuneMaxConnections/addConnection
+	// otherwise touch that lock.
+	maxEstablishedConns *atomic.Int32
 
 	// Reserve of peers to connect to. A peer can be both here and in the
 	// active connections if we're told about the peer after connecting with
@@ -994,25 +998,21 @@ func (t *torrent) setMetadataSize(bytes int) (err error) {
 
 	if t.haveInfo() {
 		// We already know the correct metadata size.
-		return err
+		return nil
 	}
 
-	if bytes <= 0 || bytes > 10*bytesx.MiB { // 10MB, pulled from my ass.
+	if bytes <= 0 || bytes > 16*bytesx.MiB { // arbitrary limit
 		return errorsx.New("bad size")
 	}
 
 	if t.metadataBytes != nil && len(t.metadataBytes) == int(bytes) {
-		return err
+		return nil
 	}
 
 	t.metadataBytes = make([]byte, bytes)
 	t.metadataCompletedChunks = make([]bool, (bytes+(1<<14)-1)/(1<<14))
 
-	for _, c := range t.conns.list() {
-		c.requestPendingMetadata()
-	}
-
-	return err
+	return nil
 }
 
 func (t *torrent) metadataPieceSize(piece int) int {
@@ -1133,7 +1133,7 @@ func (t *torrent) worstBadConn() *connection {
 		}
 		// If the connection is in the worst half of the established
 		// connection quota and is older than a minute.
-		if wcs.Len() >= (t.maxEstablishedConns+1)/2 {
+		if wcs.Len() >= (int(t.maxEstablishedConns.Load())+1)/2 {
 			// Give connections 1 minute to prove themselves.
 			if time.Since(c.completedHandshake) > time.Minute {
 				return c
@@ -1400,7 +1400,7 @@ func (t *torrent) statsLocked() (ret Stats) {
 	ret.Seeding = t.seeding()
 	ret.ActivePeers = len(conns)
 	ret.Seeders = slicesx.Reduce(0, func(sum int, c *connection) int {
-		if c.peerSentHaveAll {
+		if c.peerSentHaveAll.Load() {
 			return sum + 1
 		}
 		return sum
@@ -1413,7 +1413,7 @@ func (t *torrent) statsLocked() (ret Stats) {
 	// TODO: these can be moved to the connections directly.
 	// moving it will reduce the need to iterate the connections
 	// to compute the stats.
-	ret.MaximumAllowedPeers = t.maxEstablishedConns
+	ret.MaximumAllowedPeers = int(t.maxEstablishedConns.Load())
 
 	ret.TotalPeers = t.numTotalPeers()
 
@@ -1490,10 +1490,10 @@ func (t *torrent) addConnection(c *connection) (err error) {
 		}
 	}
 
-	if tot := t.conns.length(); tot >= t.maxEstablishedConns {
+	if tot, max := t.conns.length(), int(t.maxEstablishedConns.Load()); tot >= max {
 		c := t.worstBadConn()
 		if c == nil {
-			return errorsx.Errorf("don't want conns %d >= %d", tot, t.maxEstablishedConns)
+			return errorsx.Errorf("don't want conns %d >= %d", tot, max)
 		}
 
 		dropping = append(dropping, c)
@@ -1528,7 +1528,7 @@ func (t *torrent) wantConns() bool {
 		return false
 	}
 
-	if t.conns.length() >= t.maxEstablishedConns {
+	if t.conns.length() >= int(t.maxEstablishedConns.Load()) {
 		return false
 	}
 
@@ -1685,49 +1685,4 @@ func (t *torrent) ping(addr net.UDPAddr) {
 			t.cln.config.debug().Println("failed to ping address", ret.Err)
 		}
 	}()
-}
-
-// Process incoming ut_metadata message.
-func (t *torrent) gotMetadataExtensionMsg(payload []byte, c *connection) error {
-	var d bep0009.MetadataResponse
-	err := bencode.Unmarshal(payload, &d)
-	if _, ok := err.(bencode.ErrUnusedTrailingBytes); ok {
-	} else if err != nil {
-		return fmt.Errorf("error unmarshalling bencode: %s", err)
-	}
-
-	switch d.Type {
-	case btprotocol.RequestMetadataExtensionMsgType:
-		// log.Printf("c(%p) seed(%t) SENDING METADATA %s\n", c, t.seeding(), spew.Sdump(d))
-		if !t.haveMetadataPiece(d.Index) {
-			c.Post(t.newMetadataExtensionMessage(c, btprotocol.RejectMetadataExtensionMsgType, d.Index, nil))
-			return nil
-		}
-		start := 16 * bytesx.KiB * d.Index
-		end := start + t.metadataPieceSize(d.Index)
-		c.Post(t.newMetadataExtensionMessage(c, btprotocol.DataMetadataExtensionMsgType, d.Index, t.metadataBytes[start:end]))
-		return nil
-	case btprotocol.DataMetadataExtensionMsgType:
-		// log.Printf("c(%p) seed(%t) RECEIVED METADATA %s\n", c, t.seeding(), spew.Sdump(d))
-		c.allStats(add(1, func(cs *ConnStats) *count { return &cs.MetadataChunksRead }))
-		if !c.requestedMetadataPiece(d.Index) {
-			return fmt.Errorf("got unexpected piece %d", d.Index)
-		}
-		c.metadataRequests[d.Index] = false
-		begin := len(payload) - metadataPieceSize(d.Total, d.Index)
-		if begin < 0 || begin >= len(payload) {
-			return fmt.Errorf("data has bad offset in payload: %d", begin)
-		}
-
-		// log.Printf("c(%p) seed(%t) METADATA SAVE INITIATED %s\n", c, t.seeding(), spew.Sdump(d))
-		// defer log.Printf("c(%p) seed(%t) METADATA SAVED %s\n", c, t.seeding(), spew.Sdump(d))
-
-		t.saveMetadataPiece(d.Index, payload[begin:])
-		c.lastUsefulChunkReceived = time.Now()
-		return t.maybeCompleteMetadata(c)
-	case btprotocol.RejectMetadataExtensionMsgType:
-		return nil
-	default:
-		return errorsx.New("unknown msg_type value")
-	}
 }

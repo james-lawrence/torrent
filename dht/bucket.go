@@ -2,7 +2,6 @@ package dht
 
 import (
 	"iter"
-	"maps"
 	"sync"
 	"time"
 
@@ -25,15 +24,15 @@ func (b *bucket) Len() int {
 }
 
 func (b *bucket) NodeIter() iter.Seq[*node] {
+	b._m.RLock()
+	nodes := make([]*node, 0, len(b.nodes))
+	for n := range b.nodes {
+		nodes = append(nodes, n)
+	}
+	b._m.RUnlock()
+
 	return func(yield func(*node) bool) {
-		next, stop := iter.Pull(maps.Keys(b.nodes))
-		defer stop()
-		_next := func() (*node, bool) {
-			b._m.RLock()
-			defer b._m.RUnlock()
-			return next()
-		}
-		for n, ok := _next(); ok; n, ok = _next() {
+		for _, n := range nodes {
 			if !yield(n) {
 				return
 			}
@@ -43,17 +42,12 @@ func (b *bucket) NodeIter() iter.Seq[*node] {
 
 // Returns true if f returns true for all nodes. Iteration stops if f returns false.
 func (b *bucket) EachNode(f func(*node) bool) bool {
-	next, stop := iter.Pull(b.NodeIter())
-	defer stop()
-	for {
-		v, ok := next()
-		if !ok {
-			return true
-		}
-		if !f(v) {
+	for n := range b.NodeIter() {
+		if !f(n) {
 			return false
 		}
 	}
+	return true
 }
 
 func (b *bucket) AddNode(n *node, k int) {

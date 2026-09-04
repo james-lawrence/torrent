@@ -18,6 +18,12 @@ func Uint32[T constraints.Integer](n T) (r *atomic.Uint32) {
 	return r
 }
 
+func Int32[T constraints.Integer](n T) (r *atomic.Int32) {
+	r = &atomic.Int32{}
+	r.Store(int32(n))
+	return r
+}
+
 func Bool(n bool) (r *atomic.Bool) {
 	r = &atomic.Bool{}
 	r.Store(n)

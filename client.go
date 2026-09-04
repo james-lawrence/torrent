@@ -265,7 +265,7 @@ func (cl *Client) BindDHT(d *dht.Server, s sockets.Socket) (err error) {
 		return nil
 	}
 
-	cl.config.debug().Printf("binding dht server to client %p - %v\n", d, pc.LocalAddr)
+	cl.config.debug().Printf("binding dht server to client %p - %v\n", d, pc.LocalAddr())
 	cl.lock()
 	// the check above isnt entirely sufficient to prevent changing the dht.
 	// take the first non-nil of the the two once the lock is acquired.

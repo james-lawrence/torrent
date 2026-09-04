@@ -606,6 +606,13 @@ func (t *chunks) Cardinality(a *roaring.Bitmap) int {
 	return int(a.GetCardinality())
 }
 
+// FailedEmpty reports whether there are currently no known failed chunks.
+func (t *chunks) FailedEmpty() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.failed.IsEmpty()
+}
+
 // returns number of pieces that are readable.
 func (t *chunks) Readable() uint64 {
 	t.mu.RLock()

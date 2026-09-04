@@ -1,13 +1,10 @@
 package torrent
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"iter"
-	"log"
-	"math/rand"
 	"net"
 	"net/netip"
 	"os"
@@ -20,7 +17,6 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/james-lawrence/torrent/bep0006"
 	"github.com/james-lawrence/torrent/bep0009"
-	"github.com/james-lawrence/torrent/connections"
 	"github.com/james-lawrence/torrent/dht/int160"
 
 	"github.com/RoaringBitmap/roaring/v2"
@@ -58,26 +54,19 @@ func newConnection(cfg *ClientConfig, nc net.Conn, outgoing bool, remote netip.A
 		request:                 sync.NewCond(_mu),
 		conn:                    nc,
 		outgoing:                outgoing,
-		Choked:                  true,
-		PeerChoked:              true,
-		PeerMaxRequests:         cfg.maximumOutstandingRequests,
-		PendingMaxRequests:      cfg.maximumOutstandingRequests,
-		currentbuffer:           new(bytes.Buffer),
+		Choked:                  atomicx.Bool(true),
 		remoteAddr:              remote,
 		localport:               localport,
 		connaddr:                connaddr,
-		touched:                 roaring.NewBitmap(),
 		peerfastset:             roaring.NewBitmap(),
-		fastset:                 roaring.NewBitmap(),
 		claimed:                 roaring.NewBitmap(),
 		sentHaves:               roaring.NewBitmap(),
-		requests:                make(map[uint64]request, cfg.maximumOutstandingRequests),
 		PeerRequests:            make(map[request]struct{}, cfg.maximumOutstandingRequests),
 		PeerExtensionIDs:        make(map[pp.ExtensionName]pp.ExtensionNumber),
 		refreshrequestable:      atomicx.Pointer(timex.Inf()),
 		lastMessageReceived:     atomicx.Pointer(ts),
 		lastRejectReceived:      atomicx.Pointer(ts),
-		lastUsefulChunkReceived: ts,
+		lastUsefulChunkReceived: atomicx.Pointer(ts),
 		extensions:              extensions,
 		cfg:                     cfg,
 		r:                       nc,
@@ -125,10 +114,14 @@ type connection struct {
 	lastMessageReceived *atomic.Pointer[time.Time]
 	lastRejectReceived  *atomic.Pointer[time.Time]
 
-	chunksRejected          atomic.Int32
-	chunksReceived          atomic.Int32
-	completedHandshake      time.Time
-	lastUsefulChunkReceived time.Time
+	chunksRejected     atomic.Int32
+	chunksReceived     atomic.Int32
+	completedHandshake time.Time
+	// lastUsefulChunkReceived is written from mainReadLoop and read from the
+	// writer goroutine plus torrent-level connection ranking (worst_conns.go)
+	// - time.Time is a multi-field struct, so an unsynchronized write racing
+	// a read here is a real torn-read hazard, not just a detector nicety.
+	lastUsefulChunkReceived *atomic.Pointer[time.Time]
 	lastChunkSent           time.Time
 
 	// Stuff controlled by the local peer.
@@ -136,13 +129,20 @@ type connection struct {
 	lastBecameInterested time.Time
 	priorInterest        time.Duration
 
-	Choked   bool // we have prevented the peer from making requests
-	requests map[uint64]request
+	Choked *atomic.Bool // we have prevented the peer from making requests
+	// requests (the requests we've made of the peer) lives on *writerstate,
+	// guarded by its own mutex (writerstate.mu / mutate / view) - mainReadLoop
+	// writes to it via ws.mutate. requestcount mirrors its length atomically
+	// so any goroutine can read the count cheaply without taking that lock.
+	requestcount atomic.Int32
 
-	// Indexed by metadata piece, set to true if posted and pending a
-	// response.
-	metadataRequests []bool
-	sentHaves        *roaring.Bitmap
+	// sentHaves is exclusively writer-owned: set once during the pre-spawn
+	// handshake (ConnExtensions -> connexfast, which runs synchronously
+	// before the reader/writer goroutines are spawned, so that initial write
+	// happens-before either goroutine starts) and touched only by the writer
+	// goroutine (_connWriterSyncBitfield.Update) after that. Never read or
+	// written by the reader or mainReadLoop goroutines - no lock needed.
+	sentHaves *roaring.Bitmap
 
 	// local information
 	extensions *pp.ExtensionBits
@@ -150,8 +150,7 @@ type connection struct {
 
 	// Stuff controlled by the remote peer.
 	PeerID                int160.T
-	PeerInterested        bool
-	PeerChoked            bool // peer has restricted us from making requests.
+	PeerInterested        atomic.Bool
 	PeerRequests          map[request]struct{}
 	PeerExtensionBytes    pp.ExtensionBits
 	PeerPrefersEncryption bool // as indicated by 'e' field in extension handshake
@@ -165,28 +164,26 @@ type connection struct {
 	// bitmaps representing availability of chunks from the peer.
 	claimed     *roaring.Bitmap // represents chunks which our peer claims to have available.
 	peerfastset *roaring.Bitmap // represents chunks which we allow our peer to request while choked.
-	fastset     *roaring.Bitmap // represents chunks which our peer will allow us to request while choked.
-	// pieces we've accepted chunks for from the peer.
-	touched *roaring.Bitmap
-
-	// The pieces the peer has claimed to have.
-	// peerPieces bitmap.Bitmap
+	// fastset (chunks our peer will allow us to request while choked) and
+	// touched (pieces we've accepted chunks for from the peer) live on
+	// *writerstate, guarded by writerstate.mu - both are written from
+	// mainReadLoop (via ws.mutate) and read by the writer goroutine.
 
 	// The peer has everything. This can occur due to a special message, when
-	// we may not even know the number of pieces in the torrent yet.
-	peerSentHaveAll bool
+	// we may not even know the number of pieces in the torrent yet. Read
+	// from the reader, writer, and mainReadLoop goroutines (and torrent-level
+	// code iterating connections), written from mainReadLoop - atomic.Bool
+	// rather than a plain bool guarded by cn._mu.
+	peerSentHaveAll atomic.Bool
 
 	// The highest possible number of pieces the torrent could have based on
 	// communication with the peer. Generally only useful until we have the
 	// torrent info.
 	peerMinPieces uint64
 
-	PeerMaxRequests    int // Maximum pending requests the peer allows.
-	PendingMaxRequests int // Maximum pending requests the client allows.
-	PeerExtensionIDs   map[pp.ExtensionName]pp.ExtensionNumber
-	PeerClientName     string
+	PeerExtensionIDs map[pp.ExtensionName]pp.ExtensionNumber
+	PeerClientName   string
 
-	currentbuffer *bytes.Buffer
 	upload        *sync.Cond  // used to wake up the connection.reader
 	request       *sync.Cond  // used to wake up the connection.writer
 	needsresponse atomic.Bool // used to track when responses need to be sent that might be missed by the respond condition.
@@ -248,7 +245,7 @@ func (cn *connection) cmu() sync.Locker {
 // invalid, such as by receiving badly sized BITFIELD, or invalid HAVE
 // messages.
 func (cn *connection) resetclaimed() error {
-	if cn.peerSentHaveAll {
+	if cn.peerSentHaveAll.Load() {
 		cn.cmu().Lock()
 		cn.t.chunks.fill(cn.claimed, uint64(cn.t.chunks.cmaximum))
 		cn.cmu().Unlock()
@@ -258,9 +255,24 @@ func (cn *connection) resetclaimed() error {
 		cn.cmu().Unlock()
 	}
 
-	cn.peerfastset = errorsx.Zero(bep0006.AllowedFastSet(cn.remoteAddr.Addr(), cn.t.md.ID, cn.t.chunks.pieces, min(32, cn.t.chunks.pieces)))
+	fastset := errorsx.Zero(bep0006.AllowedFastSet(cn.remoteAddr.Addr(), cn.t.md.ID, cn.t.chunks.pieces, min(32, cn.t.chunks.pieces)))
+	cn.cmu().Lock()
+	cn.peerfastset = fastset
+	cn.cmu().Unlock()
 	cn.peerPiecesChanged()
+
 	return nil
+}
+
+// peerFastSetEmpty reports whether the peer has allowed us to fast-track any
+// chunks while choked. peerfastset is (re)assigned by resetclaimed, which
+// torrent-level code calls across every connection of a torrent whenever new
+// metainfo is set - not necessarily from this connection's own goroutines -
+// so both the assignment and this read must be locked.
+func (cn *connection) peerFastSetEmpty() bool {
+	cn.cmu().Lock()
+	defer cn.cmu().Unlock()
+	return cn.peerfastset.IsEmpty()
 }
 
 func (cn *connection) connectionFlags() (ret string) {
@@ -283,10 +295,15 @@ func (cn *connection) utp() bool {
 	return strings.Contains(cn.network, "udp")
 }
 
+// Close does not itself release outstanding requests back to the chunks
+// pool - requests lives on *writerstate, which Close (callable from any
+// goroutine, sometimes before a writer even exists) has no reliance on.
+// connwriterinit's own cleanup defer already does this unconditionally
+// whenever the writer goroutine exits, which Close triggers via ctx
+// cancellation.
 func (cn *connection) Close() {
 	// cn.cfg.debug().Output(2, fmt.Sprintf("c(%p) seed(%t) Close initiated\n", cn, cn.t.seeding()))
 	// defer cn.cfg.debug().Output(2, fmt.Sprintf("c(%p) seed(%t) Close initiated\n", cn, cn.t.seeding()))
-	defer cn.deleteAllRequests()
 	cn.cmu().Lock()
 	defer cn.cmu().Unlock()
 
@@ -308,74 +325,33 @@ func (cn *connection) Close() {
 }
 
 func (cn *connection) PeerHasPiece(piece uint64) bool {
-	return cn.peerSentHaveAll || bitmapx.Contains(cn.claimed, cn.t.chunks.chunks(piece)...)
-}
-
-// Writes a message into the write buffer.
-func (cn *connection) Post(msg pp.Message) (n int, err error) {
-	// cn.cfg.debug().Output(2, fmt.Sprintf("c(%p) seed(%t) Post initiated: %s\n", cn, cn.t.seeding(), msg.Type))
-
-	encoded, err := msg.MarshalBinary()
-	if err != nil {
-		return n, errorsx.Wrapf(err, "failed to encode message %T", msg)
+	if cn.peerSentHaveAll.Load() {
+		return true
 	}
 
-	n, err = cn.Write(encoded)
-	if err != nil {
-		return n, errorsx.Wrapf(err, "failed to write message into buffer %T", msg)
-	}
-
-	cn.wroteMsg(&msg)
-	cn.updateRequests()
-	return n, nil
-}
-
-func (cn *connection) Write(encoded []byte) (n int, err error) {
 	cn.cmu().Lock()
 	defer cn.cmu().Unlock()
-	return cn.currentbuffer.Write(encoded)
+	return bitmapx.Contains(cn.claimed, cn.t.chunks.chunks(piece)...)
 }
 
-// Writes a message into the write buffer.
-func (cn *connection) PostImmediate(msg pp.Message) (n int, err error) {
-	if _, err := cn.Post(msg); err != nil {
-		return n, err
-	}
-
-	return cn.Flush()
+// peerRequestsLen returns the number of outstanding requests the peer has
+// made of us. PeerRequests is mutated from multiple goroutines (reader,
+// writer, and mainReadLoop), so reading its length must hold the lock same
+// as any other access.
+func (cn *connection) peerRequestsLen() int {
+	cn.cmu().Lock()
+	defer cn.cmu().Unlock()
+	return len(cn.PeerRequests)
 }
 
-func (cn *connection) requestMetadataPiece(index int) {
-	if index < len(cn.metadataRequests) && cn.metadataRequests[index] {
-		return
-	}
-
-	encoded, err := bencode.Marshal(bep0009.MetadataRequest{
-		Type:  pp.RequestMetadataExtensionMsgType,
-		Index: index,
-	})
-	if err != nil {
-		log.Println("able to encoded metadata request", err)
-		return
-	}
-
-	if _, err := cn.Post(pp.NewExtended(cn.extension(pp.ExtensionNameMetadata), encoded)); err != nil {
-		log.Println("able to post metadata request", err)
-		return
-	}
-
-	for index >= len(cn.metadataRequests) {
-		cn.metadataRequests = append(cn.metadataRequests, false)
-	}
-
-	cn.metadataRequests[index] = true
+// requestsLen returns the number of requests we currently have outstanding
+// to the peer. Backed by requestcount rather than the (writer-owned)
+// requests map itself, so it's cheap to read from any goroutine.
+func (cn *connection) requestsLen() int {
+	return int(cn.requestcount.Load())
 }
 
-func (cn *connection) requestedMetadataPiece(index int) bool {
-	return index < len(cn.metadataRequests) && cn.metadataRequests[index]
-}
-
-func (cn *connection) onPeerSentCancel(r request) {
+func (cn *connection) onPeerSentCancel(r request, ws *writerstate) {
 	cn._mu.RLock()
 	_, ok := cn.PeerRequests[r]
 	cn._mu.RUnlock()
@@ -386,7 +362,7 @@ func (cn *connection) onPeerSentCancel(r request) {
 	}
 
 	if cn.supported(pp.ExtensionBitFast) {
-		cn.reject(r)
+		cn.reject(r, ws)
 		return
 	}
 
@@ -395,32 +371,43 @@ func (cn *connection) onPeerSentCancel(r request) {
 	delete(cn.PeerRequests, r)
 }
 
-func (cn *connection) Choke(msg messageWriter) error {
-	if cn.Choked {
+// Choke and Unchoke are called from both the reader (upload error path) and
+// writer (interest/timeout decisions) goroutines, and Choked is read from
+// all three (reader, writer, and mainReadLoop) - hence atomic.Bool rather
+// than a plain bool guarded by cn._mu.
+func (cn *connection) Choke(msg messageWriter, ws *writerstate) error {
+	if !cn.Choked.CompareAndSwap(false, true) {
 		return nil
 	}
 
-	cn.Choked = true
 	if err := msg(pp.NewChoked()); err != nil {
 		return err
 	}
 
 	if cn.supported(pp.ExtensionBitFast) {
+		cn.cmu().Lock()
+		pending := make([]request, 0, len(cn.PeerRequests))
 		for r := range cn.PeerRequests {
-			cn.reject(r)
+			pending = append(pending, r)
+		}
+		cn.cmu().Unlock()
+
+		for _, r := range pending {
+			cn.reject(r, ws)
 		}
 	} else {
+		cn.cmu().Lock()
 		cn.PeerRequests = nil
+		cn.cmu().Unlock()
 	}
 
 	return nil
 }
 
 func (cn *connection) Unchoke(msg func(pp.Message) bool) bool {
-	if !cn.Choked {
+	if !cn.Choked.CompareAndSwap(true, false) {
 		return false
 	}
-	cn.Choked = false
 
 	return !msg(pp.NewUnchoked())
 }
@@ -450,46 +437,6 @@ func (t messageWriter) Deprecated() func(pp.Message) bool {
 	return func(m pp.Message) bool {
 		return t(m) == nil
 	}
-}
-
-// connections check their own failures, this amortizes the cost of failures to
-// the connections themselves instead of bottlenecking at the torrent.
-func (cn *connection) checkFailures() error {
-	if cn.t.chunks.failed.IsEmpty() || cn.touched.IsEmpty() {
-		return nil
-	}
-
-	cn.cmu().Lock()
-	defer cn.cmu().Unlock()
-
-	failed := cn.t.chunks.Failed(cn.touched.Clone())
-
-	for iter, prev, pid := failed.ReverseIterator(), -1, 0; iter.HasNext(); prev = pid {
-		pid = cn.t.chunks.pindex(int(iter.Next()))
-		if pid == prev {
-			continue
-		}
-
-		cn.stats.PiecesDirtiedBad.Add(1)
-		if !cn.t.chunks.ChunksComplete(uint64(pid)) {
-			cn.t.chunks.ChunksRetry(uint64(pid))
-		}
-	}
-
-	if !cn.trusted && cn.stats.PiecesDirtiedBad.Int64() > 10 {
-		return connections.NewBanned(cn.conn, false, errorsx.New("too many bad pieces"))
-	}
-
-	return nil
-}
-
-func (cn *connection) PostBitfield(dup *roaring.Bitmap) (n int, err error) {
-	cn.cfg.debug().Printf("c(%p) seed(%t) calculated bitfield: b(%d)/p(%d)\n", cn, cn.t.seeding(), dup.GetCardinality(), cn.t.chunks.pieces)
-	n, err = cn.Post(pp.NewBitField(cn.t.chunks.pieces, dup))
-	if err != nil {
-		return n, err
-	}
-	return n, nil
 }
 
 func (cn *connection) updateRequests() {
@@ -540,7 +487,7 @@ func (cn *connection) peerSentHave(piece uint64) error {
 }
 
 func (cn *connection) peerSentBitfield(bf []bool) error {
-	cn.peerSentHaveAll = false
+	cn.peerSentHaveAll.Store(false)
 	if len(bf)%8 != 0 {
 		return errorsx.Errorf("expected bitfield length(%d) divisible by 8", len(bf))
 	}
@@ -575,16 +522,16 @@ func (cn *connection) peerSentBitfield(bf []bool) error {
 }
 
 func (cn *connection) onPeerSentHaveAll() {
+	cn.peerSentHaveAll.Store(true)
 	cn.cmu().Lock()
-	cn.peerSentHaveAll = true
 	cn.t.chunks.fill(cn.claimed, uint64(cn.t.chunks.cmaximum))
 	cn.cmu().Unlock()
 	cn.peerPiecesChanged()
 }
 
 func (cn *connection) peerSentHaveNone() error {
+	cn.peerSentHaveAll.Store(false)
 	cn.cmu().Lock()
-	cn.peerSentHaveAll = false
 	cn.claimed.Clear()
 	cn.cmu().Unlock()
 	cn.peerPiecesChanged()
@@ -603,31 +550,13 @@ func (cn *connection) extension(id pp.ExtensionName) pp.ExtensionNumber {
 	return cn.PeerExtensionIDs[id]
 }
 
-func (cn *connection) requestPendingMetadata() {
-	if !cn.extensionEnabled(pp.ExtensionNameMetadata) {
-		cn.cfg.debug().Println("connection doesnt support metadata")
-		return
-	}
-
-	if cn.t.haveInfo() {
-		cn.cfg.debug().Printf("c(%p) seed(%t) metadata ex: ignoring already have torrent\n", cn, cn.t.seeding())
-		return
-	}
-
-	cn.cfg.debug().Printf("%s metadata ext: requesting metadata\n", cn)
-
-	// Request metadata pieces that we don't have in a random order.
-	var pending []int
-	for index := 0; index < cn.t.metadataPieceCount(); index++ {
-		if !cn.t.haveMetadataPiece(index) && !cn.requestedMetadataPiece(index) {
-			pending = append(pending, index)
-		}
-	}
-
-	rand.Shuffle(len(pending), func(i, j int) { pending[i], pending[j] = pending[j], pending[i] })
-	for _, i := range pending {
-		cn.requestMetadataPiece(i)
-	}
+// peerListenPort reads PeerListenPort under cn._mu - pex.snapshot calls this
+// for *other* connections from its own mainReadLoop, not just this
+// connection's own goroutines, so the plain field is not safe to read directly.
+func (cn *connection) peerListenPort() uint16 {
+	cn._mu.RLock()
+	defer cn._mu.RUnlock()
+	return cn.PeerListenPort
 }
 
 func (cn *connection) wroteMsg(msg *pp.Message) {
@@ -676,7 +605,7 @@ func (cn *connection) useful() bool {
 		return cn.extensionEnabled(pp.ExtensionNameMetadata)
 	}
 
-	if t.seeding() && cn.PeerInterested {
+	if t.seeding() && cn.PeerInterested.Load() {
 		return true
 	}
 
@@ -684,7 +613,7 @@ func (cn *connection) useful() bool {
 }
 
 func (cn *connection) lastHelpful() (ret time.Time) {
-	ret = cn.lastUsefulChunkReceived
+	ret = *cn.lastUsefulChunkReceived.Load()
 	if cn.t.seeding() && cn.lastChunkSent.After(ret) {
 		ret = cn.lastChunkSent
 	}
@@ -695,16 +624,19 @@ func (cn *connection) supported(b ...uint) bool {
 	return cn.extensions.Supported(cn.PeerExtensionBytes, b...)
 }
 
-func (cn *connection) reject(r request) bool {
+func (cn *connection) reject(r request, ws *writerstate) bool {
 	if !cn.supported(pp.ExtensionBitFast) {
 		panic("fast not enabled")
 	}
 
-	if cn.peerfastset.Contains(r.Index.Uint32()) {
+	cn.cmu().Lock()
+	contains := cn.peerfastset.Contains(r.Index.Uint32())
+	cn.cmu().Unlock()
+	if contains {
 		return false
 	}
 
-	cn.Post(r.ToMsg(pp.Reject))
+	ws.Post(r.ToMsg(pp.Reject))
 
 	cn._mu.Lock()
 	defer cn._mu.Unlock()
@@ -713,7 +645,7 @@ func (cn *connection) reject(r request) bool {
 	return true
 }
 
-func (cn *connection) onReadRequest(r request) error {
+func (cn *connection) onReadRequest(r request, ws *writerstate) error {
 	requestedChunkLengths.Add(strconv.FormatUint(r.Length.Uint64(), 10), 1)
 	cn._mu.RLock()
 	_, ok := cn.PeerRequests[r]
@@ -724,18 +656,21 @@ func (cn *connection) onReadRequest(r request) error {
 		return nil
 	}
 
-	if cn.Choked {
-		if cn.supported(pp.ExtensionBitFast) && cn.reject(r) {
-			cn.cfg.debug().Printf("c(%p) - rejecting request: choked, cid(%d) %v rejecting request\n", cn, cn.t.chunks.requestCID(r), cn.peerfastset.ToArray())
+	if cn.Choked.Load() {
+		if cn.supported(pp.ExtensionBitFast) && cn.reject(r, ws) {
+			cn.cmu().Lock()
+			fastset := cn.peerfastset.ToArray()
+			cn.cmu().Unlock()
+			cn.cfg.debug().Printf("c(%p) - rejecting request: choked, cid(%d) %v rejecting request\n", cn, cn.t.chunks.requestCID(r), fastset)
 		}
 
 		return nil
 	}
 
-	if pending := len(cn.PeerRequests); !cn.t.seeding() || pending > cn.PendingMaxRequests+maxRequestsGrace {
+	if pending := cn.peerRequestsLen(); !cn.t.seeding() || pending > ws.PendingMaxRequests+maxRequestsGrace {
 		if cn.supported(pp.ExtensionBitFast) {
-			cn.cfg.debug().Printf("%p - onReadRequest: PeerRequests(%d) > maxRequests(%d), rejecting request\n", cn, pending, cn.PendingMaxRequests)
-			cn.reject(r)
+			cn.cfg.debug().Printf("%p - onReadRequest: PeerRequests(%d) > maxRequests(%d), rejecting request\n", cn, pending, ws.PendingMaxRequests)
+			cn.reject(r, ws)
 		}
 		// BEP 6 says we may close here if we choose.
 		return nil
@@ -762,15 +697,6 @@ func (cn *connection) onReadRequest(r request) error {
 	return nil
 }
 
-func (cn *connection) Flush() (int, error) {
-	cn.cmu().Lock()
-	buf := cn.currentbuffer.Bytes()
-	cn.currentbuffer.Reset()
-	cn.cmu().Unlock()
-
-	return cn.FlushBuffer(buf)
-}
-
 func (cn *connection) FlushBuffer(buf []byte) (int, error) {
 	n, err := cn.w.Write(buf)
 	blen := len(buf)
@@ -786,7 +712,7 @@ func (cn *connection) FlushBuffer(buf []byte) (int, error) {
 	return n, nil
 }
 
-func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.Message, err error) {
+func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder, ws *writerstate) (msg pp.Message, err error) {
 	if err = decoder.Decode(&msg); err != nil {
 		return msg, err
 	}
@@ -803,23 +729,25 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		return msg, fmt.Errorf("received fast extension message (type=%v) but extension is disabled", msg.Type)
 	}
 
-	cn.cfg.debug().Printf("(%d) c(%p) id(%s) seed(%t) remote(%s) claimed(%d) - RECEIVED MESSAGE: %s - pending(%d) - missing(%d) - failed(%d) - outstanding(%d) - unverified(%d) - completed(%d)\n", os.Getpid(), cn, cn.t.md.ID, cn.cfg.Seed, cn.conn.RemoteAddr(), cn.claimed.GetCardinality(), msg.Type, len(cn.requests), cn.t.chunks.Cardinality(cn.t.chunks.missing), cn.t.chunks.Cardinality(cn.t.chunks.failed), len(cn.t.chunks.outstanding), cn.t.chunks.Cardinality(cn.t.chunks.unverified), cn.t.chunks.Cardinality(cn.t.chunks.completed))
+	cn.cfg.debug().Printf("(%d) c(%p) id(%s) seed(%t) remote(%s) claimed(%d) - RECEIVED MESSAGE: %s - pending(%d) - missing(%d) - failed(%d) - outstanding(%d) - unverified(%d) - completed(%d)\n", os.Getpid(), cn, cn.t.md.ID, cn.cfg.Seed, cn.conn.RemoteAddr(), cn.claimed.GetCardinality(), msg.Type, cn.requestsLen(), cn.t.chunks.Cardinality(cn.t.chunks.missing), cn.t.chunks.Cardinality(cn.t.chunks.failed), len(cn.t.chunks.outstanding), cn.t.chunks.Cardinality(cn.t.chunks.unverified), cn.t.chunks.Cardinality(cn.t.chunks.completed))
 
 	switch msg.Type {
 	case pp.Choke:
-		cn.PeerChoked = true
-		cn.deleteAllRequests()
+		ws.mutate(func(ws *writerstate) {
+			ws.PeerChoked = true
+			ws.deleteAllRequestsLocked()
+		})
 		// We can then reset our interest.
 		return msg, nil
 	case pp.Unchoke:
-		cn.PeerChoked = false
+		ws.mutate(func(ws *writerstate) { ws.PeerChoked = false })
 		cn.peerPiecesChanged()
 		return msg, nil
 	case pp.Interested:
-		cn.PeerInterested = true
+		cn.PeerInterested.Store(true)
 		return msg, nil
 	case pp.NotInterested:
-		cn.PeerInterested = false
+		cn.PeerInterested.Store(false)
 		// We don't clear their requests since it isn't clear in the spec.
 		// We'll probably choke them for this, which will clear them if
 		// appropriate, and is clearly specified.
@@ -840,25 +768,25 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 
 		return msg, nil
 	case pp.Request:
-		if err = cn.onReadRequest(newRequestFromMessage(&msg)); err != nil {
+		if err = cn.onReadRequest(newRequestFromMessage(&msg), ws); err != nil {
 			return msg, err
 		}
 		cn.updateRequests()
 		return msg, nil
 	case pp.Piece:
-		if err = errorsx.Wrap(cn.receiveChunk(&msg), "failed to received chunk"); err != nil {
+		if err = errorsx.Wrap(cn.receiveChunk(&msg, ws), "failed to received chunk"); err != nil {
 			return msg, err
 		}
 
 		cn.t.chunks.pool.Put(&msg.Piece)
 
-		if n, mod := cn.chunkwakefreq.Add(1), max(uint32(cn.PeerMaxRequests/4), 1); n%mod == 0 {
+		if n, mod := cn.chunkwakefreq.Add(1), max(ws.PeerMaxRequests.Load()/4, 1); n%mod == 0 {
 			cn.request.Broadcast()
 		}
 		return msg, nil
 	case pp.Cancel:
 		req := newRequestFromMessage(&msg)
-		cn.onPeerSentCancel(req)
+		cn.onPeerSentCancel(req, ws)
 		return msg, err
 	case pp.Port:
 		pingAddr := net.UDPAddr{
@@ -893,12 +821,11 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 
 		req := newRequestFromMessage(&msg)
 		cn.chunksRejected.Add(1)
-		cn.clearRequests(req)
+		ws.mutate(func(ws *writerstate) { ws.clearRequestsLocked(req) })
 		return msg, nil
 	case pp.AllowedFast:
-		cn._mu.Lock()
-		cn.fastset.AddRange(cn.t.chunks.Range(uint64(msg.Index)))
-		cn._mu.Unlock()
+		min, max := cn.t.chunks.Range(uint64(msg.Index))
+		ws.mutate(func(ws *writerstate) { ws.fastset.AddRange(min, max) })
 
 		cn.peerPiecesChanged()
 
@@ -907,7 +834,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 		defer cn.request.Broadcast()
 		defer cn.upload.Broadcast()
 
-		if err = cn.onReadExtendedMsg(msg.ExtendedID, msg.ExtendedPayload); err != nil {
+		if err = cn.onReadExtendedMsg(msg.ExtendedID, msg.ExtendedPayload, ws); err != nil {
 			return msg, err
 		}
 		return msg, nil
@@ -918,7 +845,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder) (msg pp.
 
 // Processes incoming BitTorrent wire-protocol messages. The client lock is held upon entry and
 // exit. Returning will end the connection.
-func (cn *connection) mainReadLoop(ctx context.Context) (err error) {
+func (cn *connection) mainReadLoop(ctx context.Context, ws *writerstate) (err error) {
 	cn.cfg.debug().Printf("c(%p) seed(%t) - read loop initiated\n", cn, cn.t.seeding())
 	defer cn.cfg.debug().Printf("c(%p) seed(%t) - read loop completed\n", cn, cn.t.seeding())
 	defer cn.updateRequests() // tap the writer so it'll clean itself up.
@@ -926,7 +853,7 @@ func (cn *connection) mainReadLoop(ctx context.Context) (err error) {
 	decoder := pp.NewDecoder(cn.r, cn.t.chunks.pool)
 
 	for {
-		_, err := cn.ReadOne(ctx, decoder)
+		_, err := cn.ReadOne(ctx, decoder, ws)
 		if err != nil {
 			return err
 		}
@@ -940,9 +867,7 @@ func (cn *connection) mainReadLoop(ctx context.Context) (err error) {
 	}
 }
 
-func (cn *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (err error) {
-	t := cn.t
-
+func (cn *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte, ws *writerstate) (err error) {
 	switch id {
 	case pp.HandshakeExtendedID:
 		var d pp.ExtendedHandshakeMessage
@@ -951,30 +876,42 @@ func (cn *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (
 			return errorsx.Wrap(err, "unmarshalling extended handshake payload")
 		}
 
-		if d.Reqq != 0 {
-			cn.PeerMaxRequests = d.Reqq
-		}
+		ws.PeerMaxRequests.Store(langx.FirstNonZero(uint32(d.Reqq), ws.PeerMaxRequests.Load()))
 		cn.PeerClientName = d.V
+		// PeerExtensionIDs/PeerPrefersEncryption/PeerListenPort are read under
+		// cn._mu by extensionEnabled/extension/pexPeerFlags/peerListenPort -
+		// those are called cross-goroutine (the writer's reactive
+		// requestPendingMetadata, and pex.snapshot reading *other*
+		// connections' fields from their own mainReadLoop), so the writes
+		// need the same lock.
+		cn._mu.Lock()
 		cn.PeerPrefersEncryption = d.Encryption
 		cn.PeerExtensionIDs = d.M
 		cn.PeerListenPort = uint16(d.Port)
+		cn._mu.Unlock()
 		cn.cfg.debug().Printf("c(%p) seed(%t) extensions: %s\n", cn, cn.t.seeding(), spew.Sdump(d))
 
 		if d.MetadataSize != 0 {
-			if err = t.setMetadataSize(d.MetadataSize); err != nil {
+			if err = cn.t.setMetadataSize(d.MetadataSize); err != nil {
 				return errorsx.Wrapf(err, "setting metadata size to %d", d.MetadataSize)
 			}
+
+			// setMetadataSize itself only touches torrent-owned state now - it
+			// doesn't reach into any connection's writer. Every writer's Idler
+			// already treats t.chunks.cond as a signal (connwriterinit), so
+			// broadcasting it wakes every peer's writer to reactively pick up
+			// pending pieces via writerstate.requestPendingMetadata on its
+			// next cycle.
+			cn.t.chunks.cond.Broadcast()
 		}
 
-		cn.requestPendingMetadata()
-
-		cn.sendInitialPEX()
+		cn.sendInitialPEX(ws)
 
 		// BUG no sending PEX updates yet
 		return nil
 	case pp.MetadataExtendedID:
 		// log.Println("metadata extension available")
-		return errorsx.Wrap(t.gotMetadataExtensionMsg(payload, cn), "handling metadata extension message")
+		return errorsx.Wrap(cn.t.gotMetadataExtensionMsg(payload, cn, ws), "handling metadata extension message")
 	case pp.PEXExtendedID:
 		if _, ok := cn.cfg.extensions[pp.ExtensionNamePex]; !ok {
 			// TODO: Maybe close the connection.
@@ -991,10 +928,55 @@ func (cn *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (
 		var peers Peers
 		peers.AppendFromPex(pexMsg.Added6, pexMsg.Added6Flags)
 		peers.AppendFromPex(pexMsg.Added, pexMsg.AddedFlags)
-		t.addPeersLocked(peers)
+		cn.t.addPeersLocked(peers)
 		return nil
 	default:
 		return errorsx.Errorf("unexpected extended message ID: %v", id)
+	}
+}
+
+// Process incoming ut_metadata message.
+func (t *torrent) gotMetadataExtensionMsg(payload []byte, c *connection, ws *writerstate) error {
+	var d bep0009.MetadataResponse
+	err := bencode.Unmarshal(payload, &d)
+	if _, ok := err.(bencode.ErrUnusedTrailingBytes); ok {
+	} else if err != nil {
+		return fmt.Errorf("error unmarshalling bencode: %s", err)
+	}
+
+	switch d.Type {
+	case pp.RequestMetadataExtensionMsgType:
+		// log.Printf("c(%p) seed(%t) SENDING METADATA %s\n", c, t.seeding(), spew.Sdump(d))
+		if !t.haveMetadataPiece(d.Index) {
+			ws.Post(t.newMetadataExtensionMessage(c, pp.RejectMetadataExtensionMsgType, d.Index, nil))
+			return nil
+		}
+		start := 16 * bytesx.KiB * d.Index
+		end := start + t.metadataPieceSize(d.Index)
+		ws.Post(t.newMetadataExtensionMessage(c, pp.DataMetadataExtensionMsgType, d.Index, t.metadataBytes[start:end]))
+		return nil
+	case pp.DataMetadataExtensionMsgType:
+		// log.Printf("c(%p) seed(%t) RECEIVED METADATA %s\n", c, t.seeding(), spew.Sdump(d))
+		c.allStats(add(1, func(cs *ConnStats) *count { return &cs.MetadataChunksRead }))
+		if !ws.requestedMetadataPiece(d.Index) {
+			return fmt.Errorf("got unexpected piece %d", d.Index)
+		}
+		ws.mutate(func(ws *writerstate) { ws.metadataRequests[d.Index] = false })
+		begin := len(payload) - metadataPieceSize(d.Total, d.Index)
+		if begin < 0 || begin >= len(payload) {
+			return fmt.Errorf("data has bad offset in payload: %d", begin)
+		}
+
+		// log.Printf("c(%p) seed(%t) METADATA SAVE INITIATED %s\n", c, t.seeding(), spew.Sdump(d))
+		// defer log.Printf("c(%p) seed(%t) METADATA SAVED %s\n", c, t.seeding(), spew.Sdump(d))
+
+		t.saveMetadataPiece(d.Index, payload[begin:])
+		c.lastUsefulChunkReceived.Store(langx.Autoptr(time.Now()))
+		return t.maybeCompleteMetadata(c)
+	case pp.RejectMetadataExtensionMsgType:
+		return nil
+	default:
+		return errorsx.New("unknown msg_type value")
 	}
 }
 
@@ -1013,10 +995,10 @@ func (cn *connection) rw() io.ReadWriter {
 }
 
 // Handle a received chunk from a peer.
-func (cn *connection) receiveChunk(msg *pp.Message) error {
+func (cn *connection) receiveChunk(msg *pp.Message, ws *writerstate) error {
 	req := newRequestFromMessage(msg)
 
-	cn.clearRequests(req)
+	ws.mutate(func(ws *writerstate) { ws.clearRequestsLocked(req) })
 
 	// Do we actually want this chunk? if the chunk is already available, then we
 	// don't need it.
@@ -1029,7 +1011,7 @@ func (cn *connection) receiveChunk(msg *pp.Message) error {
 
 	cn.allStats(add(1, func(cs *ConnStats) *count { return &cs.ChunksReadUseful }))
 	cn.allStats(add(int64(len(msg.Piece)), func(cs *ConnStats) *count { return &cs.BytesReadUsefulData }))
-	cn.lastUsefulChunkReceived = time.Now()
+	cn.lastUsefulChunkReceived.Store(langx.Autoptr(time.Now()))
 	cn.chunksReceived.Add(1)
 
 	// cn.cfg.debug().Printf("c(%p) - received chunk d(%020d) r(%d,%d,%d)\n", cn, req.Digest, req.Index, req.Begin, req.Length)
@@ -1048,9 +1030,8 @@ func (cn *connection) receiveChunk(msg *pp.Message) error {
 		cn.t.digests.Enqueue(idx)
 	}
 
-	cn.cmu().Lock()
-	cn.touched.AddInt(cn.t.chunks.requestCID(req))
-	cn.cmu().Unlock()
+	cid := cn.t.chunks.requestCID(req)
+	ws.mutate(func(ws *writerstate) { ws.touched.AddInt(cid) })
 
 	return nil
 }
@@ -1063,57 +1044,6 @@ func (cn *connection) peerHasWantedPieces() bool {
 	}
 
 	return cn.t.chunks.Intersects(cn.claimed, cn.t.chunks.missing)
-}
-
-// clearRequests drops the requests from the local connection.
-func (cn *connection) clearRequests(reqs ...request) (ok bool) {
-	clearone := func(r request) bool {
-		cn.cmu().Lock()
-		defer cn.cmu().Unlock()
-		if _, ok := cn.requests[r.Digest]; !ok {
-			return false
-		}
-
-		delete(cn.requests, r.Digest)
-		return true
-	}
-
-	for _, r := range reqs {
-		ok = ok || clearone(r)
-	}
-
-	return ok
-}
-
-// releaseRequest returns the request back to the pool.
-func (cn *connection) releaseRequest(r request) (ok bool) {
-	cn.cmu().Lock()
-	defer cn.cmu().Unlock()
-	if r, ok = cn.requests[r.Digest]; !ok {
-		return false
-	}
-
-	// cn.cfg.debug().Printf("c(%p) - releasing request d(%020d) r(%d,%d,%d)\n", cn, r.Digest, r.Index, r.Begin, r.Length)
-	delete(cn.requests, r.Digest)
-	cn.t.chunks.Retry(r)
-
-	return true
-}
-
-func (cn *connection) dupRequests() (requests []request) {
-	cn._mu.RLock()
-	for _, r := range cn.requests {
-		requests = append(requests, r)
-	}
-	cn._mu.RUnlock()
-	return requests
-}
-
-func (cn *connection) deleteAllRequests() {
-	reqs := cn.dupRequests()
-	for _, r := range reqs {
-		cn.releaseRequest(r)
-	}
 }
 
 func (cn *connection) setTorrent(t *torrent) {
@@ -1136,8 +1066,12 @@ func (cn *connection) String() string {
 }
 
 func (cn *connection) pexPeerFlags() pp.PexPeerFlags {
+	cn._mu.RLock()
+	preferEncryption := cn.PeerPrefersEncryption
+	cn._mu.RUnlock()
+
 	f := pp.PexPeerFlags(0)
-	if cn.PeerPrefersEncryption {
+	if preferEncryption {
 		f |= pp.PexPrefersEncryption
 	}
 	if cn.outgoing {
@@ -1146,7 +1080,7 @@ func (cn *connection) pexPeerFlags() pp.PexPeerFlags {
 	return f
 }
 
-func (cn *connection) sendInitialPEX() {
+func (cn *connection) sendInitialPEX(ws *writerstate) {
 	if !cn.extensionEnabled(pp.ExtensionNamePex) {
 		// peer did not advertise support for the PEX extension
 		cn.cfg.debug().Printf("pex not supported peer extension enabled(%t) local extension enabled(%t)", cn.extension(pp.ExtensionNamePex) != 0, cn.cfg.extension(pp.ExtensionNamePex) != 0)
@@ -1160,5 +1094,5 @@ func (cn *connection) sendInitialPEX() {
 		return
 	}
 
-	cn.Post(pp.NewExtended(cn.extension(pp.ExtensionNamePex), bencode.MustMarshal(m)))
+	ws.Post(pp.NewExtended(cn.extension(pp.ExtensionNamePex), bencode.MustMarshal(m)))
 }

@@ -51,10 +51,11 @@ func (t *pex) snapshot(c0 *connection) *pp.PexMsg {
 		// omitted, not reported with a wrong address.
 		addr := c.remoteAddr
 		if !c.outgoing {
-			if c.PeerListenPort == 0 {
+			listenPort := c.peerListenPort()
+			if listenPort == 0 {
 				continue
 			}
-			addr = netip.AddrPortFrom(addr.Addr(), c.PeerListenPort)
+			addr = netip.AddrPortFrom(addr.Addr(), listenPort)
 		}
 
 		f := c.pexPeerFlags()

@@ -96,7 +96,7 @@ func TestConnReaderAllowRequestsDoesNotMutateChokeState(t *testing.T) {
 
 	c := cl.newConnection(nil, false, netip.AddrPort{})
 	c.setTorrent(tt)
-	require.True(t, c.Choked, "sanity: connections start choked")
+	require.True(t, c.Choked.Load(), "sanity: connections start choked")
 
 	ctx, done := context.WithCancel(t.Context())
 	defer done()
@@ -122,5 +122,5 @@ func TestConnReaderAllowRequestsDoesNotMutateChokeState(t *testing.T) {
 
 	_connreaderAllowRequests{readerstate: ws, next: connReaderUpload(ws)}.Update(ctx, nil)
 
-	require.True(t, c.Choked, "reader loop must not decide choke state - that must be left solely to the writer loop")
+	require.True(t, c.Choked.Load(), "reader loop must not decide choke state - that must be left solely to the writer loop")
 }

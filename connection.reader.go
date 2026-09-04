@@ -19,7 +19,12 @@ import (
 	"github.com/james-lawrence/torrent/internal/timex"
 )
 
-func connreaderinit(ctx context.Context, cn *connection, to time.Duration) (err error) {
+// connreaderinit takes writer explicitly (constructed in RunHandshookConn
+// before either goroutine spawns, same as connwriterinit's ws) solely so
+// _connreaderUpload.upload's Choke call can reach the writer's Post when
+// rejecting the peer's pending fast-set requests - not stored for general
+// use, and readerstate otherwise knows nothing else about the writer.
+func connreaderinit(ctx context.Context, cn *connection, writer *writerstate, to time.Duration) (err error) {
 	cn.cfg.debug().Printf("c(%p) reader initiated\n", cn)
 	defer cn.cfg.debug().Printf("c(%p) reader completed\n", cn)
 	ctx, done := context.WithCancel(ctx)
@@ -29,6 +34,7 @@ func connreaderinit(ctx context.Context, cn *connection, to time.Duration) (err 
 	ws := &readerstate{
 		bufferLimit:      256 * bytesx.KiB,
 		connection:       cn,
+		writer:           writer,
 		keepAliveTimeout: to,
 		chokeduntil:      ts.Add(-1 * time.Minute),
 		uploadavailable:  atomicx.Pointer(ts),
@@ -49,6 +55,7 @@ func connreaderinit(ctx context.Context, cn *connection, to time.Duration) (err 
 
 type readerstate struct {
 	*connection
+	writer           *writerstate
 	bufferLimit      int
 	keepAliveTimeout time.Duration
 	chokeduntil      time.Time
@@ -133,18 +140,22 @@ func (t *_connreaderUpload) writechunk(r request) (ok bool, err error) {
 
 // Also handles choking and unchoking of the remote peer.
 func (t _connreaderUpload) upload() (time.Duration, error) {
-	if t.Choked && t.chokeduntil.After(time.Now()) {
-		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) req(%d) upload restricted - disallowed\n", t.connection, t.seed, t.Choked, t.peerSentHaveAll, len(t.PeerRequests))
+	choked := t.Choked.Load()
+	haveAll := t.peerSentHaveAll.Load()
+	pending := t.peerRequestsLen()
+
+	if choked && t.chokeduntil.After(time.Now()) {
+		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) req(%d) upload restricted - disallowed\n", t.connection, t.seed, choked, haveAll, pending)
 		return timex.DurationMax(time.Until(t.chokeduntil), 0), nil
 	}
 
-	if t.peerSentHaveAll {
-		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) req(%d) upload restricted - has everything\n", t.connection, t.seed, t.Choked, t.peerSentHaveAll, len(t.PeerRequests))
+	if haveAll {
+		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) req(%d) upload restricted - has everything\n", t.connection, t.seed, choked, haveAll, pending)
 		return time.Minute, nil
 	}
 
-	if len(t.PeerRequests) == 0 {
-		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) req(%d) upload restricted - no outstanding requests\n", t.connection, t.seed, t.Choked, t.peerSentHaveAll, len(t.PeerRequests))
+	if pending == 0 {
+		t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) peer completed(%t) req(%d) upload restricted - no outstanding requests\n", t.connection, t.seed, choked, haveAll, pending)
 		return time.Minute, nil
 	}
 
@@ -161,7 +172,7 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 		}
 
 		if delay := res.Delay(); delay > 0 {
-			t.cfg.errors().Printf("c(%p) seed(%t) maximum upload rate exceed n(%d) - delay(%v) - %s req(%d)\n", t.connection, t.seed, uploaded, delay, r, len(t.PeerRequests))
+			t.cfg.errors().Printf("c(%p) seed(%t) maximum upload rate exceed n(%d) - delay(%v) - %s req(%d)\n", t.connection, t.seed, uploaded, delay, r, t.peerRequestsLen())
 			res.Cancel()
 			return delay, nil
 		}
@@ -174,7 +185,7 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 			// but there's no way to communicate this to the peer. If they
 			// ask for it again, we'll kick them to allow us to send them
 			// an updated bitfield.
-			t.Choke(t.bufmsgold)
+			t.Choke(t.bufmsgold, t.writer)
 			return 0, nil
 		}
 
@@ -276,7 +287,7 @@ func (t _connreaderClosed) Update(ctx context.Context, _ *cstate.Shared) (r csta
 
 	// if we've choked them and not allowed to fast track any chunks then there is nothing
 	// to do.
-	if ws.Choked && ws.peerfastset.IsEmpty() {
+	if ws.Choked.Load() && ws.peerFastSetEmpty() {
 		return connreaderFlush(ws, connReaderUpload(ws))
 	}
 
@@ -300,11 +311,11 @@ func connreaderidle(ws *readerstate) cstate.T {
 	// actually refill and never let a chunk send succeed.
 	if mind <= 0 {
 		ws.needsresponse.CompareAndSwap(true, false)
-		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle uploads(%t) pending(%d) - %s\n", ws.connection, ws.t.seeding(), !ws.Choked, len(ws.PeerRequests), mind)
+		ws.cfg.debug().Printf("c(%p) seed(%t) skipping idle uploads(%t) pending(%d) - %s\n", ws.connection, ws.t.seeding(), !ws.Choked.Load(), ws.peerRequestsLen(), mind)
 		return connreaderactive(ws)
 	}
 
-	ws.cfg.debug().Printf("c(%p) seed(%t) idling uploads(%t) pending(%d) - %s\n", ws.connection, ws.t.seeding(), !ws.Choked, len(ws.PeerRequests), mind)
+	ws.cfg.debug().Printf("c(%p) seed(%t) idling uploads(%t) pending(%d) - %s\n", ws.connection, ws.t.seeding(), !ws.Choked.Load(), ws.peerRequestsLen(), mind)
 
 	return ws.Idler.Idle(connreaderclosed(ws, connreaderactive(ws)), mind)
 }
