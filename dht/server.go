@@ -338,11 +338,24 @@ func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
 	// routed) simultaneously, on every family it covers (assumed dual-stack for
 	// IPv6) - register a binding per scope actually present, rather than
 	// collapsing to a single routed-scope "best" pick that can never include
-	// loopback or link-local.
-	for _, addr := range netx.ComputeReachableAddrs(bound) {
-		if _, err := s.serveBinding(ctx, pc, addr, false); err != nil {
-			return err
-		}
+	// loopback or link-local. serveBinding blocks until its address is
+	// resolved (e.g. real UPnP discovery/port-mapping I/O), so these run
+	// concurrently - otherwise Serve's latency would be the sum of every
+	// group's resolution cost instead of the slowest one.
+	addrs := netx.ComputeReachableAddrs(bound)
+	errs := make([]error, len(addrs))
+	var wg sync.WaitGroup
+	for i, addr := range addrs {
+		wg.Add(1)
+		go func(i int, addr netip.AddrPort) {
+			defer wg.Done()
+			_, errs[i] = s.serveBinding(ctx, pc, addr, false)
+		}(i, addr)
+	}
+	wg.Wait()
+
+	if err := errors.Join(errs...); err != nil {
+		return err
 	}
 
 	return nil
