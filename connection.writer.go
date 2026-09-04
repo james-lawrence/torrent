@@ -679,8 +679,8 @@ func (t _connwriterRequests) determineInterest(msg messageWriter) *roaring.Bitma
 		return t.requestable
 	}
 
-	if m := t.t.chunks.Cardinality(t.t.chunks.completed); uint64(m) == t.t.chunks.pieces {
-		t.cfg.debug().Printf("c(%p) seed(%t) disabling requestable - have all data m(%d) o(%d) c(%d) p(%d)\n", t.connection, t.seed, m, len(t.t.chunks.outstanding), m, t.t.chunks.pieces)
+	if snap := t.t.chunks.Read(copCompletedOutstandingDebugSnapshot); uint64(snap.completed) == t.t.chunks.pieces {
+		t.cfg.debug().Printf("c(%p) seed(%t) disabling requestable - have all data m(%d) o(%d) c(%d) p(%d)\n", t.connection, t.seed, snap.completed, snap.outstanding, snap.completed, t.t.chunks.pieces)
 		t.refreshrequestable.Store(langx.Autoptr(timex.Inf()))
 		t.requestable = roaring.New()
 		return t.requestable
@@ -726,7 +726,7 @@ func (t _connwriterRequests) determineInterest(msg messageWriter) *roaring.Bitma
 		return t.requestable
 	}
 
-	if t.connection.t.chunks.missing.GetCardinality() == 0 && t.connection.t.chunks.unverified.GetCardinality() > 0 {
+	if t.connection.t.chunks.Read(copHasUnverifiedNoMissing) {
 		t.connection.t.digests.EnqueueBitmap(bitmapx.Fill(t.connection.t.chunks.pieces))
 	}
 
