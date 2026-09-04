@@ -1,9 +1,12 @@
 package dht
 
 import (
+	"context"
+	"iter"
 	"net"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/netx"
@@ -130,5 +133,35 @@ func TestServe(t *testing.T) {
 
 		got := s.ID(netip.MustParseAddrPort("127.0.0.1:12345"))
 		require.NotEqual(t, int160.Zero(), got, "wildcard-bound socket must recognize its own loopback address as reachable")
+	})
+
+	t.Run("wildcard socket resolves its per-group bindings concurrently", func(t *testing.T) {
+		// serveBinding blocks until its address is resolved (e.g. a real
+		// resolvepublicaddr doing UPnP discovery/port-mapping I/O), and a
+		// wildcard bind registers one binding per (scope, family) group
+		// present on the host. If Serve resolved those groups one at a time,
+		// its total latency would be the sum of every group's resolution
+		// delay instead of the slowest one - assert it isn't.
+		const delay = 200 * time.Millisecond
+
+		slow := func(ctx context.Context, sc *Server, q Binding, id int160.T, bestaddr netip.AddrPort, local net.PacketConn) (iter.Seq[netip.AddrPort], error) {
+			time.Sleep(delay)
+			return func(yield func(netip.AddrPort) bool) { yield(bestaddr) }, nil
+		}
+
+		s := mustNewServer(t, OptionDynamicPort(slow))
+		pc, err := net.ListenPacket("udp", ":0")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = pc.Close() })
+
+		groups := len(netx.ComputeReachableAddrs(pc.LocalAddr()))
+		require.Greater(t, groups, 1, "test host needs more than one reachable group to prove concurrency")
+
+		start := time.Now()
+		err = s.Serve(t.Context(), pc)
+		elapsed := time.Since(start)
+		require.NoError(t, err)
+
+		require.Less(t, elapsed, time.Duration(groups)*delay, "Serve took as long as resolving every group sequentially")
 	})
 }
