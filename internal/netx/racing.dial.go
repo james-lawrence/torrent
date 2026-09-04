@@ -102,9 +102,13 @@ func (t RacingDialer) Dial(ctx context.Context, timeout time.Duration, address s
 		dup := w
 		dup.network = n
 
+		// Run fails once __ctx is already done - most commonly because an
+		// earlier racer already won and canceled it. Stop submitting and
+		// fall through to the select below rather than returning here: it
+		// already knows how to prefer a winning connection sitting in
+		// w.fastest over a bare context.Canceled.
 		if err := t.arena.Run(__ctx, dup); err != nil {
-			cancel(errorsx.Wrapf(err, "timeout: %d", timeout))
-			return nil, err
+			break
 		}
 	}
 

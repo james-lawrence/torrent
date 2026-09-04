@@ -20,6 +20,15 @@ type Pool[T any] struct {
 }
 
 func (t *Pool[T]) Run(ctx context.Context, w T) error {
+	// checked up front rather than left to the select below: once ctx is
+	// already done, the send on t.queued is typically also ready (it only
+	// blocks when the backlog is full), so select would otherwise pick
+	// pseudo-randomly between the two instead of consistently refusing to
+	// enqueue on a dead context.
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+
 	select {
 	case t.queued <- pending{workload: func() error { return t.async(ctx, w) }}:
 		return nil

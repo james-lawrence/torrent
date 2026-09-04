@@ -168,6 +168,37 @@ func TestRacingDialer_Dial(t *testing.T) {
 		}
 	})
 
+	t.Run("winner completing mid-submission must not surface a bare context canceled", func(t *testing.T) {
+		// Dial submits racers to the pool one at a time. The moment the
+		// first racer wins, its context gets canceled - if a later racer is
+		// still being submitted at that exact instant, Pool.Run has to pick
+		// pseudo-randomly between "enqueue succeeded" and "ctx already
+		// done", since both are ready. On the "ctx already done" outcome,
+		// Dial must still return the winning connection instead of the raw
+		// cancellation error. All networks return instantly (no sleeps) and
+		// there are several losers per Dial call, so the pool is very
+		// likely to still be submitting a loser at the moment the winner
+		// cancels the shared context - repeat enough times that this
+		// reliably reproduces even though any single call is not
+		// guaranteed to race.
+		instant := DialerFn(func(ctx context.Context, addr string) (net.Conn, error) {
+			return &closeTrackingConn{}, nil
+		})
+
+		networks := make([]DialableNetwork, 12)
+		for i := range networks {
+			networks[i] = instant
+		}
+
+		for i := 0; i < 300; i++ {
+			dialer := NewRacing(20)
+
+			conn, err := dialer.Dial(t.Context(), 200*time.Millisecond, "addr", networks...)
+			require.NoError(t, err)
+			require.NotNil(t, conn)
+		}
+	})
+
 	t.Run("no networks provided", func(t *testing.T) {
 		dialer := NewRacing(10)
 		timeout := 100 * time.Millisecond
