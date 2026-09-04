@@ -88,18 +88,12 @@ type _connreaderAllowRequests struct {
 	next cstate.T
 }
 
+// Deciding whether to choke/unchoke the peer is the writer loop's job
+// (_connwriterRequests.determineInterest, using the identical seed ||
+// chokeduntil.After(now) condition) - it must not also happen here. Both
+// loops run concurrently against the same *connection with no lock around
+// Choke/Unchoke, so having both decide would be a data race on cn.Choked.
 func (t _connreaderAllowRequests) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {
-	ts := time.Now()
-	if t.seed || t.chokeduntil.After(ts) {
-		if t.Unchoke(messageWriter(t.readerstate.bufmsgold).Deprecated()) {
-			t.cfg.debug().Printf("c(%p) seed(%t) allowing peer to make requests\n", t.connection, t.seed)
-		}
-	} else {
-		if t.Choke(t.readerstate.bufmsgold) == nil {
-			t.cfg.debug().Printf("c(%p) seed(%t) disallowing peer to make requests\n", t.connection, t.seed)
-		}
-	}
-
 	return t.next
 }
 
