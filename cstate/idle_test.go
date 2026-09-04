@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/james-lawrence/torrent/internal/testx"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,7 +28,6 @@ func TestIdleFunction(t *testing.T) {
 		require.Equal(t, signalCond1, i.signals[0])
 		require.Equal(t, signalCond2, i.signals[1])
 		require.NotNil(t, i.done)
-		require.False(t, i.running.Load()) // Should be initialized to false
 	})
 }
 
@@ -88,9 +88,8 @@ func TestIdleUpdate(t *testing.T) {
 			close(updateDone)
 		}()
 
-		// Give Update a moment to start and set running to true
+		// Give Update a moment to start
 		time.Sleep(50 * time.Millisecond)
-		require.True(t, idleInstance.running.Load())
 
 		// Signal one of the conditions
 		signalCond1.Broadcast()
@@ -102,7 +101,6 @@ func TestIdleUpdate(t *testing.T) {
 		case <-time.After(500 * time.Millisecond):
 			t.Fatal("Update did not complete after signal")
 		}
-		require.False(t, idleInstance.running.Load()) // running should be false after defer
 	})
 
 	t.Run("returns next when timeout occurs", func(t *testing.T) {
@@ -132,7 +130,6 @@ func TestIdleUpdate(t *testing.T) {
 		case <-time.After(testDuration + 200*time.Millisecond): // Add buffer for goroutine scheduling
 			t.Fatal("Update did not complete after timeout")
 		}
-		require.False(t, idleInstance.running.Load()) // running should be false after defer
 	})
 
 	t.Run("returns next when context is cancelled", func(t *testing.T) {
@@ -154,7 +151,6 @@ func TestIdleUpdate(t *testing.T) {
 
 		// Give Update a moment to start
 		time.Sleep(50 * time.Millisecond)
-		require.True(t, idleInstance.running.Load())
 
 		// Cancel the context
 		cancel()
@@ -166,54 +162,37 @@ func TestIdleUpdate(t *testing.T) {
 		case <-time.After(500 * time.Millisecond):
 			t.Fatal("Update did not complete after context cancellation")
 		}
-		require.False(t, idleInstance.running.Load()) // running should be false after defer
 	})
 
-	t.Run("target.Broadcast does not signal done channel if running is false", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
+	t.Run("a wakeup that arrives before Update is called is not lost", func(t *testing.T) {
+		// A Broadcast that arrives while nothing has called idle.Update() yet
+		// must not be dropped - it needs to be durably queued so the very next Update()
+		// call sees it immediately, rather than blocking for its full timeout.
+		ctx, cancel := testx.Context(t)
 		defer cancel()
 
 		targetCond := sync.NewCond(&sync.Mutex{})
 		signalCond := sync.NewCond(&sync.Mutex{})
 		idleInstance := Idle(ctx, targetCond, signalCond)
 
-		// Ensure running is false (it is by default, but explicitly set for clarity)
-		idleInstance.running.Store(false)
-
-		// Signal a condition, which should cause target.Broadcast()
-		signalCond.Broadcast()
-
-		// Give some time for the goroutines to process
+		// Give the monitor goroutines time to actually reach Wait() before
+		// broadcasting, so a failure here can only be the delivery logic's
+		// fault, not scheduling luck.
 		time.Sleep(100 * time.Millisecond)
 
-		// Try to read from done channel, it should block or not receive
-		select {
-		case <-idleInstance.done:
-			t.Fatal("done channel received a signal when running was false")
-		case <-time.After(50 * time.Millisecond):
-			// Expected: done channel did not receive a signal
-		}
-	})
-
-	t.Run("target.Broadcast signals done channel if running is true", func(t *testing.T) {
-		targetCond := sync.NewCond(&sync.Mutex{})
-		signalCond := sync.NewCond(&sync.Mutex{})
-		idler := Idle(t.Context(), targetCond, signalCond)
-
-		// Set running to true
-		idler.running.Store(true)
-
-		// short delay to ensure we've blocked.
-		time.Sleep(100 * time.Millisecond)
-		// Signal a condition, which should cause target.Broadcast()
 		signalCond.Broadcast()
 
-		// Expect to receive from done channel
-		select {
-		case <-idler.done:
-			// Success
-		case <-time.After(500 * time.Millisecond):
-			t.Fatal("done channel did not receive a signal when running was true")
-		}
+		// Give the broadcast time to propagate: signal's monitor goroutine
+		// wakes, relays via target.Broadcast(), target's monitor goroutine
+		// wakes and queues into done.
+		time.Sleep(100 * time.Millisecond)
+
+		expectedNext := Halt()
+		i := idleInstance.Idle(expectedNext, time.Second) // long timeout - must not be what fires below
+
+		start := time.Now()
+		returnedNext := i.Update(ctx, &Shared{})
+		require.Equal(t, expectedNext, returnedNext)
+		require.Less(t, time.Since(start), 200*time.Millisecond, "the queued wakeup from before Update was called must be delivered immediately, not lost until the timeout")
 	})
 }

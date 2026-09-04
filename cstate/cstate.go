@@ -6,11 +6,7 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
-
-	"github.com/james-lawrence/torrent/internal/atomicx"
-	"github.com/james-lawrence/torrent/internal/langx"
 )
 
 type logger interface {
@@ -37,8 +33,7 @@ func Idle(ctx context.Context, cond *sync.Cond, signals ...*sync.Cond) *Idler {
 		target:  cond,
 		signals: signals,
 		stop:    done,
-		done:    make(chan struct{}),
-		running: langx.Zero(atomicx.Bool(false)),
+		done:    make(chan struct{}, 1),
 	}).monitor(_ctx)
 }
 
@@ -48,7 +43,6 @@ type Idler struct {
 	signals []*sync.Cond
 	stop    context.CancelFunc
 	done    chan struct{}
-	running atomic.Bool
 }
 
 func (t *Idler) Stop() {
@@ -88,19 +82,15 @@ func (t *Idler) monitor(ctx context.Context) *Idler {
 			t.target.Wait()
 			t.target.L.Unlock()
 
-			if !t.running.Load() {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				continue
+			select {
+			case t.done <- struct{}{}:
+			default:
 			}
 
 			select {
-			case t.done <- struct{}{}:
 			case <-ctx.Done():
 				return
+			default:
 			}
 		}
 	}()
@@ -114,9 +104,7 @@ type idle struct {
 }
 
 func (t idle) Update(ctx context.Context, c *Shared) T {
-	defer t.Idler.running.Store(false)
 	defer t.Idler.timeout.Stop()
-	t.Idler.running.Store(true)
 	select {
 	case <-t.done:
 	case <-t.Idler.timeout.C:
