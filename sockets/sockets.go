@@ -64,6 +64,20 @@ type Socket interface {
 	Dial(ctx context.Context, addr string) (conn net.Conn, err error)
 }
 
+// PacketSocket is a single underlying socket that behaves as a
+// packet-oriented listener (e.g. a uTP socket): connection-accepting like a
+// net.Listener, but also usable as a net.PacketConn (e.g. for DHT), and able
+// to dial outbound connections over the same socket.
+type PacketSocket interface {
+	net.PacketConn
+	// Accept waits for and returns the next connection to the listener.
+	Accept() (net.Conn, error)
+	// Addr returns the listener's network address.
+	Addr() net.Addr
+	// DialContext dials an outbound connection over this socket.
+	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
+}
+
 type packetlistener interface {
 	net.PacketConn
 	// Accept waits for and returns the next connection to the listener.

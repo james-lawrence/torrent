@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/stretchr/testify/require"
 )
@@ -83,7 +84,11 @@ func TestServe(t *testing.T) {
 		require.Equal(t, 1, s.numBindings())
 	})
 
-	t.Run("ipv6 socket creates two bindings (ipv6 + ipv4)", func(t *testing.T) {
+	t.Run("ipv6 socket creates at least two bindings (ipv6 + ipv4)", func(t *testing.T) {
+		// Exact count is host-dependent: a wildcard bind now registers one
+		// binding per (scope, family) group actually present (loopback,
+		// link-local, routed), so a multi-homed host produces more than the
+		// routed-scope minimum of two.
 		s := mustNewServer(t)
 		pc, err := net.ListenUDP("udp6", &net.UDPAddr{IP: net.ParseIP("::"), Port: 0})
 		require.NoError(t, err)
@@ -91,7 +96,7 @@ func TestServe(t *testing.T) {
 
 		err = s.Serve(t.Context(), pc)
 		require.NoError(t, err)
-		require.Equal(t, 2, s.numBindings())
+		require.GreaterOrEqual(t, s.numBindings(), 2)
 
 		require.True(t, s.AddrPort(netip.MustParseAddrPort("8.8.8.8:12345")).Addr().Is4())
 		require.True(t, s.AddrPort(netip.MustParseAddrPort("[2a00:1370:81ac:820:4dea:ca75:322:3d54]:28935")).Addr().Is6())
@@ -106,5 +111,24 @@ func TestServe(t *testing.T) {
 		err = s.Serve(t.Context(), pc)
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, s.numBindings(), 1)
+	})
+
+	t.Run("wildcard socket must be reachable via its own loopback address", func(t *testing.T) {
+		// A socket bound to the wildcard address accepts traffic on every
+		// local address, loopback included - so a peer connecting to it over
+		// loopback must be recognized as reaching this binding. ":0" on
+		// network "udp" is the exact form a dual-stack wildcard bind takes in
+		// practice, letting the OS/Go pick the address, with no synthetic
+		// override of the computed best address.
+		s := mustNewServer(t)
+		pc, err := net.ListenPacket("udp", ":0")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = pc.Close() })
+
+		err = s.Serve(t.Context(), pc)
+		require.NoError(t, err)
+
+		got := s.ID(netip.MustParseAddrPort("127.0.0.1:12345"))
+		require.NotEqual(t, int160.Zero(), got, "wildcard-bound socket must recognize its own loopback address as reachable")
 	})
 }

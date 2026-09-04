@@ -2,8 +2,8 @@ package torrenttestx
 
 import (
 	"fmt"
-	"log"
 	"net"
+	"net/netip"
 	"testing"
 
 	"github.com/james-lawrence/torrent"
@@ -88,6 +88,11 @@ func QuickClientWithDHT(t testing.TB, dhts *dht.Server, options ...torrent.Clien
 	return Client(t, autobind.NewLoopback(autobind.EnableDHT(dhts)), torrent.NewMetadataCache(cdir), storage.NewFile(cdir), options...)
 }
 
+func QuickClientBinder(t testing.TB, binder autobind.Autobind, options ...torrent.ClientConfigOption) *torrent.Client {
+	cdir := t.TempDir()
+	return Client(t, binder, torrent.NewMetadataCache(cdir), storage.NewFile(cdir), options...)
+}
+
 func Client(t testing.TB, binder autobind.Autobind, mdcache torrent.MetadataStore, scache storage.ClientImpl, options ...torrent.ClientConfigOption) *torrent.Client {
 	cdir := t.TempDir()
 
@@ -98,12 +103,30 @@ func Client(t testing.TB, binder autobind.Autobind, mdcache torrent.MetadataStor
 				scache,
 				torrent.ClientConfigCacheDirectory(cdir),
 				torrent.ClientConfigSeed(true),
-				torrent.ClientConfigInfoLogger(log.New(log.Writer(), "[torrent] ", log.Flags())),
-				torrent.ClientConfigDebugLogger(log.New(log.Writer(), "[torrent] ", log.Flags())),
+				// torrent.ClientConfigInfoLogger(log.New(log.Writer(), "[torrent] ", log.Flags())),
+				// torrent.ClientConfigDebugLogger(log.New(log.Writer(), "[torrent] ", log.Flags())),
 				torrent.ClientConfigCompose(options...),
 				torrent.ClientConfigDialPoolSize(1),
 				torrent.ClientConfigUploadLimit(rate.NewLimiter(rate.Inf, 10)),
 			),
 		),
 	))(t)
+}
+
+// AddrPorts converts a client's listen addresses to netip.AddrPort, one per address.
+func AddrPorts(c *torrent.Client) (res []netip.AddrPort) {
+	for _, n := range c.ListenAddrs() {
+		var ap netip.AddrPort
+		switch v := n.(type) {
+		case *net.TCPAddr:
+			ip, _ := netip.AddrFromSlice(v.IP)
+			ap = netip.AddrPortFrom(ip, uint16(v.Port))
+		case *net.UDPAddr:
+			ip, _ := netip.AddrFromSlice(v.IP)
+			ap = netip.AddrPortFrom(ip, uint16(v.Port))
+		}
+		res = append(res, ap)
+	}
+
+	return res
 }

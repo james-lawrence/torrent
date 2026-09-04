@@ -322,15 +322,27 @@ func (s *Server) serveBinding(ctx context.Context, pc net.PacketConn, bestaddr n
 }
 
 func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
-	bestaddr := s.computeBestAddr(pc.LocalAddr())
-	if _, err := s.ServeBinding(ctx, pc, bestaddr); err != nil {
+	bound := pc.LocalAddr()
+
+	ap, err := netx.AddrPort(bound)
+	if err != nil {
+		return errorsx.Wrap(err, "unable to determine bound address")
+	}
+
+	if !netx.Wildcard(ap) {
+		_, err := s.ServeBinding(ctx, pc, s.computeBestAddr(bound))
 		return err
 	}
 
-	// TODO: dualstack socket check instead of just assuming all ip6 is dual stack.
-	if bestaddr.Addr().Unmap().Is6() {
-		_, err := s.serveBinding(ctx, pc, netx.ComputeBestAddr4(pc.LocalAddr()), false)
-		errorsx.Log(errorsx.Wrap(err, "failed to bind ip4 for an dual stack ipv6 socket binding"))
+	// A wildcard bind is reachable at every local scope (loopback, link-local,
+	// routed) simultaneously, on every family it covers (assumed dual-stack for
+	// IPv6) - register a binding per scope actually present, rather than
+	// collapsing to a single routed-scope "best" pick that can never include
+	// loopback or link-local.
+	for _, addr := range netx.ComputeReachableAddrs(bound) {
+		if _, err := s.serveBinding(ctx, pc, addr, false); err != nil {
+			return err
+		}
 	}
 
 	return nil

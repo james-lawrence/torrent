@@ -44,6 +44,11 @@ func AddrPortPriority(ap netip.AddrPort) int {
 	}
 }
 
+// Wildcard reports whether a is an unspecified bind address (0.0.0.0 / ::).
+func Wildcard(a netip.AddrPort) bool {
+	return a.Addr().Unmap().IsUnspecified()
+}
+
 // Reachable reports whether dst is reachable from a socket bound to from.
 // Reachability is determined by scope: loopback ↔ loopback only;
 // link-local ↔ link-local only; routed addresses (private + public) ↔ each
@@ -371,4 +376,68 @@ func computeBestAddr(ap netip.AddrPort, filter func(netip.AddrPort) bool) netip.
 	slices.SortStableFunc(ips, CmpAddrPortPriority)
 	best := langx.FirstNonZero(ips...)
 	return best
+}
+
+// ComputeReachableAddrs returns, for a wildcard-bound listener, one address per
+// (scope, family) group actually present on the host - loopback, link-local, and
+// routed, for the bound family and, if the bind is IPv6 (assumed dual-stack), for
+// IPv4 too. This is what a wildcard socket is genuinely reachable at, unlike
+// ComputeBestAddr/ComputeBestAddr4 which each collapse everything down to a
+// single routed-scope pick and so never include loopback or link-local. For a
+// listener bound to a specific (non-wildcard) address, it returns that address
+// unchanged.
+func ComputeReachableAddrs(bound net.Addr) []netip.AddrPort {
+	ap := errorsx.Zero(AddrPort(bound))
+	if !Wildcard(ap) {
+		return []netip.AddrPort{netip.AddrPortFrom(ap.Addr().Unmap(), ap.Port())}
+	}
+
+	ifaces, err := net.InterfaceAddrs()
+	if err != nil {
+		return []netip.AddrPort{ap}
+	}
+
+	ips := slicesx.MapTransform(func(n net.Addr) netip.AddrPort {
+		switch v := n.(type) {
+		case *net.IPNet:
+			addr, _ := netip.AddrFromSlice(v.IP)
+			return netip.AddrPortFrom(addr.Unmap(), ap.Port())
+		case *net.IPAddr:
+			addr, _ := netip.AddrFromSlice(v.IP)
+			return netip.AddrPortFrom(addr.Unmap(), ap.Port())
+		default:
+			return netip.AddrPortFrom(netip.Addr{}, ap.Port())
+		}
+	}, ifaces...)
+
+	blen := ap.Addr().Unmap().BitLen()
+	dualstack4 := ap.Addr().Unmap().Is6()
+
+	type group struct {
+		scope int
+		is4   bool
+	}
+
+	best := map[group]netip.AddrPort{}
+	for _, cand := range ips {
+		caddr := cand.Addr().Unmap()
+		if !caddr.IsValid() {
+			continue
+		}
+		if caddr.BitLen() != blen && !(dualstack4 && caddr.Is4()) {
+			continue
+		}
+
+		g := group{scope: addrScope(caddr), is4: caddr.Is4()}
+		if cur, ok := best[g]; !ok || CmpAddrPortPriority(cand, cur) < 0 {
+			best[g] = cand
+		}
+	}
+
+	out := make([]netip.AddrPort, 0, len(best))
+	for _, v := range best {
+		out = append(out, v)
+	}
+	slices.SortFunc(out, CmpAddrPort)
+	return out
 }

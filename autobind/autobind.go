@@ -122,6 +122,28 @@ func NewSpecified(dst string) Autobind {
 	}
 }
 
+// Local binds a single port to both a uTP (packet-oriented, DHT-capable)
+// socket and a TCP listener sharing that same port. Unlike New/NewLoopback,
+// which bind a fixed matrix of tcp4/tcp6/udp4/udp6 sockets internally and
+// hand the result straight to a Client, Local returns the raw components so
+// callers that need to wrap them first (e.g. to enforce a connection limit)
+// can do so before binding, via torrent.NewSocketsBind.
+func Local(network string, port uint16) (s0 sockets.PacketSocket, s1 net.Listener, err error) {
+	raw, err := utpx.New(network, fmt.Sprintf(":%d", port))
+	if err != nil {
+		return nil, nil, errorsx.Wrap(err, "unable to open utp socket")
+	}
+	s0 = raw
+
+	if addr, ok := s0.Addr().(*net.UDPAddr); ok {
+		if s1, err = net.Listen("tcp", fmt.Sprintf(":%d", addr.Port)); err != nil {
+			return nil, nil, errorsx.Wrap(langx.FirstNonZero(err, s0.Close()), "unable to open tcp socket")
+		}
+	}
+
+	return s0, s1, nil
+}
+
 // Bind the client to available networks. consumes the result of NewClient.
 func (t Autobind) Bind(cl *torrent.Client, err error) (*torrent.Client, error) {
 	var (

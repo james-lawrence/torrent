@@ -576,7 +576,6 @@ func (t *chunks) retry(r request) {
 	delete(t.outstanding, r.Digest)
 	t.unverified.Remove(uint32(cidx))
 	t.missing.AddInt(cidx)
-
 }
 
 func (t *chunks) release(r request) bool {
