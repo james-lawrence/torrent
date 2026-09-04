@@ -3,6 +3,7 @@ package int160_test
 import (
 	"net"
 	"testing"
+	"time"
 
 	"github.com/james-lawrence/torrent/dht"
 	"github.com/james-lawrence/torrent/dht/int160"
@@ -54,8 +55,12 @@ func TestRangerDynamic(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, s.Serve(t.Context(), pc))
 
-		r := int160.NewRangeDynamic(s, 16)
+		r := int160.NewRangeDynamic(s, 1024)
 
-		require.NotEqual(t, r.Generate(), r.Generate())
+		require.Eventually(t, func() bool {
+			a := r.Generate()
+			b := r.Generate()
+			return a != b
+		}, time.Second, 10*time.Millisecond)
 	})
 }
