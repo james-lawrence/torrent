@@ -84,12 +84,18 @@ func (t *digests) EnqueueBitmap(o *roaring.Bitmap) {
 	t.verify()
 }
 
-// wait for the digests to be complete
+// wait for the digests to be complete. pending.Count() alone is not a valid
+// completion signal - bitQueue is backed by a roaring.Bitmap (a set), so
+// Count() drops to 0 the instant an item is popped for processing, well
+// before its check() (real file I/O + hashing) actually finishes. reaping
+// tracks dispatched-but-not-yet-finished work and only reaches 0 once every
+// popped item's check() has returned, so it - not queue occupancy - is the
+// real "nothing outstanding" signal.
 func (t *digests) Wait() {
 	t.c.L.Lock()
 	defer t.c.L.Unlock()
 
-	for c := t.pending.Count(); c > 0; c = t.pending.Count() {
+	for atomic.LoadInt64(&t.reaping) > 0 || t.pending.Count() > 0 {
 		t.c.Wait()
 	}
 }
@@ -105,7 +111,16 @@ func (t *digests) verify() {
 			t.check(idx)
 		}
 
-		if remaining := atomic.AddInt64(&t.reaping, -1); remaining == 0 {
+		// Held across the terminal decrement so Wait's check-then-Wait
+		// sequence (guarded by the same t.c.L) can't observe reaping>0,
+		// then miss this Broadcast because it fired in the gap before
+		// Wait() actually registered: synchronize the state
+		// transition through the Cond's own lock.
+		t.c.L.Lock()
+		remaining := atomic.AddInt64(&t.reaping, -1)
+		t.c.L.Unlock()
+
+		if remaining == 0 {
 			t.c.Broadcast()
 		}
 	}()
