@@ -1356,6 +1356,10 @@ func (t *torrent) announceToDht(s *dht.Server, impliedPort bool) error {
 }
 
 func (t *torrent) dhtAnnouncer(s *dht.Server) {
+	if s == nil {
+		return
+	}
+
 	errdelay := time.Duration(0) // for the first run 0 delay to immediately find peers
 	for {
 		t.cln.config.debug().Println("dht ancouncer waiting for peers event", s.DynamicAddrPort(), t.md.ID)

@@ -584,7 +584,7 @@ func BenchmarkAddLargeTorrent(b *testing.B) {
 	require.NoError(b, err)
 	defer cl.Close()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		t, err := torrent.NewFromMetaInfoFile("testdata/bootstrap.dat.torrent")
 		if err != nil {
 			b.Fatal(err)
