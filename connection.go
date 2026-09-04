@@ -155,6 +155,12 @@ type connection struct {
 	PeerRequests          map[request]struct{}
 	PeerExtensionBytes    pp.ExtensionBits
 	PeerPrefersEncryption bool // as indicated by 'e' field in extension handshake
+	// The peer's real BitTorrent listening port, as indicated by the 'p'
+	// field in its extension handshake. Only meaningful for incoming
+	// connections: remoteAddr's port there is the peer's ephemeral outgoing
+	// source port for this socket, not their listening port. Zero if the
+	// peer hasn't told us (e.g. no extended handshake yet, or it declined).
+	PeerListenPort uint16
 
 	// bitmaps representing availability of chunks from the peer.
 	claimed     *roaring.Bitmap // represents chunks which our peer claims to have available.
@@ -951,6 +957,7 @@ func (cn *connection) onReadExtendedMsg(id pp.ExtensionNumber, payload []byte) (
 		cn.PeerClientName = d.V
 		cn.PeerPrefersEncryption = d.Encryption
 		cn.PeerExtensionIDs = d.M
+		cn.PeerListenPort = uint16(d.Port)
 		cn.cfg.debug().Printf("c(%p) seed(%t) extensions: %s\n", cn, cn.t.seeding(), spew.Sdump(d))
 
 		if d.MetadataSize != 0 {
