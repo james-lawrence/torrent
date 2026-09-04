@@ -809,12 +809,11 @@ func (t *torrent) setChunkSize(size uint64) {
 	resetChunks(t.chunks, size, langx.FirstNonZero(t.info, metainfo.NewInfo()))
 }
 
-// There's a connection to that address already.
+// There's a connection to that address already. Only checks established
+// connections - initiateConn's only caller passes a peer that PopMax just
+// atomically reserved, so the pool itself already guarantees no other
+// in-flight dial exists for that address.
 func (t *torrent) addrActive(p Peer) bool {
-	if t.peers.Connecting(p) {
-		return true
-	}
-
 	for _, c := range t.conns.list() {
 		if c.remoteAddr.Compare(p.AddrPort) == 0 {
 			return true

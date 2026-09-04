@@ -129,7 +129,7 @@ func TestClientTransferRateLimitedUpload(t *testing.T) {
 		// We are uploading 13 bytes (the length of the greeting torrent). The
 		// chunks are 2 bytes in length. Then the smallest burst we can run
 		// with is 2. Time taken is (13-burst)/rate.
-		SeederUploadRateLimiter: rate.NewLimiter(11, 6),
+		SeederUploadRateLimiter: rate.NewLimiter(11, 2),
 		ExportClientStatus:      true,
 	})
 	require.True(t, time.Since(started) > time.Second)

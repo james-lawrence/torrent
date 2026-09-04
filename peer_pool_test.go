@@ -57,3 +57,27 @@ func TestPrioritizedPeers(t *testing.T) {
 	min(nil)
 	pop(nil)
 }
+
+// TestPeerPoolPopMaxReservesAtomically proves a peer is considered active
+// the instant PopMax removes it, not only once a later, separate Loaned
+// call lands. Without that, a peer added twice in quick succession (e.g.
+// TuneClientPeer adding the same AddrPort once per listener, since Autosocket
+// binds uTP and TCP to the same port number) can be popped and dialed twice
+// concurrently: the second Add races the window between the first pop and
+// its eventual Loaned call, finds the peer in none of attempted/available/
+// loaned, and is wrongly treated as a brand new peer.
+func TestPeerPoolPopMaxReservesAtomically(t *testing.T) {
+	pp := newPeerPool(8, func(Peer) peerPriority { return 0 })
+	p := NewPeer(int160.Zero(), errorsx.Must(netip.ParseAddrPort("1.2.3.4:6001")), PeerOptionTrusted(true))
+
+	require.False(t, pp.Add(p), "sanity: first add is a genuinely new insert")
+
+	popped, ok := pp.PopMax()
+	require.True(t, ok)
+	require.Equal(t, p.AddrPort, popped.p.AddrPort)
+
+	require.True(t, pp.Add(p), "a peer must already be considered active immediately after being popped, before any separate Loaned call")
+
+	_, ok = pp.PopMax()
+	require.False(t, ok, "the same peer must not be poppable a second time while its first pop is still outstanding")
+}

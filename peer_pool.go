@@ -96,13 +96,6 @@ func (t *peerPool) Len() int {
 	return t.untried.Len()
 }
 
-func (t *peerPool) Connecting(p Peer) bool {
-	t.m.RLock()
-	defer t.m.RUnlock()
-	_, ok := t.loaned[p.AddrPort]
-	return ok
-}
-
 // Peer is returned to the pool
 func (t *peerPool) Attempted(p Peer, attempts uint64) {
 	if attempts > 3 {
@@ -125,7 +118,11 @@ func (t *peerPool) Attempted(p Peer, attempts uint64) {
 func (t *peerPool) Loaned(p Peer) {
 	t.m.Lock()
 	defer t.m.Unlock()
+	t.loan(p)
+}
 
+// loan marks p as loaned. caller must hold t.m.
+func (t *peerPool) loan(p Peer) {
 	p.LastAttempt = time.Now()
 	t.loaned[p.AddrPort] = p
 }
@@ -163,15 +160,27 @@ func (t *peerPool) DeleteMin() (ret prioritizedPeer, ok bool) {
 	return t.untried.DeleteMin()
 }
 
+// PopMax removes and returns the highest priority peer, atomically marking
+// it loaned in the same locked section - a peer must be reserved the
+// instant it's popped, not only once a later, separate Loaned call lands.
+// Without that, a peer added twice in quick succession (e.g. TuneClientPeer
+// adding the same AddrPort once per listener, since Autosocket binds uTP
+// and TCP to the same port number) can race: a second Add lands in the
+// window between the first pop and its caller getting around to calling
+// Loaned, finds the peer in none of attempted/available/loaned, and is
+// wrongly treated as a brand new peer - leading to two concurrent dials to
+// the same address.
 func (t *peerPool) PopMax() (p prioritizedPeer, ok bool) {
 	t.m.Lock()
 	defer t.m.Unlock()
 
 	if max, present := t.untried.DeleteMax(); present {
+		t.loan(max.p)
 		return max, present
 	}
 
 	if max, present := t.available.DeleteMax(); present {
+		t.loan(max.p)
 		return max, present
 	}
 
@@ -191,5 +200,10 @@ func (t *peerPool) PopMax() (p prioritizedPeer, ok bool) {
 		break
 	}
 
-	return t.available.DeleteMax()
+	if max, present := t.available.DeleteMax(); present {
+		t.loan(max.p)
+		return max, present
+	}
+
+	return p, false
 }
