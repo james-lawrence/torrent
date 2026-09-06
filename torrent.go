@@ -396,7 +396,7 @@ func TuneRecordMetadata(t *torrent) error {
 
 func tuneMerge(md Metadata) Tuner {
 	return func(t *torrent) error {
-		t.md.DisplayName = langx.DefaultIfZero(t.md.DisplayName, md.DisplayName)
+		t.md.DisplayName = langx.FirstNonZero(md.DisplayName, t.md.DisplayName)
 		t.md.Trackers = append(t.md.Trackers, md.Trackers...)
 
 		if md.ChunkSize != t.md.ChunkSize && md.ChunkSize != 0 {
@@ -553,10 +553,10 @@ func newTorrent(cl *Client, src Metadata, options ...Tuner) *torrent {
 		}),
 		conns:                   newconnset(2 * defaultMaxEstablishedConns),
 		pieceStateChanges:       pubsub.NewPubSub(),
-		storageOpener:           storage.NewClient(langx.DefaultIfZero(cl.config.defaultStorage, src.Storage)),
+		storageOpener:           storage.NewClient(langx.FirstNonZero(src.Storage, cl.config.defaultStorage)),
 		maxEstablishedConns:     atomicx.Int32(defaultMaxEstablishedConns),
 		duplicateRequestTimeout: time.Second,
-		chunks:                  newChunks(langx.DefaultIfZero(defaultChunkSize, src.ChunkSize), metainfo.NewInfo(), chunkoptCond(chunkcond)),
+		chunks:                  newChunks(langx.FirstNonZero(src.ChunkSize, defaultChunkSize), metainfo.NewInfo(), chunkoptCond(chunkcond)),
 		pex:                     newPex(),
 		storage:                 storage.NewZero(),
 		digests:                 new(digests),

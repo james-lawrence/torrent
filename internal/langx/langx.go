@@ -28,18 +28,6 @@ func FirstNonZero[T comparable](s ...T) T {
 	return x
 }
 
-func DefaultIfZero[T comparable](fallback T, v T) T {
-	var (
-		x T
-	)
-
-	if v != x {
-		return v
-	}
-
-	return fallback
-}
-
 func Must[T any](v T, err error) T {
 	if err != nil {
 		panic(err)

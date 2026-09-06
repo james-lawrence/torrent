@@ -204,7 +204,7 @@ func connexdht(ws *writerstate, n cstate.T) cstate.T {
 	cn := ws.connection
 	return cstate.Fn(func(context.Context, *cstate.Shared) cstate.T {
 		connaddr := cn.connaddr
-		port := langx.DefaultIfZero(cn.t.cln.LocalPort16(), connaddr.Port())
+		port := langx.FirstNonZero(connaddr.Port(), cn.t.cln.LocalPort16())
 		if !(cn.extensions.Supported(cn.PeerExtensionBytes, btprotocol.ExtensionBitDHT) && port > 0) {
 			cn.cfg.debug().Printf("posting dht not supported extension supported(%t) - port(%d)\n", cn.extensions.Supported(cn.PeerExtensionBytes, btprotocol.ExtensionBitDHT), port)
 			return n
