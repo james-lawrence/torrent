@@ -726,10 +726,6 @@ func (t _connwriterRequests) determineInterest(msg messageWriter) *roaring.Bitma
 		return t.requestable
 	}
 
-	if t.connection.t.chunks.Read(copHasUnverifiedNoMissing) {
-		t.connection.t.digests.EnqueueBitmap(bitmapx.Fill(t.connection.t.chunks.pieces))
-	}
-
 	return t.requestable
 }
 

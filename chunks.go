@@ -853,10 +853,6 @@ func copCompletedOutstandingDebugSnapshot(c *chunks) copCompletedOutstanding {
 	return copCompletedOutstanding{completed: int(c.completed.GetCardinality()), outstanding: len(c.outstanding)}
 }
 
-func copHasUnverifiedNoMissing(c *chunks) bool {
-	return c.missing.GetCardinality() == 0 && c.unverified.GetCardinality() > 0
-}
-
 type copDebugCounts struct {
 	missing, failed, outstanding, unverified, completed int
 }
