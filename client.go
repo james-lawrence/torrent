@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log"
 	"maps"
+	"math"
 	"net"
 	"net/netip"
 	"path/filepath"
@@ -68,7 +69,12 @@ type Client struct {
 
 	onClose []func()
 	conns   []sockets.Socket
-	dht     *dht.Server
+	// the addresses conns listen on, recorded as sockets bind so dialing our
+	// own address is rejected before it reaches the self connection detection
+	// in outgoingConnection - which bans the address it dialed, taking every
+	// other peer sharing it down with it.
+	self *connections.BloomBanIP
+	dht  *dht.Server
 
 	dialing  *netx.RacingDialer
 	torrents *memoryseeding
@@ -227,6 +233,8 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 		torrents: NewCache(cfg.defaultMetadata, NewBitmapCache(cfg.defaultCacheDirectory)),
 		_mu:      &sync.RWMutex{},
 		dialing:  netx.NewRacing(cfg.dialPoolSize),
+		// our own addresses do not stop being ours, so this never expires.
+		self: connections.NewBloomBanIP(math.MaxInt64),
 	}
 
 	defer func() {
@@ -248,6 +256,11 @@ func (cl *Client) Bind(s sockets.Socket) (err error) {
 	go cl.acceptConnections(s)
 
 	cl.lock()
+	if addr, cause := netx.AddrPort(s.Addr()); cause != nil {
+		log.Println("unable to record listener address, dials to it will not be recognized as ourselves", cause)
+	} else {
+		cl.self.Inhibit(selfip(addr), int(addr.Port()), errorsx.New("listening on this address"))
+	}
 	cl.conns = append(cl.conns, s)
 	cl.unlock()
 
@@ -755,6 +768,23 @@ func (cl *Client) publicAddr(peer netip.AddrPort) netip.AddrPort {
 		cl.publicIP(peer.Addr()),
 		cl.LocalPort16(),
 	)
+}
+
+// selfip normalizes an address into the form the self filter is keyed by. a
+// 4in6 address and its unmapped form mask to different byte slices, so both
+// Inhibit and Blocked have to agree on which of the two they use.
+func selfip(addr netip.AddrPort) net.IP {
+	return net.IP(addr.Addr().Unmap().AsSlice())
+}
+
+// listening reports whether addr is one of the addresses this client is
+// listening on, i.e. whether dialing it would connect us to ourselves. peers
+// gossiped over PEX routinely include the address of the client being
+// gossiped to, so this is consulted on every dial - the addresses are held in
+// a filter populated as sockets bind rather than rediscovered by walking the
+// sockets each time.
+func (cl *Client) listening(addr netip.AddrPort) bool {
+	return cl.self.Blocked(selfip(addr), int(addr.Port())) != nil
 }
 
 // ListenAddrs addresses currently being listened to.

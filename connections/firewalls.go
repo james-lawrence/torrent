@@ -1,8 +1,10 @@
 package connections
 
 import (
+	"encoding/binary"
 	"net"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/bits-and-blooms/bloom/v3"
@@ -23,6 +25,7 @@ type FirewallStateful interface {
 // NewBloomBanIP bans an IP address by adding to a bloom filter.
 func NewBloomBanIP(d time.Duration) *BloomBanIP {
 	return (&BloomBanIP{
+		m:        &sync.Mutex{},
 		duration: d,
 		banned:   bloom.NewWithEstimates(10000, 0.5),
 	}).reset()
@@ -31,12 +34,20 @@ func NewBloomBanIP(d time.Duration) *BloomBanIP {
 // BloomBanIP bans an IP address by adding it to a bloom filter.
 // BloomBanIP is stateful, and will track banned connections using a bloom filter.
 type BloomBanIP struct {
+	m           *sync.Mutex
 	duration    time.Duration
 	banned      *bloom.BloomFilter
 	bannedReset time.Time
 }
 
 func (t *BloomBanIP) reset() *BloomBanIP {
+	if time.Now().Before(t.bannedReset) {
+		return t
+	}
+
+	t.m.Lock()
+	defer t.m.Unlock()
+
 	t.banned.ClearAll()
 	t.bannedReset = time.Now().Add(t.duration)
 
@@ -45,11 +56,9 @@ func (t *BloomBanIP) reset() *BloomBanIP {
 
 // Blocked prevents banned connections from connecting for any reason until the timeout passes
 func (t *BloomBanIP) Blocked(ip net.IP, p int) error {
-	if t.bannedReset.Before(time.Now()) {
-		t.reset()
-	}
+	t.reset()
 
-	if t.banned.Test(maskLower8Bits(ip)) {
+	if t.banned.Test(bloomkey(ip, p)) {
 		return errorsx.Errorf("ip %s is banned", ip)
 	}
 
@@ -58,14 +67,38 @@ func (t *BloomBanIP) Blocked(ip net.IP, p int) error {
 
 // Inhibit ban an IP address within the smallest 8 bit range.
 func (t *BloomBanIP) Inhibit(ip net.IP, port int, cause error) {
-	if t.bannedReset.Before(time.Now()) {
-		t.reset()
+	t.reset()
+
+	t.banned.Add(bloomkey(ip, port))
+}
+
+// bloomkey derives the key an address is banned under. loopback addresses are
+// keyed by address and port: every peer on a loopback network shares a block,
+// and frequently the address itself, so banning the block would take out every
+// other local peer along with the offender. private addresses are keyed by the
+// exact address, anything else by the smallest 8 bit range.
+//
+// Blocked and Inhibit have to derive the key the same way, otherwise an
+// address is banned under one key and looked up under another.
+func bloomkey(ip net.IP, port int) []byte {
+	v16 := ip.To16()
+	if v16 == nil {
+		return maskLower8Bits(ip)
 	}
 
-	if addr := netip.AddrFrom16([16]byte(ip.To16())); addr.IsPrivate() {
-		t.banned.Add(ip)
-	} else {
-		t.banned.Add(maskLower8Bits(ip))
+	// normalize before keying: the 4 byte and 4in6 forms of an address name
+	// the same peer, but they mask to different byte slices and a 4in6
+	// address reports neither loopback nor private.
+	addr := netip.AddrFrom16([16]byte(v16)).Unmap()
+	normalized := net.IP(addr.AsSlice())
+
+	switch {
+	case addr.IsLoopback():
+		return binary.BigEndian.AppendUint16(normalized, uint16(port))
+	case addr.IsPrivate():
+		return normalized
+	default:
+		return maskLower8Bits(normalized)
 	}
 }
 

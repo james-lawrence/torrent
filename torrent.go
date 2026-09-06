@@ -1171,6 +1171,12 @@ func (t *torrent) openNewConns() {
 			return
 		}
 
+		// final guard against connecting to ourselves and triggering a ban.
+		if t.cln.listening(popped.p.AddrPort) {
+			t.cln.config.debug().Printf("openNewConns: skipping our own address %s\n", popped.p.AddrPort)
+			continue
+		}
+
 		t.cln.config.debug().Printf("%p initiating connection to peer %s\n", t, popped.p.AddrPort)
 		// log.Printf("%p initiating connection to peer %s\n", t, popped.p.AddrPort)
 		t.initiateConn(context.Background(), popped.p)
