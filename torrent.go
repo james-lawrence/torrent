@@ -497,7 +497,7 @@ func VerifyStored(ctx context.Context, md *metainfo.MetaInfo, t io.ReaderAt) (mi
 
 	chunks := newChunks(defaultChunkSize, info)
 	digests := newDigests(t, func(i int) *metainfo.Piece {
-		return langx.Autoptr(info.Piece(i))
+		return new(info.Piece(i))
 	}, func(idx int, cause error) func() {
 		chunks.Hashed(uint64(idx), cause)
 		return func() {}

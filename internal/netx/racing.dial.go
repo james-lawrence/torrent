@@ -44,7 +44,7 @@ func NewRacing(n uint16) *RacingDialer {
 				return nil
 			}
 
-			w.failure.CompareAndSwap(nil, langx.Autoptr(err))
+			w.failure.CompareAndSwap(nil, new(err))
 			if w.outstanding.Add(^uint32(0)) == 0 {
 				w.done(err)
 				close(w.fastest)

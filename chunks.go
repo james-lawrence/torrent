@@ -90,7 +90,7 @@ func newChunks(clength uint64, m *metainfo.Info, options ...chunkopt) *chunks {
 		panic("chunksize cannot be zero")
 	}
 
-	p := langx.Autoptr(langx.Clone(chunks{
+	p := new(langx.Clone(chunks{
 		chunkstate: chunkstate{
 			meta:        m,
 			pieces:      uint64(m.NumPieces()),

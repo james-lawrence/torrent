@@ -214,7 +214,7 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 func (t _connreaderUpload) resetuploadavailability(delay time.Duration) {
 	// t.cfg.debug().Printf("c(%p) seed(%t) setting next upload - %s\n", t.connection, t.seed, delay)
 	next := time.Now().Add(delay)
-	t.uploadavailable.Store(langx.Autoptr(next))
+	t.uploadavailable.Store(new(next))
 }
 
 func (t _connreaderUpload) Update(ctx context.Context, _ *cstate.Shared) (r cstate.T) {

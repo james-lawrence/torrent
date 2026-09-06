@@ -9,7 +9,6 @@ import (
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/dht/krpc"
 	peer_store "github.com/james-lawrence/torrent/dht/peer-store"
-	"github.com/james-lawrence/torrent/internal/langx"
 )
 
 // Standard Muxer configuration used by the server.
@@ -83,7 +82,7 @@ func (t HandlerPeers) Handle(ctx context.Context, src Addr, srv *Server, b Bindi
 
 	if ps := srv.peers; ps != nil {
 		r.Values = filterPeers(src.IP(), msg.A.Want, ps.GetPeers(peer_store.InfoHash(msg.A.InfoHash)))
-		r.Token = langx.Autoptr(srv.createToken(src))
+		r.Token = new(srv.createToken(src))
 	}
 
 	if len(r.Values) == 0 {
@@ -137,7 +136,7 @@ func (t Bep44Get) Handle(ctx context.Context, source Addr, s *Server, b Binding,
 		return err
 	}
 
-	r.Token = langx.Autoptr(s.createToken(source))
+	r.Token = new(s.createToken(source))
 
 	item, err := s.store.Get(bep44.Target(m.A.Target))
 	if err == bep44.ErrItemNotFound {

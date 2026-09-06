@@ -3,11 +3,6 @@ package langx
 
 import "reflect"
 
-// Autoptr converts a value into a pointer
-func Autoptr[T any](a T) *T {
-	return &a
-}
-
 // safely converts a pointer to its value, uses the zero value for nil.
 func Zero[T any](a *T) (zero T) {
 	if a == nil {

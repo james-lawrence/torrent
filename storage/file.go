@@ -60,10 +60,11 @@ func infoHashPathMakerV0(baseDir string, infoHash int160.T, info *metainfo.Info,
 
 // All Torrent data stored in this baseDir
 func NewFile(baseDir string, options ...FileOption) *fileClientImpl {
-	return langx.Autoptr(langx.Clone(fileClientImpl{
+	return new(langx.Clone(fileClientImpl{
 		baseDir:   baseDir,
 		pathMaker: InfoHashPathMaker,
 	}, options...))
+
 }
 
 func (me *fileClientImpl) Close() error {

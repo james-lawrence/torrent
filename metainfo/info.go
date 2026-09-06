@@ -34,7 +34,7 @@ func OptionDisplayName(s string) Option {
 }
 
 func NewFromReader(src io.Reader, options ...Option) (info *Info, err error) {
-	info = langx.Autoptr(langx.Clone(Info{
+	info = new(langx.Clone(Info{
 		PieceLength: bytesx.MiB,
 	}, options...))
 
@@ -55,9 +55,10 @@ func NewFromReader(src io.Reader, options ...Option) (info *Info, err error) {
 }
 
 func NewInfo(options ...Option) *Info {
-	return langx.Autoptr(langx.Clone(Info{
+	return new(langx.Clone(Info{
 		PieceLength: bytesx.MiB,
 	}, options...))
+
 }
 
 func NewInfoFromReader(r io.Reader, options ...Option) (_ *Info, err error) {
@@ -69,7 +70,7 @@ func NewInfoFromReader(r io.Reader, options ...Option) (_ *Info, err error) {
 }
 
 func NewFromPath(root string, options ...Option) (info *Info, err error) {
-	info = langx.Autoptr(langx.Clone(Info{
+	info = new(langx.Clone(Info{
 		Name:        filepath.Base(root),
 		PieceLength: bytesx.MiB,
 	}, options...))

@@ -450,7 +450,7 @@ func (cn *connection) peerPiecesChanged() {
 		return
 	}
 
-	cn.refreshrequestable.Store(langx.Autoptr(time.Now()))
+	cn.refreshrequestable.Store(new(time.Now()))
 	if cn.needsresponse.CompareAndSwap(false, true) {
 		cn.request.Broadcast()
 	}
@@ -718,7 +718,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder, ws *writ
 	}
 
 	cn.readMsg(&msg)
-	cn.lastMessageReceived.Store(langx.Autoptr(time.Now()))
+	cn.lastMessageReceived.Store(new(time.Now()))
 
 	if msg.Keepalive {
 		dc := cn.t.chunks.Read(copDebugSnapshot)
@@ -973,7 +973,7 @@ func (t *torrent) gotMetadataExtensionMsg(payload []byte, c *connection, ws *wri
 		// defer log.Printf("c(%p) seed(%t) METADATA SAVED %s\n", c, t.seeding(), spew.Sdump(d))
 
 		t.saveMetadataPiece(d.Index, payload[begin:])
-		c.lastUsefulChunkReceived.Store(langx.Autoptr(time.Now()))
+		c.lastUsefulChunkReceived.Store(new(time.Now()))
 		return t.maybeCompleteMetadata(c)
 	case pp.RejectMetadataExtensionMsgType:
 		return nil
@@ -1013,7 +1013,7 @@ func (cn *connection) receiveChunk(msg *pp.Message, ws *writerstate) error {
 
 	cn.allStats(add(1, func(cs *ConnStats) *count { return &cs.ChunksReadUseful }))
 	cn.allStats(add(int64(len(msg.Piece)), func(cs *ConnStats) *count { return &cs.BytesReadUsefulData }))
-	cn.lastUsefulChunkReceived.Store(langx.Autoptr(time.Now()))
+	cn.lastUsefulChunkReceived.Store(new(time.Now()))
 	cn.chunksReceived.Add(1)
 
 	// cn.cfg.debug().Printf("c(%p) - received chunk d(%020d) r(%d,%d,%d)\n", cn, req.Digest, req.Index, req.Begin, req.Length)

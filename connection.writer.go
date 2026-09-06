@@ -37,7 +37,7 @@ func RunHandshookConn(c *connection, t *torrent) error {
 
 	c.conn.SetWriteDeadline(time.Time{})
 	c.r = deadlineReader{c.conn, c.r}
-	t.lastConnection.Store(langx.Autoptr(time.Now()))
+	t.lastConnection.Store(new(time.Now()))
 	completedHandshakeConnectionFlags.Add(c.connectionFlags(), 1)
 
 	defer t.dropConnection(c)
@@ -559,7 +559,7 @@ func (t _connWriterSyncBitfield) Update(ctx context.Context, _ *cstate.Shared) (
 		return t.next
 	}
 
-	ws.resyncbitfield.Store(langx.Autoptr(time.Now().Add(time.Minute)))
+	ws.resyncbitfield.Store(new(time.Now().Add(time.Minute)))
 
 	dup := ws.t.chunks.Clone(ws.t.chunks.completed)
 	dup.AndNot(ws.sentHaves)
@@ -681,7 +681,7 @@ func (t _connwriterRequests) determineInterest(msg messageWriter) *roaring.Bitma
 
 	if snap := t.t.chunks.Read(copCompletedOutstandingDebugSnapshot); uint64(snap.completed) == t.t.chunks.pieces {
 		t.cfg.debug().Printf("c(%p) seed(%t) disabling requestable - have all data m(%d) o(%d) c(%d) p(%d)\n", t.connection, t.seed, snap.completed, snap.outstanding, snap.completed, t.t.chunks.pieces)
-		t.refreshrequestable.Store(langx.Autoptr(timex.Inf()))
+		t.refreshrequestable.Store(new(timex.Inf()))
 		t.requestable = roaring.New()
 		return t.requestable
 	}
@@ -704,7 +704,7 @@ func (t _connwriterRequests) determineInterest(msg messageWriter) *roaring.Bitma
 		t._mu.RUnlock()
 	}
 
-	t.refreshrequestable.Store(langx.Autoptr(timex.Inf()))
+	t.refreshrequestable.Store(new(timex.Inf()))
 
 	tmp := bitmapx.Fill(t.t.chunks.cmaximum)
 	tmp.AndAny(fastset, claimed)
@@ -776,7 +776,7 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg messageW
 			// mark out available set for refresh when we hit this state.
 			// this is because we remove chunks from our requestable set before we receive them.
 			// and when we run out of work and there is more things to request it means we missed some.
-			t.refreshrequestable.Store(langx.Autoptr(time.Now()))
+			t.refreshrequestable.Store(new(time.Now()))
 
 			t.t.chunks.MergeInto(t.t.chunks.missing, t.t.chunks.failed)
 			t.t.chunks.FailuresReset()
@@ -861,7 +861,7 @@ func (t _connwriterKeepalive) Update(ctx context.Context, _ *cstate.Shared) csta
 		return cstate.Failure(errorsx.Wrap(err, "keepalive encoding failed"))
 	}
 
-	ws.keepaliverequired.Store(langx.Autoptr(time.Now().Add(ws.keepAliveTimeout)))
+	ws.keepaliverequired.Store(new(time.Now().Add(ws.keepAliveTimeout)))
 
 	return connwriterFlush(t.next, ws)
 }
@@ -888,7 +888,7 @@ func (t _connwriterFlush) Update(ctx context.Context, _ *cstate.Shared) cstate.T
 	}
 
 	if n != 0 {
-		ws.keepaliverequired.Store(langx.Autoptr(time.Now().Add(ws.keepAliveTimeout)))
+		ws.keepaliverequired.Store(new(time.Now().Add(ws.keepAliveTimeout)))
 	}
 
 	return t.next

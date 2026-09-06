@@ -9,7 +9,6 @@ import (
 
 	"github.com/james-lawrence/torrent/dht/int160"
 	"github.com/james-lawrence/torrent/internal/bytesx"
-	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/james-lawrence/torrent/storage"
 	"github.com/james-lawrence/torrent/torrenttest"
@@ -46,7 +45,7 @@ func newBlockingReaderFixture(t *testing.T, npieces int) blockingReaderFixture {
 
 	c := newChunks(uint64(pieceLength), info)
 	d := newDigests(impl, func(idx int) *metainfo.Piece {
-		return langx.Autoptr(info.Piece(idx))
+		return new(info.Piece(idx))
 	}, func(idx int, cause error) func() {
 		c.Hashed(uint64(idx), cause)
 		return func() {}

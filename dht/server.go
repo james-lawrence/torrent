@@ -187,7 +187,7 @@ func (t discard) Print(v ...any) {
 
 // NewServer initializes a new DHT node server.
 func NewServer(k int, options ...Option) (s *Server, err error) {
-	s = langx.Autoptr(langx.Clone(Server{
+	s = new(langx.Clone(Server{
 		k:           k,
 		id:          atomicx.Pointer(int160.Random()),
 		dynamicaddr: atomicx.Pointer(netip.AddrPortFrom(netip.IPv6Unspecified(), 0)),
