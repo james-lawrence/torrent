@@ -721,8 +721,11 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder, ws *writ
 		return msg, fmt.Errorf("received fast extension message (type=%v) but extension is disabled", msg.Type)
 	}
 
-	dc := cn.t.chunks.Read(copDebugSnapshot)
-	cn.cfg.debug().Printf("(%d) c(%p) id(%s) seed(%t) remote(%s) claimed(%d) - RECEIVED MESSAGE: %s - pending(%d) - missing(%d) - failed(%d) - outstanding(%d) - unverified(%d) - completed(%d)\n", os.Getpid(), cn, cn.t.md.ID, cn.cfg.Seed, cn.conn.RemoteAddr(), cn.claimed.GetCardinality(), msg.Type, ws.requestsLen(), dc.missing, dc.failed, dc.outstanding, dc.unverified, dc.completed)
+	// runs for every message received, and its arguments are evaluated whether
+	// or not debug logging is enabled - a chunks snapshot and two bitmap
+	// cardinalities, each behind a lock. uncomment when tracing a connection.
+	// dc := cn.t.chunks.Read(copDebugSnapshot)
+	// cn.cfg.debug().Printf("(%d) c(%p) id(%s) seed(%t) remote(%s) claimed(%d) - RECEIVED MESSAGE: %s - pending(%d) - missing(%d) - failed(%d) - outstanding(%d) - unverified(%d) - completed(%d)\n", os.Getpid(), cn, cn.t.md.ID, cn.cfg.Seed, cn.conn.RemoteAddr(), cn.claimed.GetCardinality(), msg.Type, ws.requestsLen(), dc.missing, dc.failed, dc.outstanding, dc.unverified, dc.completed)
 
 	switch msg.Type {
 	case pp.Choke:
