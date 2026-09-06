@@ -19,10 +19,11 @@ import (
 type empty struct {
 	Outstanding int
 	Missing     int
+	Failed      int
 }
 
 func (t empty) Error() string {
-	return fmt.Sprintf("empty queue: outstanding requests(%d) - missing requests(%d)", t.Outstanding, t.Missing)
+	return fmt.Sprintf("empty queue: outstanding requests(%d) - missing requests(%d) - failed requests(%d)", t.Outstanding, t.Missing, t.Failed)
 }
 
 func chunksPerPiece(plength, clength int64) int64 {
@@ -297,7 +298,7 @@ func (t *chunks) peekn(available *roaring.Bitmap, dst []peeked) (int, error) {
 	union.And(t.missing)
 
 	if union.IsEmpty() {
-		return 0, empty{Outstanding: len(t.outstanding), Missing: int(t.missing.GetCardinality())}
+		return 0, empty{Outstanding: len(t.outstanding), Missing: int(t.missing.GetCardinality()), Failed: int(t.failed.GetCardinality())}
 	}
 
 	it := union.Iterator()
@@ -321,7 +322,7 @@ func (t *chunks) peek(available *roaring.Bitmap) (cidx int, req request, err err
 		return -1, request{}, err
 	}
 	if n == 0 {
-		return -1, request{}, empty{Outstanding: len(t.outstanding), Missing: int(t.missing.GetCardinality())}
+		return -1, request{}, empty{Outstanding: len(t.outstanding), Missing: int(t.missing.GetCardinality()), Failed: int(t.failed.GetCardinality())}
 	}
 	return int(buf[0].cidx), buf[0].req, nil
 }
@@ -548,9 +549,15 @@ func (t *chunks) Pop(n int, available *roaring.Bitmap) (reqs []request, err erro
 		return nil, err
 	}
 
+	// stamp the reservation as the chunk becomes outstanding - this is what
+	// reap measures the grace period from. left unset it defaults to the zero
+	// time, which makes every request expired the moment it is created.
+	ts := time.Now()
+
 	reqs = make([]request, filled)
 	for i := range filled {
 		p := dst[i]
+		p.req.Reserved = ts
 		t.outstanding[p.req.Digest] = p.req
 		t.missing.Remove(uint32(p.cidx))
 		reqs[i] = p.req

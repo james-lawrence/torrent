@@ -132,9 +132,7 @@ type connection struct {
 	Choked *atomic.Bool // we have prevented the peer from making requests
 	// requests (the requests we've made of the peer) lives on *writerstate,
 	// guarded by its own mutex (writerstate.mu / mutate / view) - mainReadLoop
-	// writes to it via ws.mutate. requestcount mirrors its length atomically
-	// so any goroutine can read the count cheaply without taking that lock.
-	requestcount atomic.Int32
+	// writes to it via ws.mutate, and reads its length via ws.requestsLen.
 
 	// sentHaves is exclusively writer-owned: set once during the pre-spawn
 	// handshake (ConnExtensions -> connexfast, which runs synchronously
@@ -342,13 +340,6 @@ func (cn *connection) peerRequestsLen() int {
 	cn.cmu().Lock()
 	defer cn.cmu().Unlock()
 	return len(cn.PeerRequests)
-}
-
-// requestsLen returns the number of requests we currently have outstanding
-// to the peer. Backed by requestcount rather than the (writer-owned)
-// requests map itself, so it's cheap to read from any goroutine.
-func (cn *connection) requestsLen() int {
-	return int(cn.requestcount.Load())
 }
 
 func (cn *connection) onPeerSentCancel(r request, ws *writerstate) {
@@ -731,7 +722,7 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder, ws *writ
 	}
 
 	dc := cn.t.chunks.Read(copDebugSnapshot)
-	cn.cfg.debug().Printf("(%d) c(%p) id(%s) seed(%t) remote(%s) claimed(%d) - RECEIVED MESSAGE: %s - pending(%d) - missing(%d) - failed(%d) - outstanding(%d) - unverified(%d) - completed(%d)\n", os.Getpid(), cn, cn.t.md.ID, cn.cfg.Seed, cn.conn.RemoteAddr(), cn.claimed.GetCardinality(), msg.Type, cn.requestsLen(), dc.missing, dc.failed, dc.outstanding, dc.unverified, dc.completed)
+	cn.cfg.debug().Printf("(%d) c(%p) id(%s) seed(%t) remote(%s) claimed(%d) - RECEIVED MESSAGE: %s - pending(%d) - missing(%d) - failed(%d) - outstanding(%d) - unverified(%d) - completed(%d)\n", os.Getpid(), cn, cn.t.md.ID, cn.cfg.Seed, cn.conn.RemoteAddr(), cn.claimed.GetCardinality(), msg.Type, ws.requestsLen(), dc.missing, dc.failed, dc.outstanding, dc.unverified, dc.completed)
 
 	switch msg.Type {
 	case pp.Choke:

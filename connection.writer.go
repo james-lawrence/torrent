@@ -236,6 +236,7 @@ func newWriterState(cn *connection) *writerstate {
 		fastset:            roaring.New(),
 		touched:            roaring.New(),
 		requests:           make(map[uint64]request, cn.cfg.maximumOutstandingRequests),
+		requested:          roaring.New(),
 		bufferLimit:        writebufferscapacity,
 		buffer:             bytes.NewBuffer(make([]byte, 0, writebufferscapacity)),
 		pool: sync.Pool{New: func() any {
@@ -299,10 +300,13 @@ type writerstate struct {
 	PeerChoked bool            // peer has restricted us from making requests.
 	fastset    *roaring.Bitmap // represents chunks which our peer will allow us to request while choked.
 	touched    *roaring.Bitmap // pieces we've accepted chunks for from the peer.
-	// requests (what we've asked the peer for). requestcount mirrors its
-	// length atomically so other goroutines can read the count without
-	// taking mu.
-	requests map[uint64]request
+	// requests (what we've asked the peer for), keyed by digest so incoming
+	// chunk/reject messages can find their request. requested is the same
+	// set indexed by chunk id - membership drives both the dedupe in
+	// request() and requestsLen(), so the two can never disagree about how
+	// many requests are outstanding.
+	requests  map[uint64]request
+	requested *roaring.Bitmap
 	// buffer holds messages queued but not yet flushed to the wire.
 	// Written from the writer's own code, mainReadLoop (reject/PEX/metadata
 	// requests posted in response to incoming messages), and, pre-spawn,
@@ -336,6 +340,14 @@ func (ws *writerstate) view[T any](op func(*writerstate) T) T {
 	return op(ws)
 }
 
+// requestsLen returns the number of requests we currently have outstanding
+// to the peer. Backed by the requested bitmap's cardinality, which is
+// maintained by the same CheckedAdd/Remove pairs that decide whether a chunk
+// is in flight - so the count can't drift from the set it describes.
+func (ws *writerstate) requestsLen() int {
+	return ws.view(func(ws *writerstate) int { return int(ws.requested.GetCardinality()) })
+}
+
 func (ws *writerstate) peerChoked() (r bool) {
 	return ws.view(func(ws *writerstate) bool { return ws.PeerChoked })
 }
@@ -347,7 +359,7 @@ func (ws *writerstate) clearRequestsLocked(reqs ...request) (ok bool) {
 			continue
 		}
 		delete(ws.requests, r.Digest)
-		ws.requestcount.Add(-1)
+		ws.requested.Remove(uint32(ws.t.chunks.requestCID(r)))
 		ok = true
 	}
 	return ok
@@ -362,7 +374,7 @@ func (ws *writerstate) releaseRequestLocked(r request) (ok bool) {
 
 	// ws.cfg.debug().Printf("c(%p) - releasing request d(%020d) r(%d,%d,%d)\n", ws, r.Digest, r.Index, r.Begin, r.Length)
 	delete(ws.requests, r.Digest)
-	ws.requestcount.Add(-1)
+	ws.requested.Remove(uint32(ws.t.chunks.requestCID(r)))
 	ws.t.chunks.Retry(r)
 
 	return true
@@ -731,10 +743,25 @@ func (t _connwriterRequests) determineInterest(msg messageWriter) *roaring.Bitma
 
 // Proxies the messageWriter's response.
 func (t _connwriterRequests) request(r request, mw messageWriter) bool {
+	var duplicate bool
+
 	t.mutate(func(ws *writerstate) {
+		// CheckedAdd reports whether the chunk was newly requested. a chunk
+		// we've already asked this peer for and haven't heard back on is
+		// wasted bandwidth to ask for again - chunks come back into play from
+		// under us (a reaped request, a failed digest) while the peer may
+		// still be about to answer the original.
+		if duplicate = !ws.requested.CheckedAdd(uint32(ws.t.chunks.requestCID(r))); duplicate {
+			return
+		}
+
 		ws.requests[r.Digest] = r
-		ws.requestcount.Add(1)
 	})
+
+	// not a filled buffer - keep filling from the rest of the batch.
+	if duplicate {
+		return true
+	}
 
 	return mw(btprotocol.Message{
 		Type:   btprotocol.Request,
@@ -770,9 +797,17 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg messageW
 	t.lowrequestwatermark += min(1, int(t.chunksReceived.Swap(0)*4-t.chunksRejected.Swap(0)))
 	t.lowrequestwatermark = min(t.lowrequestwatermark, int(t.PeerMaxRequests.Load()))
 
+	// exclude what we're already waiting on this peer for. done as a set
+	// difference at the point of use rather than by draining requestable,
+	// which has to keep meaning "what this peer can serve" - a chunk that
+	// returns to missing is immediately requestable again by anyone.
+	pending := t.view(func(ws *writerstate) *roaring.Bitmap {
+		return roaring.AndNot(available, ws.requested)
+	})
+
 	max := max(0, t.lowrequestwatermark-t.requestsLen())
-	if reqs, err = t.t.chunks.Pop(max, available); errors.As(err, &unavailable) {
-		if len(reqs) == 0 && t.requestable.IsEmpty() && (unavailable.Missing > 0 || unavailable.Outstanding > 0) {
+	if reqs, err = t.t.chunks.Pop(max, pending); errors.As(err, &unavailable) {
+		if len(reqs) == 0 && (unavailable.Missing > 0 || unavailable.Outstanding > 0 || unavailable.Failed > 0) {
 			// mark out available set for refresh when we hit this state.
 			// this is because we remove chunks from our requestable set before we receive them.
 			// and when we run out of work and there is more things to request it means we missed some.
@@ -795,11 +830,6 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg messageW
 			t.cfg.debug().Printf("c(%p) seed(%t) done filling after(%d)\n", t.connection, t.seed, max)
 			break
 		}
-
-		// remove requests that have been requested to prevent them from
-		// being requested from this connection until requestable is recalculated.
-		// which happens whenever we run out of chunks to request.
-		t.requestable.Remove(uint32(t.t.chunks.requestCID(req)))
 
 		// t.cfg.debug().Printf("c(%p) seed(%t) choked(%t) requested(%d, %d, %d) remaining(%d)\n", t.connection, t.seed, t.PeerChoked, req.Index, req.Begin, req.Length, t.requestable.GetCardinality())
 	}
