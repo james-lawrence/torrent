@@ -968,7 +968,10 @@ func (t *torrent) setInfoBytes(b []byte) error {
 
 	t.metadataBytes = b
 	t.metadataCompletedChunks = nil
-	*t.digests = newDigestsFromTorrent(t)
+	// only the storage changed here (setInfo opens it), and digests may already
+	// have workers running against this exact pointer - so rebind the reader
+	// instead of replacing the struct underneath them.
+	t.digests.rebind(t.storage)
 
 	t.onSetInfo()
 
