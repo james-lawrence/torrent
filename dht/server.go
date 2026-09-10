@@ -311,13 +311,11 @@ func (s *Server) serveBinding(ctx context.Context, pc net.PacketConn, bestaddr n
 	}
 
 	s.wg.Go(func() {
-		defer s.wg.Done()
 		for detected := range seq {
 			updateaddr(fixed, detected)
 		}
 	})
 	s.wg.Go(func() {
-		defer s.wg.Done()
 		done(s.serveUntilClosed(ctx, b))
 	})
 

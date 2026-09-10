@@ -367,23 +367,62 @@ func TestChunksFailedThenRetryClearsUnverified(t *testing.T) {
 }
 
 func TestChunksPop(t *testing.T) {
-	info, err := fromFile("testdata/bootstrap.dat.torrent")
-	require.NoError(t, err)
-	p := quickpopulate(newChunks(uint64(info.PieceLength), &info))
+	t.Run("pops missing chunks in index order", func(t *testing.T) {
+		info, err := fromFile("testdata/bootstrap.dat.torrent")
+		require.NoError(t, err)
+		p := quickpopulate(newChunks(uint64(info.PieceLength), &info))
 
-	reqs, err := p.Pop(1, p.missing.Clone())
-	require.NoError(t, err)
-	for _, req := range reqs {
-		require.Equal(t, 0, int(req.Index))
-		require.Equal(t, true, req.Reserved.Before(time.Now()))
-	}
+		reqs, err := p.Pop(1, p.missing.Clone())
+		require.NoError(t, err)
+		for _, req := range reqs {
+			require.Equal(t, 0, int(req.Index))
+			require.Equal(t, true, req.Reserved.Before(time.Now()))
+		}
 
-	reqs, err = p.Pop(1, p.missing.Clone())
-	require.NoError(t, err)
-	for _, req := range reqs {
-		require.Equal(t, 1, int(req.Index))
-		require.Equal(t, true, req.Reserved.Before(time.Now()))
-	}
+		reqs, err = p.Pop(1, p.missing.Clone())
+		require.NoError(t, err)
+		for _, req := range reqs {
+			require.Equal(t, 1, int(req.Index))
+			require.Equal(t, true, req.Reserved.Before(time.Now()))
+		}
+	})
+
+	t.Run("far from completion: a chunk already inflight to one connection is not offered to another", func(t *testing.T) {
+		p := quickpopulate(newChunks(256, tinyTorrentInfo()))
+
+		reqs, err := p.Pop(1, p.missing.Clone())
+		require.NoError(t, err)
+		require.Len(t, reqs, 1)
+		victim := reqs[0]
+
+		available := roaring.New()
+		available.AddInt(p.requestCID(victim))
+
+		second, err := p.Pop(1, available)
+		require.Error(t, err, "the only candidate is already inflight to someone else and should not be offered again")
+		require.Empty(t, second)
+	})
+
+	t.Run("near completion: a chunk already inflight to one connection is offered to another", func(t *testing.T) {
+		p := quickpopulate(newChunks(256, tinyTorrentInfo()))
+
+		reqs, err := p.Pop(1, p.missing.Clone())
+		require.NoError(t, err)
+		require.Len(t, reqs, 1)
+		victim := reqs[0]
+
+		// force near completion. copRequestPool only reads completed/pieces,
+		// so it doesn't need to be otherwise consistent with missing here.
+		p.completed.AddRange(0, p.pieces)
+
+		available := roaring.New()
+		available.AddInt(p.requestCID(victim))
+
+		second, err := p.Pop(1, available)
+		require.NoError(t, err)
+		require.Len(t, second, 1)
+		require.Equal(t, victim.Digest, second[0].Digest)
+	})
 }
 
 func TestChunksComplete(t *testing.T) {

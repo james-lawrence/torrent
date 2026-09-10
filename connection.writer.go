@@ -303,9 +303,9 @@ type writerstate struct {
 	touched    *roaring.Bitmap // pieces we've accepted chunks for from the peer.
 	// requests (what we've asked the peer for), keyed by digest so incoming
 	// chunk/reject messages can find their request. requested is the same
-	// set indexed by chunk id - membership drives both the dedupe in
-	// request() and requestsLen(), so the two can never disagree about how
-	// many requests are outstanding.
+	// set indexed by chunk id - a bitmap so genrequests can compute the
+	// AndNot against available in O(1) and request() can CheckedAdd for
+	// per-message dedupe, rather than rebuilding one from requests' keys.
 	requests  map[uint64]request
 	requested *roaring.Bitmap
 	// nextReap gates reapExpiredRequestsLocked - skip scanning ws.requests
@@ -345,11 +345,9 @@ func (ws *writerstate) view[T any](op func(*writerstate) T) T {
 }
 
 // requestsLen returns the number of requests we currently have outstanding
-// to the peer. Backed by the requested bitmap's cardinality, which is
-// maintained by the same CheckedAdd/Remove pairs that decide whether a chunk
-// is in flight - so the count can't drift from the set it describes.
+// to the peer.
 func (ws *writerstate) requestsLen() int {
-	return ws.view(func(ws *writerstate) int { return int(ws.requested.GetCardinality()) })
+	return ws.view(func(ws *writerstate) int { return len(ws.requests) })
 }
 
 func (ws *writerstate) peerChoked() (r bool) {
@@ -830,7 +828,9 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg messageW
 	// exclude what we're already waiting on this peer for. done as a set
 	// difference at the point of use rather than by draining requestable,
 	// which has to keep meaning "what this peer can serve" - a chunk that
-	// returns to missing is immediately requestable again by anyone.
+	// returns to missing is immediately requestable again by anyone. always
+	// applied, regardless of completion - this connection must never ask
+	// the same peer for a chunk it already has outstanding to that peer.
 	pending := t.view(func(ws *writerstate) *roaring.Bitmap {
 		return roaring.AndNot(available, ws.requested)
 	})

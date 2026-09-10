@@ -247,7 +247,7 @@ func (t *chunks) zero(b *roaring.Bitmap) *roaring.Bitmap {
 // Fills the provided slice with the next available chunks without modifying state.
 func (t *chunks) peekn(available *roaring.Bitmap, dst []peeked) (int, error) {
 	union := available.Clone()
-	union.And(t.missing)
+	union.And(copRequestPool(t))
 
 	if union.IsEmpty() {
 		return 0, empty{Outstanding: int(t.inflight.GetCardinality()), Missing: int(t.missing.GetCardinality()), Failed: int(t.failed.GetCardinality())}
@@ -519,7 +519,14 @@ func (t *chunks) retry(r request) {
 	cidx := t.requestCID(r)
 
 	t.inflight.Remove(uint32(cidx))
-	t.unverified.Remove(uint32(cidx))
+
+	// another connection may have already satisfied this chunk (or its
+	// whole piece) while this now-expired request was still outstanding -
+	// do not resurrect already-verified/completed work into missing.
+	if t.unverified.ContainsInt(cidx) || t.completed.ContainsInt(int(r.Index)) {
+		return
+	}
+
 	t.missing.AddInt(cidx)
 }
 
@@ -790,10 +797,22 @@ func copCompletedBitmap(c *chunks) *roaring.Bitmap {
 	return c.completed.Clone()
 }
 
-func copIgnoreRequested(c *chunks) bool {
+// copRequestPool returns the chunk ids currently eligible to be popped for a
+// request. normally that's only chunks nobody has asked for yet (missing).
+// once few enough chunks remain, it also includes chunks already outstanding
+// to some other connection (inflight), so one slow/stalled peer holding the
+// last few chunks can't stall the finish - a connection's own
+// already-requested set is still excluded upstream
+// (writerstate.requested's unconditional AndNot), so this only ever lets a
+// *different* connection claim it.
+func copRequestPool(c *chunks) *roaring.Bitmap {
 	if c.pieces == 0 {
-		return false
+		return c.missing
 	}
 
-	return float64(c.pieces-c.completed.GetCardinality())/float64(c.pieces) > 0.05
+	if float64(c.pieces-c.completed.GetCardinality())/float64(c.pieces) > 0.05 {
+		return c.missing
+	}
+
+	return roaring.Or(c.missing, c.inflight)
 }
