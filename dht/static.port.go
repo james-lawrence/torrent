@@ -50,12 +50,20 @@ func AutoDetectIP(ctx context.Context, sc *Server, b Binding, id int160.T, besta
 		}
 
 		for {
+			if ctx.Err() != nil {
+				return
+			}
+
 			if gnodes := sc.numGoodNodes(); gnodes < minK {
 				if !yield(b.AddrPort()) {
 					return
 				}
 
-				time.Sleep(time.Second)
+				select {
+				case <-time.After(time.Second):
+				case <-ctx.Done():
+					return
+				}
 				continue
 			}
 
@@ -72,11 +80,19 @@ func AutoDetectIP(ctx context.Context, sc *Server, b Binding, id int160.T, besta
 			}
 
 			if len(m) == 0 {
-				time.Sleep(shortretry)
+				select {
+				case <-time.After(shortretry):
+				case <-ctx.Done():
+					return
+				}
 				continue
 			}
 
-			time.Sleep(lease)
+			select {
+			case <-time.After(lease):
+			case <-ctx.Done():
+				return
+			}
 		}
 	}, nil
 }
