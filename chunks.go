@@ -85,6 +85,15 @@ func chunkoptCompleted(completed *roaring.Bitmap) chunkopt {
 	}
 }
 
+// chunkoptEndgame overrides the fraction of remaining pieces (0.0-1.0) below
+// which copRequestPool starts offering chunks already outstanding to another
+// connection. Defaults to 0.15.
+func chunkoptEndgame(fraction float64) chunkopt {
+	return func(c *chunks) {
+		c.endgame = fraction
+	}
+}
+
 func newChunks(clength uint64, m *metainfo.Info, options ...chunkopt) *chunks {
 	if clength == 0 {
 		panic("chunksize cannot be zero")
@@ -97,6 +106,7 @@ func newChunks(clength uint64, m *metainfo.Info, options ...chunkopt) *chunks {
 			cmaximum:    numChunks(m.TotalLength(), m.PieceLength, int64(clength)),
 			clength:     int64(clength),
 			gracePeriod: 2 * time.Minute,
+			endgame:     0.15,
 			inflight:    roaring.New(),
 			missing:     roaring.New(),
 			unverified:  roaring.New(),
@@ -125,7 +135,7 @@ func resetChunks(orig *chunks, clength uint64, m *metainfo.Info) *chunks {
 	orig.mu.Lock()
 	defer orig.mu.Unlock()
 
-	fresh := newChunks(clength, m, chunkoptCompleted(orig.completed))
+	fresh := newChunks(clength, m, chunkoptCompleted(orig.completed), chunkoptEndgame(orig.endgame))
 	orig.chunkstate = fresh.chunkstate
 
 	return orig
@@ -149,6 +159,12 @@ type chunkstate struct {
 
 	// gracePeriod how long to wait before reaping outstanding requests.
 	gracePeriod time.Duration
+
+	// endgame is the fraction of remaining pieces (0.0-1.0) below which
+	// copRequestPool starts offering chunks already outstanding to another
+	// connection, so one slow/stalled peer holding the last few chunks
+	// can't stall the finish.
+	endgame float64
 
 	// cache of chunks we're missing.
 	missing *roaring.Bitmap
@@ -810,7 +826,7 @@ func copRequestPool(c *chunks) *roaring.Bitmap {
 		return c.missing
 	}
 
-	if float64(c.pieces-c.completed.GetCardinality())/float64(c.pieces) > 0.15 {
+	if float64(c.pieces-c.completed.GetCardinality())/float64(c.pieces) > c.endgame {
 		return c.missing
 	}
 

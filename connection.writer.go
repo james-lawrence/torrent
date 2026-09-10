@@ -823,7 +823,7 @@ func (t _connwriterRequests) genrequests(available *roaring.Bitmap, msg messageW
 	// once we fall below the low watermark dynamic adjust it based on what we saw.
 	// never allowing it to go above the original low watermark and with a floor of a single request.
 	t.lowrequestwatermark += min(1, int(t.chunksReceived.Swap(0)*4-t.chunksRejected.Swap(0)))
-	t.lowrequestwatermark = min(t.lowrequestwatermark, int(t.PeerMaxRequests.Load()))
+	t.lowrequestwatermark = max(1, min(t.lowrequestwatermark, int(t.PeerMaxRequests.Load())))
 
 	// exclude what we're already waiting on this peer for. done as a set
 	// difference at the point of use rather than by draining requestable,
