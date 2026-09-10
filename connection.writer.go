@@ -154,7 +154,7 @@ func connexfast(ws *writerstate, n cstate.T) cstate.T {
 	return cstate.Fn(func(context.Context, *cstate.Shared) cstate.T {
 		defer cn.cfg.debug().Printf("c(%p) seed(%t) fast extension completed\n", cn, cn.t.seeding())
 		if !cn.supported(btprotocol.ExtensionBitFast) {
-			cn.sentHaves = cn.t.chunks.CompletedBitmap()
+			cn.sentHaves = cn.t.chunks.Read(copCompletedBitmap)
 			if _, err := ws.PostBitfield(cn.sentHaves); err != nil {
 				return cstate.Failure(err)
 			}
@@ -190,7 +190,7 @@ func connexfast(ws *writerstate, n cstate.T) cstate.T {
 			return n
 		default:
 			cn.cfg.debug().Printf("c(%p) seed(%t) posting bitfield: r(%d) u(%d) c(%d) cmax(%d)\n", cn, cn.t.seeding(), readable, cn.t.chunks.Cardinality(cn.t.chunks.unverified), cn.t.chunks.Cardinality(cn.t.chunks.completed), cn.t.chunks.cmaximum)
-			cn.sentHaves = cn.t.chunks.CompletedBitmap()
+			cn.sentHaves = cn.t.chunks.Read(copCompletedBitmap)
 			if _, err := ws.PostBitfield(cn.sentHaves); err != nil {
 				return cstate.Failure(err)
 			}

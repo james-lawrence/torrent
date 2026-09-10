@@ -653,13 +653,6 @@ func (t *chunks) ReadableBitmap() *roaring.Bitmap {
 	return bm
 }
 
-func (t *chunks) CompletedBitmap() *roaring.Bitmap {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	return t.completed.Clone()
-}
-
 // returns true if any chunks are in incomplete states (missing, oustanding, unverified)
 func (t *chunks) Incomplete() bool {
 	if t == nil {
@@ -872,4 +865,16 @@ func copDebugSnapshot(c *chunks) copDebugCounts {
 		unverified:  int(c.unverified.GetCardinality()),
 		completed:   int(c.completed.GetCardinality()),
 	}
+}
+
+func copCompletedBitmap(c *chunks) *roaring.Bitmap {
+	return c.completed.Clone()
+}
+
+func copIgnoreRequested(c *chunks) bool {
+	if c.pieces == 0 {
+		return false
+	}
+
+	return float64(c.pieces-c.completed.GetCardinality())/float64(c.pieces) > 0.05
 }
