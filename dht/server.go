@@ -62,6 +62,7 @@ type Server struct {
 	bindings    []*socketbinding
 
 	mu            sync.RWMutex
+	wg            sync.WaitGroup
 	transactions  transactions.Dispatcher[*transaction]
 	closed        chan struct{}
 	tokenServer   tokenServer // Manages tokens we issue to our queriers.
@@ -309,14 +310,16 @@ func (s *Server) serveBinding(ctx context.Context, pc net.PacketConn, bestaddr n
 		break
 	}
 
-	go func() {
+	s.wg.Go(func() {
+		defer s.wg.Done()
 		for detected := range seq {
 			updateaddr(fixed, detected)
 		}
-	}()
-	go func() {
+	})
+	s.wg.Go(func() {
+		defer s.wg.Done()
 		done(s.serveUntilClosed(ctx, b))
-	}()
+	})
 
 	return b, nil
 }
@@ -955,17 +958,23 @@ func (s *Server) Nodes() (nis []krpc.NodeInfo) {
 	return nis
 }
 
-// Stops the server network activity. This is all that's required to clean-up a Server.
+// Stops the server network activity and blocks until the goroutines it
+// started (per binding) have exited. This is all that's required to
+// clean-up a Server.
 func (s *Server) Close() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.isClosed() {
+		s.mu.Unlock()
 		return
 	}
 	close(s.closed)
-	for _, b := range s.bindings {
-		go b.pc.Close()
+	bindings := slices.Clone(s.bindings)
+	s.mu.Unlock()
+
+	for _, b := range bindings {
+		b.pc.Close()
 	}
+	s.wg.Wait()
 }
 
 func (s *Server) GetPeers(
