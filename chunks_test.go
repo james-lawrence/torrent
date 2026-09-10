@@ -386,24 +386,6 @@ func TestChunksPop(t *testing.T) {
 	}
 }
 
-func TestChunksGraceWindow(t *testing.T) {
-	info, err := fromFile("testdata/bootstrap.dat.torrent")
-	require.NoError(t, err)
-	p := smallpopulate(newChunks(defaultChunkSize, &info))
-
-	// adjust grace period to be negative to force immediate
-	// recovering of outstanding requests.
-	p.gracePeriod = -1 * time.Second
-
-	total := p.missing.GetCardinality()
-	for i := 0; i < 10; i++ {
-		_, err = p.Pop(1, p.missing.Clone())
-		require.NoError(t, err)
-		p.reap(0)
-		require.Equal(t, total, p.missing.GetCardinality())
-	}
-}
-
 func TestChunksComplete(t *testing.T) {
 	p := quickpopulate(newChunks(256, tinyTorrentInfo()))
 

@@ -238,6 +238,7 @@ func newWriterState(cn *connection) *writerstate {
 		requests:           make(map[uint64]request, cn.cfg.maximumOutstandingRequests),
 		requested:          roaring.New(),
 		bufferLimit:        writebufferscapacity,
+		nextReap:           timex.NegInf(),
 		buffer:             bytes.NewBuffer(make([]byte, 0, writebufferscapacity)),
 		pool: sync.Pool{New: func() any {
 			return bytes.NewBuffer(make([]byte, 0, writebufferscapacity))
@@ -307,6 +308,9 @@ type writerstate struct {
 	// many requests are outstanding.
 	requests  map[uint64]request
 	requested *roaring.Bitmap
+	// nextReap gates reapExpiredRequestsLocked - skip scanning ws.requests
+	// until the furthest-out deadline seen on the last scan has passed.
+	nextReap time.Time
 	// buffer holds messages queued but not yet flushed to the wire.
 	// Written from the writer's own code, mainReadLoop (reject/PEX/metadata
 	// requests posted in response to incoming messages), and, pre-spawn,
@@ -386,6 +390,30 @@ func (ws *writerstate) deleteAllRequestsLocked() {
 	for _, r := range ws.requests {
 		ws.releaseRequestLocked(r)
 	}
+}
+
+// reapExpiredRequestsLocked releases every request whose grace period has
+// elapsed back to chunks, mirroring deleteAllRequestsLocked but selectively.
+// Caller must hold ws.mu.
+func (ws *writerstate) reapExpiredRequestsLocked() (reaped int) {
+	ts := time.Now()
+
+	if ws.nextReap.After(ts) {
+		return 0
+	}
+
+	for _, r := range ws.requests {
+		if deadline := r.Reserved.Add(ws.t.chunks.gracePeriod); deadline.Before(ts) {
+			ws.releaseRequestLocked(r)
+			reaped++
+		} else if ws.nextReap.Before(deadline) {
+			// by saving the deadline that will expire the furthest into the future
+			// we ensure we'll capture all the expired requests between now and then.
+			ws.nextReap = deadline.Add(time.Millisecond)
+		}
+	}
+
+	return reaped
 }
 
 // Write appends into currentbuffer. Called by the writer's own code, by
@@ -612,6 +640,8 @@ func (t _connWriterClosed) Update(ctx context.Context, _ *cstate.Shared) (r csta
 	if ws.closed.Load() {
 		return nil
 	}
+
+	ws.mutate(func(ws *writerstate) { ws.reapExpiredRequestsLocked() })
 
 	// if we're choked and not allowed to fast track any chunks then there is nothing
 	// to do.

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/v2"
@@ -98,7 +97,7 @@ func newChunks(clength uint64, m *metainfo.Info, options ...chunkopt) *chunks {
 			cmaximum:    numChunks(m.TotalLength(), m.PieceLength, int64(clength)),
 			clength:     int64(clength),
 			gracePeriod: 2 * time.Minute,
-			outstanding: make(map[uint64]request),
+			inflight:    roaring.New(),
 			missing:     roaring.New(),
 			unverified:  roaring.New(),
 			failed:      roaring.New(),
@@ -148,9 +147,6 @@ type chunkstate struct {
 	// maximum valid chunk index.
 	cmaximum int64
 
-	// track the number of reaping requests.
-	reapers int64
-
 	// gracePeriod how long to wait before reaping outstanding requests.
 	gracePeriod time.Duration
 
@@ -161,18 +157,14 @@ type chunkstate struct {
 	// connections to kill themselves when a digest fails validation.
 	failed *roaring.Bitmap
 
-	// The last time we requested a chunk. Deleting the request from any
-	// connection will clear this value.
-	outstanding map[uint64]request
+	// cache of chunks currently checked out to some connection.
+	inflight *roaring.Bitmap
 
 	// cache of the pieces that need to be verified.
 	unverified *roaring.Bitmap
 
 	// cache of completed piece indices, this means they have been retrieved and verified.
 	completed *roaring.Bitmap
-
-	// next time to reap the outstanding requests
-	nextReap time.Time
 
 	// buffer pool for storing chunks
 	pool *sync.Pool
@@ -191,46 +183,6 @@ type chunks struct {
 type peeked struct {
 	cidx int64
 	req  request
-}
-
-func (t *chunks) reap(window time.Duration) {
-	ts := time.Now()
-	recovered := 0
-	scanned := 0
-
-	if len(t.outstanding) == 0 {
-		return
-	}
-
-	if t.nextReap.After(ts) {
-		return
-	}
-
-	for _, req := range t.outstanding {
-		scanned++
-
-		if deadline := req.Reserved.Add(t.gracePeriod); deadline.Before(ts) {
-			t.retry(req)
-			recovered++
-		} else if t.nextReap.IsZero() || t.nextReap.Before(deadline) {
-			// by saving the deadline that will expire the furthest into the future
-			// we ensure we'll capture all the expired requests between now and then.
-			t.nextReap = deadline.Add(time.Millisecond)
-		}
-
-		// check after its scanned a few elements.
-		// the cap is somewhat arbitrary based on testing.
-		// thousands of items can be scanned in < millisecond times.
-		// the time.Since method vastly outweighs the scanning.
-		if scanned%1000 == 0 && time.Since(ts) > window {
-			break
-		}
-	}
-
-	// if recovered > 0 {
-	// 	log.Println(recovered, "/", scanned, "recovered in", time.Since(ts), ">", window, t.gracePeriod, "remaining", len(t.outstanding), "next reap", t.nextReap)
-	// 	log.Printf("remaining(%d) - failed(%d) - outstanding(%d) - unverified(%d) - completed(%d)\r\n", t.missing.Len(), t.failed.GetCardinality(), len(t.outstanding), t.unverified.Len(), t.completed.Len())
-	// }
 }
 
 // chunks returns the set of chunk id's for the given piece.
@@ -298,7 +250,7 @@ func (t *chunks) peekn(available *roaring.Bitmap, dst []peeked) (int, error) {
 	union.And(t.missing)
 
 	if union.IsEmpty() {
-		return 0, empty{Outstanding: len(t.outstanding), Missing: int(t.missing.GetCardinality()), Failed: int(t.failed.GetCardinality())}
+		return 0, empty{Outstanding: int(t.inflight.GetCardinality()), Missing: int(t.missing.GetCardinality()), Failed: int(t.failed.GetCardinality())}
 	}
 
 	it := union.Iterator()
@@ -322,7 +274,7 @@ func (t *chunks) peek(available *roaring.Bitmap) (cidx int, req request, err err
 		return -1, request{}, err
 	}
 	if n == 0 {
-		return -1, request{}, empty{Outstanding: len(t.outstanding), Missing: int(t.missing.GetCardinality()), Failed: int(t.failed.GetCardinality())}
+		return -1, request{}, empty{Outstanding: int(t.inflight.GetCardinality()), Missing: int(t.missing.GetCardinality()), Failed: int(t.failed.GetCardinality())}
 	}
 	return int(buf[0].cidx), buf[0].req, nil
 }
@@ -541,24 +493,21 @@ func (t *chunks) Pop(n int, available *roaring.Bitmap) (reqs []request, err erro
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.recover()
-
 	dst := make([]peeked, n)
 	filled, err := t.peekn(available, dst)
 	if err != nil {
 		return nil, err
 	}
 
-	// stamp the reservation as the chunk becomes outstanding - this is what
-	// reap measures the grace period from. left unset it defaults to the zero
-	// time, which makes every request expired the moment it is created.
+	// stamp the reservation as the chunk becomes outstanding - the owning
+	// connection uses this to reap its own expired requests.
 	ts := time.Now()
 
 	reqs = make([]request, filled)
 	for i := range filled {
 		p := dst[i]
 		p.req.Reserved = ts
-		t.outstanding[p.req.Digest] = p.req
+		t.inflight.AddInt(int(p.cidx))
 		t.missing.Remove(uint32(p.cidx))
 		reqs[i] = p.req
 	}
@@ -566,29 +515,16 @@ func (t *chunks) Pop(n int, available *roaring.Bitmap) (reqs []request, err erro
 	return reqs, nil
 }
 
-// Recover initiate a collection of outstanding requests.
-// this moves them back into the missing bitmap, allowing them to be requested again.
-func (t *chunks) recover() {
-	if atomic.CompareAndSwapInt64(&t.reapers, 0, 1) {
-		// log.Println("reaping initiated")
-		t.reap(10 * time.Millisecond)
-		// log.Println("reaping completed")
-		atomic.CompareAndSwapInt64(&t.reapers, 1, 0)
-	}
-}
-
 func (t *chunks) retry(r request) {
 	cidx := t.requestCID(r)
 
-	delete(t.outstanding, r.Digest)
+	t.inflight.Remove(uint32(cidx))
 	t.unverified.Remove(uint32(cidx))
 	t.missing.AddInt(cidx)
 }
 
 func (t *chunks) release(r request) bool {
-	_, ok := t.outstanding[r.Digest]
-	delete(t.outstanding, r.Digest)
-	return ok
+	return t.inflight.CheckedRemove(uint32(t.requestCID(r)))
 }
 
 func (t *chunks) pend(r request) (changed bool) {
@@ -600,7 +536,7 @@ func (t *chunks) pend(r request) (changed bool) {
 	// remove from unverified.
 	t.unverified.Remove(uint32(cidx))
 
-	delete(t.outstanding, r.Digest)
+	t.inflight.Remove(uint32(cidx))
 
 	return changed
 }
@@ -660,14 +596,14 @@ func (t *chunks) Incomplete() bool {
 	}
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return (int(t.missing.GetCardinality()) + len(t.outstanding) + int(t.unverified.GetCardinality())) > 0
+	return (int(t.missing.GetCardinality()) + int(t.inflight.GetCardinality()) + int(t.unverified.GetCardinality())) > 0
 }
 
 func (t *chunks) Snapshot(s *Stats) *Stats {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	s.Missing = int(t.missing.GetCardinality())
-	s.Outstanding = len(t.outstanding)
+	s.Outstanding = int(t.inflight.GetCardinality())
 	s.Unverified = int(t.unverified.GetCardinality())
 	s.Failed = int(t.failed.GetCardinality())
 	s.Completed = int(t.completed.GetCardinality())
@@ -681,27 +617,12 @@ func (t *chunks) FailuresReset() {
 	t.failed.Clear()
 }
 
-// Outstanding returns a copy of the outstanding requests
-func (t *chunks) Outstanding() (dup map[uint64]request) {
-	// trace(fmt.Sprintf("initiated: %p", t.mu.(*DebugLock).m))
-	// defer trace(fmt.Sprintf("completed: %p", t.mu.(*DebugLock).m))
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	dup = make(map[uint64]request, len(t.outstanding))
-	for i, r := range t.outstanding {
-		dup[i] = r
-	}
-	return dup
-}
-
 // Pend forces a chunks to be added to the missing queue.
 func (t *chunks) Pend(reqs ...request) {
 	// trace(fmt.Sprintf("initiated: %p", t.mu.(*DebugLock).m))
 	// defer trace(fmt.Sprintf("completed: %p", t.mu.(*DebugLock).m))
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	defer t.recover()
 	for _, r := range reqs {
 		t.pend(r)
 	}
@@ -711,7 +632,6 @@ func (t *chunks) Pend(reqs ...request) {
 func (t *chunks) Release(reqs ...request) (b bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	defer t.recover()
 
 	b = true
 	for _, r := range reqs {
@@ -725,7 +645,6 @@ func (t *chunks) Release(reqs ...request) (b bool) {
 func (t *chunks) Retry(reqs ...request) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	defer t.recover()
 
 	for _, r := range reqs {
 		t.retry(r)
@@ -745,7 +664,7 @@ func (t *chunks) Verify(r request) (err error) {
 
 	cid := t.requestCID(r)
 
-	delete(t.outstanding, r.Digest)
+	t.inflight.Remove(uint32(cid))
 	t.missing.Remove(uint32(cid))
 	t.unverified.AddInt(cid)
 
@@ -786,7 +705,7 @@ func (t *chunks) Complete(pid uint64) (changed bool) {
 
 	for _, r := range t.chunksRequests(pid) {
 		cidx := t.requestCID(r)
-		delete(t.outstanding, r.Digest)
+		t.inflight.Remove(uint32(cidx))
 
 		t.missing.Remove(uint32(cidx))
 		t.unverified.Remove(uint32(cidx))
@@ -840,7 +759,7 @@ func (t *chunks) String() string {
 		t,
 		t.missing.GetCardinality(),
 		t.failed.GetCardinality(),
-		len(t.outstanding),
+		t.inflight.GetCardinality(),
 		t.unverified.GetCardinality(),
 		t.completed.GetCardinality(),
 		t.pieces,
@@ -850,7 +769,7 @@ func (t *chunks) String() string {
 type copCompletedOutstanding struct{ completed, outstanding int }
 
 func copCompletedOutstandingDebugSnapshot(c *chunks) copCompletedOutstanding {
-	return copCompletedOutstanding{completed: int(c.completed.GetCardinality()), outstanding: len(c.outstanding)}
+	return copCompletedOutstanding{completed: int(c.completed.GetCardinality()), outstanding: int(c.inflight.GetCardinality())}
 }
 
 type copDebugCounts struct {
@@ -861,7 +780,7 @@ func copDebugSnapshot(c *chunks) copDebugCounts {
 	return copDebugCounts{
 		missing:     int(c.missing.GetCardinality()),
 		failed:      int(c.failed.GetCardinality()),
-		outstanding: len(c.outstanding),
+		outstanding: int(c.inflight.GetCardinality()),
 		unverified:  int(c.unverified.GetCardinality()),
 		completed:   int(c.completed.GetCardinality()),
 	}

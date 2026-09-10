@@ -205,7 +205,10 @@ func TestWriterStateRerequestsChunksReturnedToMissing(t *testing.T) {
 	require.Empty(t, requested, "chunks already in flight to this peer must not be re-requested")
 
 	// every chunk arrives, so nothing is outstanding to the peer any more.
-	for _, req := range slices.Collect(maps.Values(ws.t.chunks.Outstanding())) {
+	outstanding := ws.view(func(ws *writerstate) map[uint64]request {
+		return maps.Clone(ws.requests)
+	})
+	for _, req := range slices.Collect(maps.Values(outstanding)) {
 		ws.mutate(func(ws *writerstate) { ws.clearRequestsLocked(req) })
 		require.NoError(t, ws.t.chunks.Verify(req))
 	}

@@ -1256,10 +1256,8 @@ func (t *torrent) deleteConnection(c *connection) (ret bool) {
 }
 
 func (t *torrent) assertNoPendingRequests() {
-	if outstanding := t.chunks.Outstanding(); len(outstanding) != 0 {
-		for _, r := range outstanding {
-			t.cln.config.errors().Printf("still expecting c(%p) d(%020d) r(%d,%d,%d)", t.chunks, r.Digest, r.Index, r.Begin, r.Length)
-		}
+	if n := t.chunks.Cardinality(t.chunks.inflight); n != 0 {
+		t.cln.config.errors().Printf("still expecting %d requests c(%p)", n, t.chunks)
 	}
 }
 
