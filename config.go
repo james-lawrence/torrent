@@ -2,6 +2,7 @@ package torrent
 
 import (
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -377,6 +378,7 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		dialRateLimiter:                rate.NewLimiter(rate.Limit(32), 128),
 		acceptRateLimiter:              rate.NewLimiter(rate.Limit(runtime.NumCPU()), runtime.NumCPU()),
 		dialPoolSize:                   uint16(runtime.NumCPU()),
+		dialer:                         &net.Dialer{Timeout: 15 * time.Second},
 		HeaderObfuscationPolicy: HeaderObfuscationPolicy{
 			Preferred: false,
 			Required:  false,

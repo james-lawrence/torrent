@@ -324,7 +324,6 @@ func (cl *Client) Close() error {
 	if cl.dht != nil {
 		cl.dht.DetachAnnouncer(dht.PeerAnnounceFn(cl.onDHTAnnouncePeer))
 	}
-	// cl.eachDhtServer(func(s *dht.Server) { s.Close() })
 	cl.closeSockets()
 
 	if err := cl.torrents.Close(); err != nil {

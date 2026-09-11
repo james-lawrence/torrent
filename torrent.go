@@ -707,6 +707,12 @@ type torrent struct {
 
 	// signal events on this torrent.
 	event *sync.Cond
+
+	// BEP19 webseed (HTTP mirror) chunk sources, one per url-list/ws= entry.
+	webseedOnce   sync.Once
+	webseedCancel context.CancelFunc
+	webseedMu     sync.RWMutex
+	webseeds      []*webseedWorker
 }
 
 // Returns a Reader bound to the torrent's data. All read calls block until
@@ -944,6 +950,7 @@ func (t *torrent) onSetInfo() {
 	t.metainfoAvailable.Store(true)
 	t.event.Broadcast()
 	t.updateWantPeersEvent()
+	t.startWebseeds()
 }
 
 // Called when metadata for a torrent becomes available.
@@ -1073,6 +1080,8 @@ func (t *torrent) close() error {
 	default:
 		close(t.closed)
 	}
+
+	t.stopWebseeds()
 
 	for _, conn := range t.conns.list() {
 		conn.Close()
