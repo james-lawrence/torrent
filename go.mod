@@ -7,7 +7,7 @@ require (
 	github.com/RoaringBitmap/roaring/v2 v2.27.0
 	github.com/alexflint/go-arg v1.6.0
 	github.com/anacrolix/generics v0.2.0
-	github.com/anacrolix/go-libutp v1.4.0
+	github.com/anacrolix/go-libutp v1.5.1
 	github.com/anacrolix/missinggo v1.3.0
 	github.com/anacrolix/multiless v0.4.0
 	github.com/anacrolix/stm v0.6.0
