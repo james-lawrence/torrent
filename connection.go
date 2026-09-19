@@ -305,7 +305,10 @@ func (cn *connection) Close() {
 	cn.cmu().Lock()
 	defer cn.cmu().Unlock()
 
-	if cn.closed.Load() {
+	// Close is called from the reader, the writer and the handshake's defer,
+	// only the first may run the teardown or the ConnectionClosed hook fires
+	// (and the received counts decrement) once per caller.
+	if !cn.closed.CompareAndSwap(false, true) {
 		return
 	}
 
@@ -648,14 +651,22 @@ func (cn *connection) onReadRequest(r request, ws *writerstate) error {
 	}
 
 	if cn.Choked.Load() {
-		if cn.supported(pp.ExtensionBitFast) && cn.reject(r, ws) {
+		// without the fast extension there is no way to answer a choked peer, the request is dropped.
+		if !cn.supported(pp.ExtensionBitFast) {
+			return nil
+		}
+
+		// not in the allowed fast set, tell the peer.
+		if cn.reject(r, ws) {
 			cn.cmu().Lock()
 			fastset := cn.peerfastset.ToArray()
 			cn.cmu().Unlock()
 			cn.cfg.debug().Printf("c(%p) - rejecting request: choked, cid(%d) %v rejecting request\n", cn, cn.t.chunks.requestCID(r), fastset)
+			return nil
 		}
 
-		return nil
+		// allowed fast pieces are served even while choked (BEP 6), a new connection starts choked
+		// and the peer is handed its allowed fast set before the writer unchokes it. falls through and queues it.
 	}
 
 	if pending := cn.peerRequestsLen(); !cn.t.seeding() || pending > ws.PendingMaxRequests+maxRequestsGrace {
