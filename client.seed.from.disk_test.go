@@ -3,6 +3,7 @@ package torrent_test
 import (
 	"context"
 	"crypto/md5"
+	"io"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -10,8 +11,10 @@ import (
 	"github.com/james-lawrence/torrent"
 	"github.com/james-lawrence/torrent/autobind"
 	"github.com/james-lawrence/torrent/dht/int160"
+	"github.com/james-lawrence/torrent/internal/bitmapx"
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/testx"
+	"github.com/james-lawrence/torrent/metainfo"
 	"github.com/james-lawrence/torrent/storage"
 	"github.com/james-lawrence/torrent/torrenttest"
 	"github.com/james-lawrence/torrent/torrenttestx"
@@ -340,6 +343,131 @@ func TestClientSeedFromDisk(t *testing.T) {
 		require.Eventually(t, func() bool {
 			return uploaded.Load() >= leechers*int64(torrentlen) && uploaded.Load() == downloaded.Load()
 		}, 10*idletimeout, idletimeout/10, "uploaded %d and downloaded %d must agree and cover %d leechers of %d bytes", uploaded.Load(), downloaded.Load(), leechers, int64(torrentlen))
+	})
+
+	t.Run("resumes a half downloaded torrent and counts the bytes validated of the entire file", func(t *testing.T) {
+		const (
+			piecelen   = 256 * bytesx.KiB
+			chunklen   = 16 * bytesx.KiB
+			pieces     = 64
+			halfpieces = pieces / 2
+			cpp        = piecelen / chunklen
+			resumelen  = pieces * piecelen
+			half       = resumelen / 2
+		)
+
+		ctx, done := testx.Context(t)
+		defer done()
+
+		sdir := t.TempDir()
+		info, expected, err := torrenttest.Random(sdir, resumelen, metainfo.OptionPieceLength(piecelen))
+		require.NoError(t, err)
+
+		smd, err := torrent.NewFromInfo(info)
+		require.NoError(t, err)
+
+		// the torrent is on disk, but never started.
+		mdstore := torrent.NewMetadataCache(t.TempDir())
+		require.NoError(t, mdstore.Write(smd))
+
+		sclient := torrenttestx.Client(
+			t,
+			autobind.NewLoopback(autobind.EnableDHT(torrenttestx.QuickDHT(t))),
+			mdstore,
+			storage.NewFile(sdir),
+		)
+		defer sclient.Close()
+
+		// the leecher has its own cache directory, the bitmap of what was downloaded is persisted there.
+		cachedir := t.TempDir()
+		tclient := torrenttestx.Client(
+			t,
+			autobind.NewLoopback(autobind.EnableDHT(torrenttestx.QuickDHT(t))),
+			torrent.NewMetadataCache(t.TempDir()),
+			storage.NewFile(t.TempDir()),
+			torrent.ClientConfigCacheDirectory(cachedir),
+		)
+		defer tclient.Close()
+
+		lmd, err := torrent.NewFromInfo(info)
+		require.NoError(t, err)
+
+		// the whole test must finish well within 10 seconds.
+		dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		dl, added, err := tclient.Start(lmd)
+		require.NoError(t, err)
+		require.True(t, added)
+
+		// download the first half. the range is one byte short of the half so the piece after it isn't requested,
+		// the range is rounded up to the end of the piece containing its last byte.
+		type result struct {
+			n   int64
+			err error
+		}
+
+		rd := torrent.DownloadRange(dctx, dl, 0, half-1, torrent.TuneClientPeer(sclient), torrent.TuneNewConns)
+		first := make(chan result, 1)
+		go func() {
+			n, err := io.Copy(io.Discard, rd)
+			first <- result{n: n, err: err}
+		}()
+
+		// reads don't observe the context, so wait on it here to keep a stalled transfer from hanging the test.
+		select {
+		case res := <-first:
+			require.NoError(t, res.err)
+			require.EqualValues(t, half-1, res.n)
+		case <-dctx.Done():
+			require.Failf(t, "first half never completed", "completed %d of %d bytes", dl.BytesCompleted(), half)
+		}
+		require.NoError(t, rd.Close())
+
+		stats := dl.Stats()
+		require.EqualValues(t, halfpieces, stats.Completed)
+		require.EqualValues(t, half, stats.BytesValidated.Uint64())
+
+		// stopping the torrent persists what was downloaded, exactly the chunks of the first half.
+		require.NoError(t, tclient.Stop(lmd))
+
+		persisted, err := torrent.NewBitmapCache(cachedir).Read(lmd.ID)
+		require.NoError(t, err)
+		require.Equal(t, bitmapx.Range(0, halfpieces*cpp).ToArray(), persisted.ToArray())
+
+		// restart the torrent. its counters start over and it resumes where it left off, only the second half is missing.
+		dl, added, err = tclient.Start(lmd)
+		require.NoError(t, err)
+		require.True(t, added)
+
+		resumed := dl.Stats()
+		require.EqualValues(t, (pieces-halfpieces)*cpp, resumed.Missing)
+		require.LessOrEqual(t, resumed.BytesValidated.Uint64(), uint64(half))
+
+		// finish the download. the first half is verified as it is read, the second half as it is downloaded.
+		actual := md5.New()
+		second := make(chan result, 1)
+		go func() {
+			n, err := torrent.DownloadInto(dctx, actual, dl, torrent.TuneClientPeer(sclient), torrent.TuneNewConns)
+			second <- result{n: n, err: err}
+		}()
+
+		select {
+		case res := <-second:
+			require.NoError(t, res.err)
+			require.EqualValues(t, resumelen, res.n)
+			require.Equal(t, expected.Sum(nil), actual.Sum(nil))
+		case <-dctx.Done():
+			require.Failf(t, "resumed download never completed", "completed %d of %d bytes", dl.BytesCompleted(), resumelen)
+		}
+
+		// every byte of the file was validated exactly once since the restart.
+		stats = dl.Stats()
+		require.EqualValues(t, resumelen, stats.BytesValidated.Uint64())
+		require.EqualValues(t, pieces, stats.Completed)
+		require.Zero(t, stats.Unverified)
+		require.Zero(t, stats.Missing)
+		require.Zero(t, stats.Failed)
 	})
 
 	t.Run("unloads a download that makes no progress", func(t *testing.T) {

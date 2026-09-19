@@ -73,6 +73,30 @@ func Random(max uint64, bits uint64) *roaring.Bitmap {
 	return RandomFromSource(max, bits, rand.NewPCG(rand.Uint64(), rand.Uint64()))
 }
 
+// RandomSubset returns up to bits randomly chosen values from the bitmap.
+func RandomSubset(m *roaring.Bitmap, bits uint64) *roaring.Bitmap {
+	return RandomSubsetFromSource(m, bits, rand.NewPCG(rand.Uint64(), rand.Uint64()))
+}
+
+// RandomSubsetFromSource returns up to bits randomly chosen values from the bitmap,
+// the values are chosen using the provided source.
+func RandomSubsetFromSource(m *roaring.Bitmap, bits uint64, src rand.Source) *roaring.Bitmap {
+	if m.GetCardinality() <= bits {
+		return m.Clone()
+	}
+
+	subset := roaring.New()
+	RandomFromSource(m.GetCardinality(), bits, src).Iterate(func(rank uint32) bool {
+		if v, err := m.Select(rank); err == nil {
+			subset.Add(v)
+		}
+
+		return true
+	})
+
+	return subset
+}
+
 func sample[T constraints.Integer](src rand.Source, n T, k T) []T {
 	r := rand.New(src)
 
