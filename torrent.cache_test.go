@@ -270,6 +270,104 @@ func TestTorrentCache(t *testing.T) {
 		require.NoError(t, c.Close())
 	})
 
+	t.Run("load waits for a torrent that is still initializing", func(t *testing.T) {
+		tmpdir := t.TempDir()
+		mdc := NewMetadataCache(tmpdir)
+		c := NewCache(mdc, NewBitmapCache(tmpdir))
+
+		info, _, err := torrenttest.Random(tmpdir, 1)
+		require.NoError(t, err)
+		md, err := NewFromInfo(info)
+		require.NoError(t, err)
+		require.NoError(t, mdc.Write(md))
+
+		// the creator publishes the torrent and then blocks on the chunks lock while initializing it.
+		var held *torrent
+		creator := make(chan *torrent, 1)
+		go func() {
+			tor, cached, err := c.Load(md.ID, func(md Metadata, options ...Tuner) *torrent {
+				held = zeroTorrent(md, options...)
+				held.chunks.mu.Lock()
+				return held
+			})
+			require.NoError(t, err)
+			require.False(t, cached)
+			creator <- tor
+		}()
+
+		require.Eventually(t, func() bool {
+			c._mu.RLock()
+			defer c._mu.RUnlock()
+			return len(c.torrents) == 1
+		}, time.Second, time.Millisecond, "creator never published the torrent")
+
+		waiter := make(chan *torrent, 1)
+		go func() {
+			tor, cached, err := c.Load(md.ID, zeroTorrent)
+			require.NoError(t, err)
+			require.True(t, cached)
+			waiter <- tor
+		}()
+
+		require.Never(t, func() bool {
+			return len(waiter) > 0
+		}, 200*time.Millisecond, 10*time.Millisecond, "load returned a torrent that was still initializing")
+
+		held.chunks.mu.Unlock()
+
+		require.True(t, held == <-creator)
+		require.True(t, held == <-waiter)
+		require.EqualValues(t, 1, len(c.torrents))
+		require.NoError(t, c.Close())
+	})
+
+	t.Run("insert waits for a torrent that is still initializing", func(t *testing.T) {
+		tmpdir := t.TempDir()
+		c := NewCache(NewMetadataCache(tmpdir), NewBitmapCache(tmpdir))
+
+		info, _, err := torrenttest.Random(tmpdir, 1)
+		require.NoError(t, err)
+		md, err := NewFromInfo(info)
+		require.NoError(t, err)
+
+		// the creator publishes the torrent and then blocks on the chunks lock while initializing it.
+		var held *torrent
+		creator := make(chan *torrent, 1)
+		go func() {
+			tor, err := c.Insert(md, func(md Metadata, options ...Tuner) *torrent {
+				held = zeroTorrent(md, options...)
+				held.chunks.mu.Lock()
+				return held
+			})
+			require.NoError(t, err)
+			creator <- tor
+		}()
+
+		require.Eventually(t, func() bool {
+			c._mu.RLock()
+			defer c._mu.RUnlock()
+			return len(c.torrents) == 1
+		}, time.Second, time.Millisecond, "creator never published the torrent")
+
+		waiter := make(chan *torrent, 1)
+		go func() {
+			tor, err := c.Insert(md, zeroTorrent)
+			require.NoError(t, err)
+			waiter <- tor
+		}()
+
+		require.Never(t, func() bool {
+			return len(waiter) > 0
+		}, 200*time.Millisecond, 10*time.Millisecond, "insert returned a torrent that was still initializing")
+
+		held.chunks.mu.Unlock()
+
+		require.True(t, held == <-creator)
+		require.True(t, held == <-waiter)
+		require.EqualValues(t, 1, len(c.torrents))
+		require.NoError(t, c.Close())
+	})
+
 	t.Run("concurrent metadata reads", func(t *testing.T) {
 		tmpdir := t.TempDir()
 		c := NewCache(NewMetadataCache(tmpdir), NewBitmapCache(tmpdir))
