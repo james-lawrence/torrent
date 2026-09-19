@@ -112,6 +112,7 @@ func newChunks(clength uint64, m *metainfo.Info, options ...chunkopt) *chunks {
 			unverified:  roaring.New(),
 			failed:      roaring.New(),
 			completed:   roaring.New(),
+			credited:    roaring.New(),
 			pool: &sync.Pool{
 				New: func() interface{} {
 					b := make([]byte, clength)
@@ -181,6 +182,10 @@ type chunkstate struct {
 
 	// cache of completed piece indices, this means they have been retrieved and verified.
 	completed *roaring.Bitmap
+
+	// cache of piece indices that were counted as validated when the torrent was resumed
+	// without being hashed. they are not counted again when they are eventually hashed.
+	credited *roaring.Bitmap
 
 	// buffer pool for storing chunks
 	pool *sync.Pool
@@ -574,6 +579,14 @@ func (t *chunks) Read[T any](op ChunkOp[T]) T {
 	return op(t)
 }
 
+// Write is Read for operations that modify chunks' internal state and return a result,
+// run while chunks' write lock is held.
+func (t *chunks) Write[T any](op ChunkOp[T]) T {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return op(t)
+}
+
 func (t *chunks) Cardinality(a *roaring.Bitmap) int {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -825,6 +838,21 @@ func DownloadedSnapshotSave(c *chunks) *roaring.Bitmap {
 	})
 
 	return bm
+}
+
+// chunkoptCredit records the pieces as already counted as validated.
+func chunkoptCredit(pieces *roaring.Bitmap) chunkopt {
+	return func(c *chunks) {
+		c.credited.Or(pieces)
+	}
+}
+
+// copUncredit reports whether the piece was already counted as validated, and clears it
+// so that only the first hash of the piece after the credit is skipped.
+func copUncredit(pid uint64) ChunkOp[bool] {
+	return func(c *chunks) bool {
+		return c.credited.CheckedRemove(uint32(pid))
+	}
 }
 
 // copCompletedPieces returns the pieces that have every chunk downloaded but not yet verified.

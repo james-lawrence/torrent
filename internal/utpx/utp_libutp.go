@@ -12,7 +12,7 @@ import (
 // grace is how long a socket stays open once asked to close. closing a connection only queues
 // its FIN when the send window is full, and destroying the socket discards anything unsent,
 // leaving the peer holding a dead connection until it times out.
-const grace = 200 * time.Millisecond
+const grace = 100 * time.Millisecond
 
 // New ...
 func New(network, addr string) (Socket, error) {

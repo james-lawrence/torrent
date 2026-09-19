@@ -26,7 +26,8 @@ func newDigestsFromTorrent(t *torrent) digests {
 			if t.chunks.Hashed(uint64(idx), cause) {
 				t.touch()
 
-				if p := t.piece(idx); p != nil {
+				// pieces credited during resume are already counted.
+				if p := t.piece(idx); p != nil && !t.chunks.Write(copUncredit(uint64(idx))) {
 					n := p.Length()
 					t.stats.BytesValidated.Add(n)
 					t.cln.stats.BytesValidated.Add(n)

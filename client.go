@@ -296,11 +296,20 @@ func (cl *Client) Closed() <-chan struct{} {
 	return cl.closed
 }
 
+// closeSockets closes every socket and waits for them to finish. sockets can be slow to close (uTP gives
+// the closing packets of its connections time to leave), so they are closed concurrently.
 func (cl *Client) closeSockets() {
+	var wg sync.WaitGroup
+
 	cl.eachListener(func(l sockets.Socket) bool {
-		l.Close()
+		wg.Go(func() {
+			l.Close()
+		})
+
 		return true
 	})
+
+	wg.Wait()
 }
 
 func (cl *Client) Tune(ops ...ClientOperation) error {

@@ -442,7 +442,8 @@ func TestClientSeedFromDisk(t *testing.T) {
 
 		resumed := dl.Stats()
 		require.EqualValues(t, (pieces-halfpieces)*cpp, resumed.Missing)
-		require.LessOrEqual(t, resumed.BytesValidated.Uint64(), uint64(half))
+		// the first half was downloaded before the restart, so it counts as validated immediately.
+		require.EqualValues(t, half, resumed.BytesValidated.Uint64())
 
 		// finish the download. the first half is verified as it is read, the second half as it is downloaded.
 		actual := md5.New()
@@ -463,6 +464,119 @@ func TestClientSeedFromDisk(t *testing.T) {
 
 		// every byte of the file was validated exactly once since the restart.
 		stats = dl.Stats()
+		require.EqualValues(t, resumelen, stats.BytesValidated.Uint64())
+		require.EqualValues(t, pieces, stats.Completed)
+		require.Zero(t, stats.Unverified)
+		require.Zero(t, stats.Missing)
+		require.Zero(t, stats.Failed)
+	})
+
+	t.Run("resumes a fully downloaded torrent and counts the bytes validated of the entire file", func(t *testing.T) {
+		const (
+			piecelen  = 256 * bytesx.KiB
+			pieces    = 64
+			resumelen = pieces * piecelen
+		)
+
+		ctx, done := testx.Context(t)
+		defer done()
+
+		sdir := t.TempDir()
+		info, expected, err := torrenttest.Random(sdir, resumelen, metainfo.OptionPieceLength(piecelen))
+		require.NoError(t, err)
+
+		smd, err := torrent.NewFromInfo(info)
+		require.NoError(t, err)
+
+		// the torrent is on disk, but never started.
+		mdstore := torrent.NewMetadataCache(t.TempDir())
+		require.NoError(t, mdstore.Write(smd))
+
+		sclient := torrenttestx.Client(
+			t,
+			autobind.NewLoopback(autobind.EnableDHT(torrenttestx.QuickDHT(t))),
+			mdstore,
+			storage.NewFile(sdir),
+		)
+		defer sclient.Close()
+
+		tclient := torrenttestx.Client(
+			t,
+			autobind.NewLoopback(autobind.EnableDHT(torrenttestx.QuickDHT(t))),
+			torrent.NewMetadataCache(t.TempDir()),
+			storage.NewFile(t.TempDir()),
+			torrent.ClientConfigCacheDirectory(t.TempDir()),
+		)
+		defer tclient.Close()
+
+		lmd, err := torrent.NewFromInfo(info)
+		require.NoError(t, err)
+
+		// the whole test must finish well within 10 seconds.
+		dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		dl, added, err := tclient.Start(lmd)
+		require.NoError(t, err)
+		require.True(t, added)
+
+		type result struct {
+			n   int64
+			err error
+		}
+
+		// download the entire file.
+		actual := md5.New()
+		first := make(chan result, 1)
+		go func() {
+			n, err := torrent.DownloadInto(dctx, actual, dl, torrent.TuneClientPeer(sclient), torrent.TuneNewConns)
+			first <- result{n: n, err: err}
+		}()
+
+		// reads don't observe the context, so wait on it here to keep a stalled transfer from hanging the test.
+		select {
+		case res := <-first:
+			require.NoError(t, res.err)
+			require.EqualValues(t, resumelen, res.n)
+			require.Equal(t, expected.Sum(nil), actual.Sum(nil))
+		case <-dctx.Done():
+			require.Failf(t, "download never completed", "completed %d of %d bytes", dl.BytesCompleted(), resumelen)
+		}
+		downloaded := dl.Stats()
+		require.EqualValues(t, resumelen, downloaded.BytesValidated.Uint64())
+
+		// restart the torrent, its counters start over.
+		require.NoError(t, tclient.Stop(lmd))
+
+		dl, added, err = tclient.Start(lmd)
+		require.NoError(t, err)
+		require.True(t, added)
+
+		// everything was downloaded before the restart, so it counts as validated immediately
+		// even though only a sample of the pieces were hashed.
+		resumed := dl.Stats()
+		require.EqualValues(t, resumelen, resumed.BytesValidated.Uint64())
+		require.Zero(t, resumed.Missing)
+		require.Zero(t, resumed.Failed)
+
+		// reading the file verifies the remaining pieces, they must not be counted a second time.
+		actual = md5.New()
+		second := make(chan result, 1)
+		go func() {
+			n, err := torrent.DownloadInto(dctx, actual, dl, torrent.TuneClientPeer(sclient), torrent.TuneNewConns)
+			second <- result{n: n, err: err}
+		}()
+
+		select {
+		case res := <-second:
+			require.NoError(t, res.err)
+			require.EqualValues(t, resumelen, res.n)
+			require.Equal(t, expected.Sum(nil), actual.Sum(nil))
+		case <-dctx.Done():
+			require.Failf(t, "resumed read never completed", "completed %d of %d bytes", dl.BytesCompleted(), resumelen)
+		}
+
+		stats := dl.Stats()
 		require.EqualValues(t, resumelen, stats.BytesValidated.Uint64())
 		require.EqualValues(t, pieces, stats.Completed)
 		require.Zero(t, stats.Unverified)
