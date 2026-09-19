@@ -9,6 +9,7 @@ import (
 	"time"
 
 	pp "github.com/james-lawrence/torrent/btprotocol"
+	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/metainfo"
 )
@@ -68,11 +69,7 @@ func newRequestFromMessage(msg *pp.Message) request {
 
 // The size in bytes of a metadata extension piece.
 func metadataPieceSize(totalSize int, piece int) int {
-	ret := totalSize - piece*(1<<14)
-	if ret > 1<<14 {
-		ret = 1 << 14
-	}
-	return ret
+	return min(totalSize-piece*(16*bytesx.KiB), 16*bytesx.KiB)
 }
 
 // Return the request that would include the given offset into the torrent data.
