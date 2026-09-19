@@ -267,6 +267,9 @@ func testClientTransfer(t *testing.T, ps testClientTransferParams) {
 	_, err = torrent.DownloadInto(ctx, io.Discard, leecherTorrent)
 	require.NoError(t, err)
 
+	// seeding is disabled for the leecher, completing must not change that.
+	assert.False(t, leecherTorrent.Stats().Seeding)
+
 	r := torrent.NewReader(leecherTorrent)
 	defer r.Close()
 
@@ -355,6 +358,8 @@ func TestClientSeedWithoutAdding(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int64(64*bytesx.KiB), n)
 		require.Equal(t, md5x.FormatHex(expected), md5x.FormatHex(downloaded))
+		// seeding is disabled for the leecher, completing must not change that.
+		require.False(t, leeched.Stats().Seeding)
 	})
 
 	t.Run("with encryption", func(t *testing.T) {
@@ -417,6 +422,8 @@ func TestClientSeedWithoutAdding(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int64(64*bytesx.KiB), n)
 		require.Equal(t, md5x.FormatHex(expected), md5x.FormatHex(downloaded))
+		// seeding is disabled for the leecher, completing must not change that.
+		require.False(t, leeched.Stats().Seeding)
 	})
 }
 
@@ -496,6 +503,13 @@ func TestSeedAfterDownloading(t *testing.T) {
 	require.Equal(t, int64(13), n)
 	require.NoError(t, err)
 	require.Equal(t, "22c3683b094136c3398391ae71b20f04", md5x.FormatHex(digest))
+
+	// the leecher has seeding enabled and just completed, it must now report seeding.
+	require.True(t, leecherGreeting.Stats().Seeding)
+
+	// the leecherLeecher has seeding disabled, completing must not change that.
+	wg.Wait()
+	require.False(t, llg.Stats().Seeding)
 }
 
 func TestDownload(t *testing.T) {

@@ -42,7 +42,7 @@ func connreaderinit(ctx context.Context, cn *connection, writer *writerstate, to
 		Idler:            cstate.Idle(ctx, cn.upload),
 		requestbuffer:    new(bytes.Buffer),
 		pool: &sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				b := make([]byte, defaultChunkSize)
 				return &b
 			},
