@@ -324,9 +324,13 @@ func (cl *Client) Close() error {
 	if cl.dht != nil {
 		cl.dht.DetachAnnouncer(dht.PeerAnnounceFn(cl.onDHTAnnouncePeer))
 	}
+
+	// torrents close first so their connections can flush their closing packets, closing the
+	// sockets first leaves peers holding connections to us until they time out.
+	err := cl.torrents.Close()
 	cl.closeSockets()
 
-	if err := cl.torrents.Close(); err != nil {
+	if err != nil {
 		return errorsx.Wrap(err, "unable to close torrents")
 	}
 
@@ -471,6 +475,9 @@ func (cl *Client) establishOutgoingConn(ctx context.Context, t *torrent, addr ne
 		// there's nothing else to try.
 		return c, err
 	}
+
+	// the retry replaces the error, keep the reason the first attempt failed.
+	cl.config.debug().Printf("outgoing connection attempt failed (obfuscated=%t), retrying with obfuscated=%t: %s - %v\n", obfuscatedHeaderFirst, !obfuscatedHeaderFirst, addr, err)
 
 	// Try again with encryption if we didn't earlier, or without if we did.
 	if c, err = cl.establishOutgoingConnEx(ctx, t, addr, !obfuscatedHeaderFirst); err != nil {

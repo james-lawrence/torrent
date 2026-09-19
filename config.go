@@ -42,6 +42,10 @@ type ClientConfig struct {
 	// zero disables idle unloading.
 	idleTimeout time.Duration
 
+	// how often connections send keepalives. a connection that has sent nothing for two intervals
+	// is dropped.
+	keepAliveTimeout time.Duration
+
 	// Only applies to chunks uploaded to peers, to maintain responsiveness
 	// communicating local Client state to peers. Each limiter token
 	// represents one byte. The Limiter's burst must be large enough to fit a
@@ -207,6 +211,15 @@ func ClientConfigSeed(b bool) ClientConfigOption {
 func ClientConfigIdleTimeout(d time.Duration) ClientConfigOption {
 	return func(c *ClientConfig) {
 		c.idleTimeout = d
+	}
+}
+
+// ClientConfigKeepAlive how often connections send keepalives, a connection that has sent nothing
+// for two intervals is considered dead and dropped. peers should be configured to match, a peer with a
+// longer interval is dropped while quiet. defaults to 10 seconds.
+func ClientConfigKeepAlive(d time.Duration) ClientConfigOption {
+	return func(c *ClientConfig) {
+		c.keepAliveTimeout = d
 	}
 }
 
@@ -386,6 +399,7 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		TorrentPeersHighWater:          64,
 		TorrentPeersLowWater:           16,
 		handshakesTimeout:              4 * time.Second,
+		keepAliveTimeout:               10 * time.Second,
 		UploadRateLimiter:              rate.NewLimiter(rate.Limit(128*bytesx.MiB), bytesx.MiB),
 		DownloadRateLimiter:            rate.NewLimiter(rate.Limit(256*bytesx.MiB), bytesx.MiB),
 		dialRateLimiter:                rate.NewLimiter(rate.Limit(32), 128),

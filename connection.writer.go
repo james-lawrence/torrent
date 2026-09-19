@@ -31,6 +31,7 @@ import (
 
 func RunHandshookConn(c *connection, t *torrent) error {
 	const retrydelay = 10 * time.Second
+	keepalive := c.cfg.keepAliveTimeout
 
 	remotreaddr := c.conn.RemoteAddr()
 	c.setTorrent(t)
@@ -66,14 +67,14 @@ func RunHandshookConn(c *connection, t *torrent) error {
 	}
 
 	go func() {
-		err := connwriterinit(ctx, ws, 10*time.Second)
+		err := connwriterinit(ctx, ws, keepalive)
 		err = errorsx.StdlibTimeout(err, retrydelay, syscall.ECONNRESET)
 		cancel(err)
 		c.Close()
 	}()
 
 	go func() {
-		err := connreaderinit(ctx, c, ws, 10*time.Second)
+		err := connreaderinit(ctx, c, ws, keepalive)
 		err = errorsx.StdlibTimeout(err, retrydelay, syscall.ECONNRESET)
 		cancel(err)
 		c.Close()
