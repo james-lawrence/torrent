@@ -48,14 +48,27 @@ func Autosocket(t *testing.T) Binder {
 	_dht, err := dht.NewServer(32)
 	require.NoError(t, err)
 
-	s, err := utpx.New("udp4", "localhost:")
-	require.NoError(t, err)
-	bindings = append(bindings, sockets.New(s, s))
-
-	if addr, ok := s.Addr().(*net.UDPAddr); ok {
-		s, err := net.Listen("tcp4", fmt.Sprintf("localhost:%d", addr.Port))
+	// the tcp port matches the randomly assigned udp port, which may already be
+	// in use by tcp elsewhere on the machine. retry with a new udp port when that happens.
+	for attempt := 0; ; attempt++ {
+		s, err := utpx.New("udp4", "localhost:")
 		require.NoError(t, err)
-		bindings = append(bindings, sockets.New(s, &net.Dialer{}))
+
+		addr, ok := s.Addr().(*net.UDPAddr)
+		if !ok {
+			bindings = append(bindings, sockets.New(s, s))
+			break
+		}
+
+		l, err := net.Listen("tcp4", fmt.Sprintf("localhost:%d", addr.Port))
+		if err != nil {
+			s.Close()
+			require.Less(t, attempt, 10, "unable to find a port free for both udp and tcp: %v", err)
+			continue
+		}
+
+		bindings = append(bindings, sockets.New(s, s), sockets.New(l, &net.Dialer{}))
+		break
 	}
 
 	return NewSocketsBind(bindings...).Options(
