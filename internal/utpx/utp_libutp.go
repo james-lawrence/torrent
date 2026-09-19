@@ -4,8 +4,15 @@
 package utpx
 
 import (
+	"time"
+
 	utp "github.com/anacrolix/go-libutp"
 )
+
+// grace is how long a socket stays open once asked to close. closing a connection only queues
+// its FIN when the send window is full, and destroying the socket discards anything unsent,
+// leaving the peer holding a dead connection until it times out.
+const grace = 200 * time.Millisecond
 
 // New ...
 func New(network, addr string) (Socket, error) {
@@ -13,9 +20,16 @@ func New(network, addr string) (Socket, error) {
 	if s == nil {
 		return nil, err
 	}
-	if err != nil {
-		return s, err
-	}
 
-	return s, err
+	return ungraceful{Socket: s}, err
+}
+
+// ungraceful gives the closing packets of its connections time to leave before the socket is destroyed.
+type ungraceful struct {
+	*utp.Socket
+}
+
+func (t ungraceful) Close() error {
+	time.Sleep(grace)
+	return t.Socket.Close()
 }
