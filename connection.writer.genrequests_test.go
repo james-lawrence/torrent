@@ -10,32 +10,30 @@ import (
 	pp "github.com/james-lawrence/torrent/btprotocol"
 )
 
-// TestGenrequests proves genrequests' dynamic lowrequestwatermark adjustment
-// never drops below 1, matching its own doc comment ("with a floor of a
-// single request") which the code didn't actually enforce - only an upper
-// clamp against PeerMaxRequests existed. A burst of rejects in one cycle
-// (chunksRejected far exceeding chunksReceived*4) drove the watermark
-// negative, which zeroed genrequests' Pop budget (max(0, watermark-inflight))
-// with no error to signal it - the connection would go quiet and only claw
-// back up by at most +1 per cycle.
-func TestGenrequests(t *testing.T) {
-	t.Run("a burst of rejects does not zero out the request budget", func(t *testing.T) {
+// TestConnwriterRequestsGenrequests covers what the writer does once a connection has nothing left it may request.
+func TestConnwriterRequestsGenrequests(t *testing.T) {
+	t.Run("no work while other connections hold every chunk does not spin the writer", func(t *testing.T) {
 		ws := newTestWriterState(t)
+
+		// the initialization connwriterinit performs on a live writer, which newWriterState leaves out.
 		ws.requestable = roaring.New()
-		ws.lowrequestwatermark = 4
+		ws.lowrequestwatermark = max(1, int(ws.PeerMaxRequests.Load()/4))
 		ws.chokeduntil = time.Now().Add(-time.Minute)
 		ws.mutate(func(ws *writerstate) { ws.PeerChoked = false })
 
 		ws.t.chunks.fill(ws.t.chunks.missing, uint64(ws.t.chunks.cmaximum))
+
 		ws.cmu().Lock()
 		ws.claimed.AddRange(0, uint64(ws.t.chunks.cmaximum))
 		ws.cmu().Unlock()
 		ws.peerPiecesChanged()
 
-		// simulate a burst of BEP6 rejects (connection.go:819) far outweighing
-		// anything actually received this cycle.
-		ws.chunksReceived.Store(0)
-		ws.chunksRejected.Store(100)
+		// another connection took every chunk, nothing is left for this one to pop.
+		everything := roaring.New()
+		everything.AddRange(0, uint64(ws.t.chunks.cmaximum))
+		taken, err := ws.t.chunks.Pop(int(ws.t.chunks.cmaximum), everything)
+		require.NoError(t, err)
+		require.Len(t, taken, int(ws.t.chunks.cmaximum))
 
 		var requested []request
 		mw := messageWriter(func(m pp.Message) error {
@@ -47,8 +45,9 @@ func TestGenrequests(t *testing.T) {
 
 		gen := _connwriterRequests{writerstate: ws}
 		gen.genrequests(gen.determineInterest(mw), mw)
+		require.Empty(t, requested, "every chunk is outstanding elsewhere, there is nothing to request")
 
-		require.EqualValues(t, 1, ws.lowrequestwatermark, "watermark must floor at 1, never go to 0 or negative")
-		require.NotEmpty(t, requested, "a floored-but-positive watermark must still let the connection request work")
+		// a refresh due right now makes connwriteridle skip idling, the writer loops without waiting for anything.
+		require.True(t, ws.refreshrequestable.Load().After(time.Now()), "the retry for chunks held elsewhere must be in the future, otherwise the writer busy loops")
 	})
 }
