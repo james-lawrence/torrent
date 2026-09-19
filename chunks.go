@@ -316,15 +316,6 @@ func (t *chunks) Locked(fn func()) {
 	fn()
 }
 
-func (t *chunks) InitFromUnverified(m *roaring.Bitmap) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.unverified.Or(m)
-	t.missing = bitmapx.Fill(uint64(t.cmaximum))
-	t.missing.AndNot(t.unverified)
-}
-
 func (t *chunks) Intersects(a, b *roaring.Bitmap) bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -564,6 +555,12 @@ func (t *chunks) pend(r request) (changed bool) {
 	return changed
 }
 
+func (t *chunks) Mut(op chunkopt) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	op(t)
+}
+
 // ChunkOp is a read-only operation against chunks' internal state, run
 // while chunks' lock is held - lets a call site read multiple related
 // fields (e.g. several bitmaps, or a bitmap plus the outstanding map) as
@@ -597,19 +594,6 @@ func (t *chunks) Readable() uint64 {
 
 	cpp := chunksPerPiece(t.meta.PieceLength, t.clength)
 	return t.unverified.GetCardinality() + min((uint64(cpp)*t.completed.GetCardinality()), uint64(t.cmaximum))
-}
-
-func (t *chunks) ReadableBitmap() *roaring.Bitmap {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	bm := t.unverified.Clone()
-	t.completed.Iterate(func(x uint32) bool {
-		bm.AddRange(t.Range(uint64(x)))
-		return true
-	})
-
-	return bm
 }
 
 // returns true if any chunks are in incomplete states (missing, oustanding, unverified)
@@ -831,4 +815,51 @@ func copRequestPool(c *chunks) *roaring.Bitmap {
 	}
 
 	return roaring.Or(c.missing, c.inflight)
+}
+
+func DownloadedSnapshotSave(c *chunks) *roaring.Bitmap {
+	bm := c.unverified.Clone()
+	c.completed.Iterate(func(x uint32) bool {
+		bm.AddRange(c.Range(uint64(x)))
+		return true
+	})
+
+	return bm
+}
+
+// copCompletedPieces returns the pieces that have every chunk downloaded but not yet verified.
+func copCompletedPieces(c *chunks) *roaring.Bitmap {
+	pieces := roaring.New()
+	for pid := uint64(0); pid < c.pieces; pid++ {
+		min, max := c.Range(pid)
+		if max > min && bitmapx.Range(min, max).AndCardinality(c.unverified) == max-min {
+			pieces.Add(uint32(pid))
+		}
+	}
+
+	return pieces
+}
+
+// DownloadedSnapshotRestore initializes the chunks from a snapshot created by DownloadedSnapshotSave.
+// the snapshot is every chunk that had been downloaded. none of it has been verified since the
+// restore, so every chunk in the snapshot is restored as unverified (including the chunks of pieces
+// that were completed when the snapshot was saved) and every other chunk is missing. nothing is
+// completed. unverified chunks are verified as they are read (see blockingreader), or by a
+// verification tuner.
+// chunks outside of the torrent are ignored. inflight and failed are left untouched.
+// the chunks are not locked, apply it with Mut.
+func DownloadedSnapshotRestore(unverified *roaring.Bitmap) chunkopt {
+	return func(c *chunks) {
+		downloaded := bitmapx.Fill(uint64(c.cmaximum))
+		downloaded.And(unverified)
+
+		c.missing.Clear()
+		c.missing.AddRange(0, uint64(c.cmaximum))
+		c.missing.AndNot(downloaded)
+
+		c.completed.Clear()
+
+		c.unverified.Clear()
+		c.unverified.Or(downloaded)
+	}
 }

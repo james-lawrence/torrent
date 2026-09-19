@@ -64,7 +64,7 @@ func (t *memoryseeding) Sync(id int160.T) error {
 	}
 
 	if c.haveInfo() {
-		if err := t.bm.Write(id, c.chunks.ReadableBitmap()); err != nil {
+		if err := t.bm.Write(id, c.chunks.Read(DownloadedSnapshotSave)); err != nil {
 			return err
 		}
 	}
@@ -150,7 +150,7 @@ func (t *memoryseeding) Insert(md Metadata, fn func(md Metadata, options ...Tune
 		return nil, err
 	}
 
-	return dlt, dlt.Tune(tuneVerifySample(unverified, 8))
+	return dlt, dlt.Tune(TuneVerifyBitmap(unverified, 8))
 }
 
 func (t *memoryseeding) Load(id int160.T, fn func(md Metadata, options ...Tuner) *torrent, options ...Tuner) (dlt *torrent, cached bool, _ error) {
@@ -213,7 +213,7 @@ func (t *memoryseeding) Load(id int160.T, fn func(md Metadata, options ...Tuner)
 		return nil, false, err
 	}
 
-	return dlt, cached, dlt.Tune(tuneVerifySample(unverified, 8))
+	return dlt, cached, dlt.Tune(TuneVerifyBitmap(unverified, 8))
 }
 
 func (t *memoryseeding) Metadata(id int160.T) (md Metadata, err error) {
