@@ -531,6 +531,7 @@ func zeroTorrent(md Metadata, options ...Tuner) *torrent {
 		wantPeersEvent:          make(chan struct{}, 1),
 		closed:                  make(chan struct{}),
 		lastConnection:          atomicx.Pointer(time.Now()),
+		lastActivity:            atomicx.Pointer(time.Now()),
 		event:                   &sync.Cond{L: mu},
 		chunks:                  newChunks(defaultChunkSize, metainfo.NewInfo(), chunkoptCond(chunkcond)),
 	}
@@ -563,6 +564,8 @@ func newTorrent(cl *Client, src Metadata, options ...Tuner) *torrent {
 		wantPeersEvent:          make(chan struct{}, 1),
 		closed:                  make(chan struct{}),
 		lastConnection:          atomicx.Pointer(time.Now()),
+		lastActivity:            atomicx.Pointer(time.Now()),
+		idleTimeout:             cl.config.idleTimeout,
 		event:                   &sync.Cond{L: m},
 	}
 	*t.digests = newDigestsFromTorrent(t)
@@ -572,6 +575,10 @@ func newTorrent(cl *Client, src Metadata, options ...Tuner) *torrent {
 
 	if err := t.Tune(options...); err != nil {
 		log.Println("encountered an error tuning torrent", err)
+	}
+
+	if err := t.Tune(TuneIdleAutoUnload); err != nil {
+		log.Println("encountered an error starting the idle watcher", err)
 	}
 
 	return t
@@ -704,6 +711,14 @@ type torrent struct {
 
 	// last time a peer connection was established.
 	lastConnection *atomic.Pointer[time.Time]
+
+	// last time the torrent made progress: a connection was established or dropped,
+	// or a piece was validated. drives idle unloading.
+	lastActivity *atomic.Pointer[time.Time]
+
+	// how long the torrent may be inactive before it is unloaded, zero disables.
+	// cloned from the client config when the torrent is created.
+	idleTimeout time.Duration
 
 	// signal events on this torrent.
 	event *sync.Cond
@@ -1243,6 +1258,8 @@ func (t *torrent) bytesCompleted() int64 {
 }
 
 func (t *torrent) dropConnection(c *connection) {
+	t.touch()
+
 	if t.deleteConnection(c) {
 		t.openNewConns()
 	}
@@ -1424,6 +1441,7 @@ func (t *torrent) statsLocked() (ret Stats) {
 
 	ret.PendingPeers, ret.HalfOpenPeers = t.peers.Stats()
 	ret.LastConnection = langx.Zero(t.lastConnection.Load())
+	ret.LastActivity = langx.Zero(t.lastActivity.Load())
 	t.chunks.Snapshot(&ret)
 
 	// TODO: these can be moved to the connections directly.

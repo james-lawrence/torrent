@@ -38,6 +38,10 @@ type ClientConfig struct {
 	// Upload even after there's nothing in it for us.
 	Seed bool `long:"seed"`
 
+	// how long a torrent may go without activity before it is unloaded from memory.
+	// zero disables idle unloading.
+	idleTimeout time.Duration
+
 	// Only applies to chunks uploaded to peers, to maintain responsiveness
 	// communicating local Client state to peers. Each limiter token
 	// represents one byte. The Limiter's burst must be large enough to fit a
@@ -194,6 +198,15 @@ func ClientConfigDebugLogger(l logging) ClientConfigOption {
 func ClientConfigSeed(b bool) ClientConfigOption {
 	return func(c *ClientConfig) {
 		c.Seed = b
+	}
+}
+
+// ClientConfigIdleTimeout unload torrents from memory once they have had no activity for
+// the given duration. a seeding torrent with connections is never idle. the torrent remains
+// on disk and is reloaded when a peer connects. zero disables idle unloading.
+func ClientConfigIdleTimeout(d time.Duration) ClientConfigOption {
+	return func(c *ClientConfig) {
+		c.idleTimeout = d
 	}
 }
 

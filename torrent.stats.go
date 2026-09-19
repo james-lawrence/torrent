@@ -29,6 +29,8 @@ type Stats struct {
 
 	Seeding        bool
 	LastConnection time.Time
+	// last connection change or validated piece, used for idle unloading.
+	LastActivity time.Time
 }
 
 func (stats Stats) String() string {

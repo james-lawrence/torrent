@@ -24,6 +24,8 @@ func newDigestsFromTorrent(t *torrent) digests {
 			// log.Printf("hashed %p %d / %d - %v", t.chunks, idx+1, t.chunks.pieces, cause)
 
 			if t.chunks.Hashed(uint64(idx), cause) {
+				t.touch()
+
 				if p := t.piece(idx); p != nil {
 					n := p.Length()
 					t.stats.BytesValidated.Add(n)
