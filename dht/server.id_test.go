@@ -34,6 +34,13 @@ func TestServerID(t *testing.T) {
 		wantValid bool
 	}{
 		{
+			// clients without a packet socket never bind a dht server.
+			name:      "nil_server",
+			setup:     func(t *testing.T) *Server { return nil },
+			source:    netip.MustParseAddrPort("127.0.0.1:12345"),
+			wantValid: false,
+		},
+		{
 			name:      "no_bindings",
 			setup:     func(t *testing.T) *Server { return mustNewServer(t, OptionNodeID(wantID)) },
 			source:    netip.MustParseAddrPort("127.0.0.1:12345"),

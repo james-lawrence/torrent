@@ -219,6 +219,11 @@ func NewServer(k int, options ...Option) (s *Server, err error) {
 }
 
 func (s *Server) Binding(addr netip.AddrPort) *socketbinding {
+	// clients without a packet socket never bind a dht server.
+	if s == nil {
+		return nil
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.bindingLocked(addr)
