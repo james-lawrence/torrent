@@ -16,16 +16,18 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// TestClientStopStartInflight reproduces what a service does when a user pauses and later resumes a
+// TestTorrentResume reproduces what a service does when a user pauses and later resumes a
 // download: Client.Stop drops the torrent and Client.Start brings it back. requests that were outstanding
 // when the transfer was interrupted must be handed back to the pool, a chunk left inflight is never
 // requested again (outside of endgame only missing chunks are requested) so its piece can never complete
 // and the transfer stalls. the client logs `still expecting N requests` each time a connection closes while
 // requests are still outstanding.
-func TestClientStopStartInflight(t *testing.T) {
+func TestTorrentResume(t *testing.T) {
 	const torrentlen = 2 * bytesx.MiB
 
 	t.Run("stopping a torrent unblocks the download in progress", func(t *testing.T) {
+		t.Parallel()
+
 		ctx, done := testx.Context(t)
 		defer done()
 
@@ -77,6 +79,8 @@ func TestClientStopStartInflight(t *testing.T) {
 	})
 
 	t.Run("stopping and starting the downloading torrent completes the transfer", func(t *testing.T) {
+		t.Parallel()
+
 		ctx, done := testx.Context(t)
 		defer done()
 
@@ -120,7 +124,9 @@ func TestClientStopStartInflight(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, added, "a stopped torrent must be added again when it is started")
 
-		dctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		// the throttled transfer needs 8s of pure transfer time, the resumed transfer has been observed to take
+		// anywhere between 10s and 25s to finish.
+		dctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 
 		second := make(chan error, 1)
@@ -160,6 +166,8 @@ func TestClientStopStartInflight(t *testing.T) {
 	})
 
 	t.Run("dropping every connection mid transfer releases every request", func(t *testing.T) {
+		t.Parallel()
+
 		ctx, done := testx.Context(t)
 		defer done()
 

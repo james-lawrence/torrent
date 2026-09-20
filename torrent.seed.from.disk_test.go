@@ -22,16 +22,18 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// TestClientSeedFromDisk covers a seeder whose torrent only exists on disk. the torrent is
+// TestTorrentSeedFromDisk covers a seeder whose torrent only exists on disk. the torrent is
 // loaded into memory when a leecher connects, the uploaded bytes are recorded when the
 // connection closes, and the torrent is unloaded once it has been idle.
-func TestClientSeedFromDisk(t *testing.T) {
+func TestTorrentSeedFromDisk(t *testing.T) {
 	const (
 		torrentlen  = bytesx.MiB
 		idletimeout = 500 * time.Millisecond
 	)
 
 	t.Run("loads from disk, records uploads, and unloads when idle", func(t *testing.T) {
+		t.Parallel()
+
 		var uploaded atomic.Int64
 
 		ctx, done := testx.Context(t)
@@ -126,6 +128,8 @@ func TestClientSeedFromDisk(t *testing.T) {
 	})
 
 	t.Run("reloads after unload and aggregates uploaded and downloaded bytes across loads", func(t *testing.T) {
+		t.Parallel()
+
 		const rounds = 2
 
 		var (
@@ -218,6 +222,8 @@ func TestClientSeedFromDisk(t *testing.T) {
 	})
 
 	t.Run("serves simultaneous leechers from a single load", func(t *testing.T) {
+		t.Parallel()
+
 		const leechers = 5
 
 		var (
@@ -346,6 +352,8 @@ func TestClientSeedFromDisk(t *testing.T) {
 	})
 
 	t.Run("resumes a half downloaded torrent and counts the bytes validated of the entire file", func(t *testing.T) {
+		t.Parallel()
+
 		const (
 			piecelen   = 256 * bytesx.KiB
 			chunklen   = 16 * bytesx.KiB
@@ -472,6 +480,8 @@ func TestClientSeedFromDisk(t *testing.T) {
 	})
 
 	t.Run("resumes a fully downloaded torrent and counts the bytes validated of the entire file", func(t *testing.T) {
+		t.Parallel()
+
 		const (
 			piecelen  = 256 * bytesx.KiB
 			pieces    = 64
@@ -585,6 +595,8 @@ func TestClientSeedFromDisk(t *testing.T) {
 	})
 
 	t.Run("unloads a download that makes no progress", func(t *testing.T) {
+		t.Parallel()
+
 		info, _, err := torrenttest.Random(t.TempDir(), torrentlen)
 		require.NoError(t, err)
 

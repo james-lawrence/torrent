@@ -782,7 +782,7 @@ type torrent struct {
 // Returns a Reader bound to the torrent's data. All read calls block until
 // the data requested is actually available.
 func (t *torrent) Storage() storage.TorrentImpl {
-	return newBlockingReader(t.storage, t.chunks, t.digests)
+	return newBlockingReader(t.storage, t.chunks, t.digests, t.closed)
 }
 
 // Metadata provides enough information to lookup the torrent again.
@@ -1117,6 +1117,8 @@ func (t *torrent) usualPieceSize() int {
 
 func (t *torrent) close() error {
 	defer t.event.Broadcast()
+	// wake the readers waiting on data, they observe the closed torrent and return.
+	defer t.chunks.cond.Broadcast()
 
 	t.lock()
 	defer t.unlock()

@@ -9,11 +9,15 @@ import (
 	"github.com/james-lawrence/torrent/storage"
 )
 
-func newBlockingReader(imp storage.TorrentImpl, c *chunks, d *digests) *blockingreader {
+// newBlockingReader reads from imp, blocking until the data is available. done is closed when the
+// owning torrent is closed, reads still waiting for data at that point return, nil when there is
+// no torrent to observe.
+func newBlockingReader(imp storage.TorrentImpl, c *chunks, d *digests, done <-chan struct{}) *blockingreader {
 	return &blockingreader{
 		TorrentImpl: imp,
 		c:           c,
 		d:           d,
+		done:        done,
 		closed:      atomicx.Bool(false),
 	}
 }
@@ -22,6 +26,7 @@ type blockingreader struct {
 	storage.TorrentImpl
 	d      *digests
 	c      *chunks
+	done   <-chan struct{}
 	closed *atomic.Bool
 }
 
@@ -47,6 +52,12 @@ func (t *blockingreader) ReadAt(p []byte, offset int64) (n int, err error) {
 	for allowed = t.c.DataAvailableForOffset(offset); allowed < 0; allowed = t.c.DataAvailableForOffset(offset) {
 		if t.closed.Load() {
 			return 0, io.ErrClosedPipe
+		}
+
+		select {
+		case <-t.done:
+			return 0, io.ErrClosedPipe
+		default:
 		}
 
 		if t.c.ChunksAvailable(pid) && onceb.CompareAndSwap(true, false) {

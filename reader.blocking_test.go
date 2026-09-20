@@ -52,7 +52,7 @@ func newBlockingReaderFixture(t *testing.T, npieces int) blockingReaderFixture {
 	})
 
 	return blockingReaderFixture{
-		r:           newBlockingReader(impl, c, &d),
+		r:           newBlockingReader(impl, c, &d, nil),
 		c:           c,
 		pieceLength: pieceLength,
 		data:        data,
