@@ -3,6 +3,7 @@ package dht
 import (
 	"context"
 	"log"
+	"net/netip"
 
 	"github.com/james-lawrence/torrent/bencode"
 	"github.com/james-lawrence/torrent/dht/bep44"
@@ -101,24 +102,29 @@ func (t HandlerAnnounce) Handle(ctx context.Context, source Addr, s *Server, b B
 	}
 
 	var port uint16
-	portOk := false
 	if m.A.Port != nil {
 		port = *m.A.Port
-		portOk = true
 	}
 	if m.A.ImpliedPort {
 		port = source.Port()
-		portOk = true
 	}
 
+	// a peer without a port cannot be connected to, the port is required unless it is implied.
+	portOk := port != 0
+
+	// hooks are told where the peer can be reached, which is the announced port and not the port
+	// the packet came from.
+	peer := netip.AddrPortFrom(source.AddrPort().Addr(), port)
 	for _, h := range s.announceto {
-		go h.Announced(int160.FromByteArray(m.A.InfoHash), source.AddrPort(), portOk)
+		go h.Announced(int160.FromByteArray(m.A.InfoHash), peer, portOk)
 	}
 
-	s.peers.AddPeer(
-		peer_store.InfoHash(m.A.InfoHash),
-		krpc.NewNodeAddrFromIPPort(source.IP(), port),
-	)
+	if portOk {
+		s.peers.AddPeer(
+			peer_store.InfoHash(m.A.InfoHash),
+			krpc.NewNodeAddrFromIPPort(source.IP(), port),
+		)
+	}
 
 	return s.reply(ctx, b, source, m.T, krpc.Return{})
 }

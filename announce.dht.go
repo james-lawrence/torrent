@@ -2,6 +2,7 @@ package torrent
 
 import (
 	"context"
+	"errors"
 	"iter"
 
 	"github.com/james-lawrence/torrent/dht"
@@ -9,6 +10,23 @@ import (
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/iterx"
 )
+
+// traceDHTOutcome classifies the result of a dht announce without emitting the error text,
+// dht errors can carry the addresses of the remote nodes.
+func traceDHTOutcome(err error) string {
+	switch {
+	case err == nil:
+		return "ok"
+	case errors.Is(err, dht.ErrDHTNoInitialNodes):
+		return "no initial nodes"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline exceeded"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "failed"
+	}
+}
 
 func DHTAnnounceOnce(ctx context.Context, d *dht.Server, id int160.T) (err error) {
 	// log.Println("dht announced initiated", id, d.DynamicAddrPort())

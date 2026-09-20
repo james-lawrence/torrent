@@ -33,7 +33,7 @@ func (ts trackerseq) Peers(ctx context.Context, t *torrent, options ...tracker.A
 			// a task per tracker, it ends before the result is yielded so it only measures the announce.
 			tctx, task := trace.NewTask(ctx, "torrent.announce.tracker")
 			trace.Log(tctx, "tracker.uri", traceTrackerURI(uri))
-			trace.Logf(tctx, "tracker.initiated", "trackers=%d metadata=%t", len(ts), t.info != nil)
+			trace.Logf(tctx, "tracker.initiated", "infohash=%s trackers=%d metadata=%t", t.md.ID, len(ts), t.info != nil)
 			actx, done := context.WithTimeout(tctx, time.Minute)
 			d, peers, err := TrackerAnnounceOnce(actx, t, uri, options...)
 			done()
@@ -48,11 +48,11 @@ func (ts trackerseq) Peers(ctx context.Context, t *torrent, options ...tracker.A
 
 			// the task has ended, these attach to the caller's task.
 			if failed != nil {
-				trace.Logf(ctx, "tracker.failed", "tracker=%s outcome=%s metadata=%t", traceTrackerURI(uri), traceTrackerOutcome(failed), t.info != nil)
+				trace.Logf(ctx, "tracker.failed", "infohash=%s tracker=%s outcome=%s metadata=%t", t.md.ID, traceTrackerURI(uri), traceTrackerOutcome(failed), t.info != nil)
 				continue
 			}
 
-			trace.Logf(ctx, "tracker.completed", "tracker=%s trackers=%d", traceTrackerURI(uri), len(ts))
+			trace.Logf(ctx, "tracker.completed", "infohash=%s tracker=%s trackers=%d", t.md.ID, traceTrackerURI(uri), len(ts))
 		}
 	}
 }
@@ -151,7 +151,7 @@ func TrackerAnnounceUntil(ctx context.Context, t *torrent, donefn func() bool, o
 		)
 
 		if ts := time.Now(); !t.wantPeers() && ts.Before(forcecheck) {
-			trace.Logf(ctx, "announce.skipped", "infohash=%s peers not wanted, next force=%s", t.md.ID.String(), forcecheck.Format(time.RFC3339))
+			trace.Logf(ctx, "announce.skipped", "infohash=%s peers not wanted, sleep=%s next force=%s", t.md.ID.String(), mindelay, forcecheck.Format(time.RFC3339))
 			time.Sleep(mindelay)
 			continue
 		} else {

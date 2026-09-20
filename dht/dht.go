@@ -30,15 +30,19 @@ type transactionKey = transactions.Key
 
 type StartingNodesGetter func(ctx context.Context, dcache dnscacher) ([]Addr, error)
 
+// PeerAnnounce is notified of the peers that announce to the server. peer is the address the announcing
+// peer can be reached on: the address the announce came from, with the port it announced (the port
+// the announce came from when it asked for that with implied_port). portOk is false when the announce
+// did not include a usable port, in which case the port of peer is 0 and it cannot be connected to.
 type PeerAnnounce interface {
-	Announced(peerid int160.T, source netip.AddrPort, portOk bool)
+	Announced(peerid int160.T, peer netip.AddrPort, portOk bool)
 }
 
 type HookQuery func(source netip.AddrPort, query *krpc.Msg) (propagate bool)
-type PeerAnnounceFn func(peerid int160.T, source netip.AddrPort, portOk bool)
+type PeerAnnounceFn func(peerid int160.T, peer netip.AddrPort, portOk bool)
 
-func (t PeerAnnounceFn) Announced(peerid int160.T, source netip.AddrPort, portOk bool) {
-	t(peerid, source, portOk)
+func (t PeerAnnounceFn) Announced(peerid int160.T, peer netip.AddrPort, portOk bool) {
+	t(peerid, peer, portOk)
 }
 
 type PublicAddrPort func(ctx context.Context, sc *Server, q Binding, id int160.T, bestaddr netip.AddrPort, local net.PacketConn) (iter.Seq[netip.AddrPort], error)

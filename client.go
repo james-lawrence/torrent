@@ -708,7 +708,12 @@ func (cl *Client) newConnection(nc net.Conn, outgoing bool, remoteAddr netip.Add
 	return c
 }
 
-func (cl *Client) onDHTAnnouncePeer(id int160.T, source netip.AddrPort, portOk bool) {
+func (cl *Client) onDHTAnnouncePeer(id int160.T, peer netip.AddrPort, portOk bool) {
+	// a peer that did not announce a usable port cannot be connected to.
+	if !portOk {
+		return
+	}
+
 	cl.lock()
 	defer cl.unlock()
 
@@ -720,8 +725,8 @@ func (cl *Client) onDHTAnnouncePeer(id int160.T, source netip.AddrPort, portOk b
 
 	t.addPeers(NewPeerDeprecated(
 		int160.Zero(),
-		net.IP(source.Addr().AsSlice()),
-		source.Port(),
+		net.IP(peer.Addr().AsSlice()),
+		peer.Port(),
 		PeerOptionSource(peerSourceDhtAnnouncePeer),
 	))
 }

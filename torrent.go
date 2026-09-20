@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"runtime/trace"
 	"strconv"
 	"strings"
 	"sync"
@@ -1387,6 +1388,7 @@ func (t *torrent) consumeDhtAnnouncePeers(ctx context.Context, pvs <-chan dht.Pe
 		case v, ok := <-pvs:
 			if !ok {
 				t.cln.config.debug().Println(t.md.ID, "peer events completed")
+				trace.Logf(ctx, "dht.peers", "completed infohash=%s", t.md.ID)
 				return
 			}
 
@@ -1399,6 +1401,8 @@ func (t *torrent) consumeDhtAnnouncePeers(ctx context.Context, pvs <-chan dht.Pe
 			}, slicesx.Filter(func(v dht.Peer) bool { return v.Port() != 0 }, v.Peers...)...)
 
 			t.cln.config.debug().Println("adding peers", len(peers))
+			// only counts, the addresses belong to other peers.
+			trace.Logf(ctx, "dht.peers", "received=%d usable=%d", len(v.Peers), len(peers))
 			t.addPeersLocked(peers)
 		case <-ctx.Done():
 			return
@@ -1406,8 +1410,8 @@ func (t *torrent) consumeDhtAnnouncePeers(ctx context.Context, pvs <-chan dht.Pe
 	}
 }
 
-func (t *torrent) announceToDht(s *dht.Server, impliedPort bool) error {
-	ctx, done := context.WithTimeout(context.Background(), 5*time.Minute)
+func (t *torrent) announceToDht(ctx context.Context, s *dht.Server, impliedPort bool) error {
+	ctx, done := context.WithTimeout(ctx, 5*time.Minute)
 	defer done()
 
 	ps, err := s.AnnounceTraversal(ctx, t.md.ID, dht.AnnouncePeer(s, impliedPort))
@@ -1432,31 +1436,43 @@ func (t *torrent) dhtAnnouncer(s *dht.Server) {
 		return
 	}
 
+	// a task for the lifetime of the announcer, the dht announces run nested under it. it is only
+	// recorded when the announcer starts during a trace capture, the events still carry its id otherwise.
+	ctx, loop := trace.NewTask(context.Background(), "torrent.dht.announcer")
+	defer loop.End()
+	trace.Logf(ctx, "torrent.infohash", "%s", t.md.ID.String())
+
 	errdelay := time.Duration(0) // for the first run 0 delay to immediately find peers
 	for {
 		t.cln.config.debug().Println("dht ancouncer waiting for peers event", s.DynamicAddrPort(), t.md.ID)
 		select {
 		case <-t.closed:
+			trace.Logf(ctx, "dht.announcer", "torrent closed addr=%s infohash=%s", s.DynamicAddrPort(), t.md.ID)
 			return
 		case <-time.After(errdelay):
+			trace.Logf(ctx, "dht.announcer", "delay elapsed addr=%s infohash=%s", s.DynamicAddrPort(), t.md.ID)
 		case <-t.wantPeersEvent:
 			t.cln.config.debug().Println("dht ancouncing peers wanted event", s.DynamicAddrPort(), t.md.ID)
+			trace.Logf(ctx, "dht.announcer", "peers wanted addr=%s infohash=%s", s.DynamicAddrPort(), t.md.ID)
 		}
 
 		t.stats.DHTAnnounce.Add(1)
 
-		if err := t.announceToDht(s, false); err == nil {
+		if err := t.announceToDht(ctx, s, false); err == nil {
 			errdelay = time.Minute // when we succeeded wait unless a wantPeersEvent comes in.
+			trace.Logf(ctx, "dht.announce.result", "outcome=%s next=%s addr=%s infohash=%s", traceDHTOutcome(err), errdelay, s.DynamicAddrPort(), t.md.ID)
 			t.cln.config.debug().Println("dht ancouncing completed", s.DynamicAddrPort(), t.md.ID)
 			t.openNewConns()
 			continue
 		} else if errors.Is(err, dht.ErrDHTNoInitialNodes) {
 			t.cln.config.errors().Println(t, err)
 			errdelay = time.Minute
+			trace.Logf(ctx, "dht.announce.result", "outcome=%s next=%s infohash=%s", traceDHTOutcome(err), errdelay, t.md.ID)
 			continue
 		} else {
 			t.cln.config.errors().Println(t, errorsx.Wrap(err, "error announcing to DHT"))
 			errdelay = time.Second
+			trace.Logf(ctx, "dht.announce.result", "outcome=%s next=%s infohash=%s", traceDHTOutcome(err), errdelay, t.md.ID)
 			continue
 		}
 	}
