@@ -98,7 +98,7 @@ func TestClientSeedFromDisk(t *testing.T) {
 			require.EqualValues(t, torrentlen, res.n)
 			require.Equal(t, expected.Sum(nil), res.digest)
 		case <-dctx.Done():
-			require.Failf(t, "leecher never completed the transfer", "completed %d of %d bytes", dl.BytesCompleted(), torrentlen)
+			require.Failf(t, "leecher never completed the transfer", "completed %d of %d bytes", dl.Stats().Downloaded, torrentlen)
 		}
 
 		// the leecher is still connected, so the seeder holds on to the torrent even past the idle timeout.
@@ -420,7 +420,7 @@ func TestClientSeedFromDisk(t *testing.T) {
 			require.NoError(t, res.err)
 			require.EqualValues(t, half-1, res.n)
 		case <-dctx.Done():
-			require.Failf(t, "first half never completed", "completed %d of %d bytes", dl.BytesCompleted(), half)
+			require.Failf(t, "first half never completed", "completed %d of %d bytes", dl.Stats().Downloaded, half)
 		}
 		require.NoError(t, rd.Close())
 
@@ -459,7 +459,7 @@ func TestClientSeedFromDisk(t *testing.T) {
 			require.EqualValues(t, resumelen, res.n)
 			require.Equal(t, expected.Sum(nil), actual.Sum(nil))
 		case <-dctx.Done():
-			require.Failf(t, "resumed download never completed", "completed %d of %d bytes", dl.BytesCompleted(), resumelen)
+			require.Failf(t, "resumed download never completed", "completed %d of %d bytes", dl.Stats().Downloaded, resumelen)
 		}
 
 		// every byte of the file was validated exactly once since the restart.
@@ -540,7 +540,7 @@ func TestClientSeedFromDisk(t *testing.T) {
 			require.EqualValues(t, resumelen, res.n)
 			require.Equal(t, expected.Sum(nil), actual.Sum(nil))
 		case <-dctx.Done():
-			require.Failf(t, "download never completed", "completed %d of %d bytes", dl.BytesCompleted(), resumelen)
+			require.Failf(t, "download never completed", "completed %d of %d bytes", dl.Stats().Downloaded, resumelen)
 		}
 		downloaded := dl.Stats()
 		require.EqualValues(t, resumelen, downloaded.BytesValidated.Uint64())
@@ -573,7 +573,7 @@ func TestClientSeedFromDisk(t *testing.T) {
 			require.EqualValues(t, resumelen, res.n)
 			require.Equal(t, expected.Sum(nil), actual.Sum(nil))
 		case <-dctx.Done():
-			require.Failf(t, "resumed read never completed", "completed %d of %d bytes", dl.BytesCompleted(), resumelen)
+			require.Failf(t, "resumed read never completed", "completed %d of %d bytes", dl.Stats().Downloaded, resumelen)
 		}
 
 		stats := dl.Stats()

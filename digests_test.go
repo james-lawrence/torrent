@@ -112,7 +112,7 @@ func TestDigestsWaitBlocksUntilInFlightCheckCompletes(t *testing.T) {
 // breaks when every worker is between its last empty Pop() and its decrement:
 // they still hold their slots, so the push is refused, and then they all retire
 // without ever seeing it. The piece stays in pending forever - Wait() never
-// returns, and a live download's BytesCompleted() stops short of the total.
+// returns, and a live download's Stats().Downloaded stops short of the total.
 //
 // No timing luck is required to hit it. The retire path takes t.c.L, so a test
 // holding that lock pins every worker in the window on purpose: saturate the

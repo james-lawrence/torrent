@@ -125,7 +125,7 @@ func TuneReadBytesRemaining(v *int64) Tuner {
 		t.rLock()
 		defer t.rUnlock()
 
-		*v = max(t.bytesLeft(), 0)
+		*v = max(t.chunks.Read(copSnapshot(&Stats{})).Remaining, 0)
 		return nil
 	}
 }
@@ -469,7 +469,6 @@ type Torrent interface {
 	Metadata() Metadata
 	Tune(...Tuner) error
 	Stats() Stats
-	BytesCompleted() int64        // TODO: maybe should be pulled from torrent, it has a reference to the storage implementation. or maybe part of the Stats call?
 	Info() *metainfo.Info         // TODO: remove, this should be pulled from Metadata()
 	GotInfo() <-chan struct{}     // TODO: remove, torrents should never be returned if they don't have the meta info.
 	Storage() storage.TorrentImpl // temporary replacement for reader.
@@ -1112,23 +1111,6 @@ func (t *torrent) haveInfo() bool {
 	return t.info != nil
 }
 
-func (t *torrent) bytesLeft() (left int64) {
-	if !t.haveInfo() {
-		return -1
-	}
-
-	s := t.chunks.Read(copSnapshot(&Stats{}))
-
-	// every completed piece is assumed to be a full PieceLength, except the
-	// last piece of the torrent, which is frequently shorter.
-	completed := int64(s.Completed) * int64(t.info.PieceLength)
-	if pieces := t.chunks.pieces; pieces > 0 && t.chunks.ChunksComplete(pieces-1) {
-		completed -= int64(t.info.PieceLength) - int64(t.pieceLength(pieces-1))
-	}
-
-	return t.info.TotalLength() - ((int64(s.Unverified) * int64(t.chunks.clength)) + completed)
-}
-
 func (t *torrent) usualPieceSize() int {
 	return int(t.info.PieceLength)
 }
@@ -1297,14 +1279,6 @@ func (t *torrent) needData() bool {
 	}
 
 	return t.chunks.Incomplete()
-}
-
-// Don't call this before the info is available.
-func (t *torrent) bytesCompleted() int64 {
-	if !t.haveInfo() {
-		return 0
-	}
-	return t.info.TotalLength() - t.bytesLeft()
 }
 
 func (t *torrent) dropConnection(c *connection) {
@@ -1705,16 +1679,6 @@ func (t *torrent) Info() *metainfo.Info {
 	t.rLock()
 	defer t.rUnlock()
 	return t.info
-}
-
-// Number of bytes of the entire torrent we have completed. This is the sum of
-// completed pieces, and dirtied chunks of incomplete pieces. Do not use this
-// for download rate, as it can go down when pieces are lost or fail checks.
-// Sample Torrent.Stats.DataBytesRead for actual file data download rate.
-func (t *torrent) BytesCompleted() int64 {
-	t.rLock()
-	defer t.rUnlock()
-	return t.bytesCompleted()
 }
 
 // The completed length of all the torrent data, in all its files. This is

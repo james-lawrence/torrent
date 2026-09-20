@@ -75,7 +75,7 @@ func TestLoopbackClientPeerTransfer(t *testing.T) {
 		require.EqualValues(t, torrentlen, res.n)
 		require.Equal(t, expected.Sum(nil), res.digest)
 	case <-dctx.Done():
-		require.Failf(t, "leecher never completed the transfer", "completed %d of %d bytes", dl.BytesCompleted(), torrentlen)
+		require.Failf(t, "leecher never completed the transfer", "completed %d of %d bytes", dl.Stats().Downloaded, torrentlen)
 	}
 }
 
@@ -128,11 +128,11 @@ func TestLoopbackClientPeerTransferPreStarted(t *testing.T) {
 	dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	for watched.BytesCompleted() < torrentlen {
+	for watched.Stats().Downloaded < torrentlen {
 		select {
 		case <-sub.Values:
 		case <-dctx.Done():
-			require.Failf(t, "subscription never reported a completed download", "completed %d of %d bytes", watched.BytesCompleted(), torrentlen)
+			require.Failf(t, "subscription never reported a completed download", "completed %d of %d bytes", watched.Stats().Downloaded, torrentlen)
 		}
 	}
 }

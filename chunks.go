@@ -99,10 +99,13 @@ func newChunks(clength uint64, m *metainfo.Info, options ...chunkopt) *chunks {
 		panic("chunksize cannot be zero")
 	}
 
+	pieces := m.NumPieces()
+
 	p := new(langx.Clone(chunks{
 		chunkstate: chunkstate{
 			meta:        m,
-			pieces:      uint64(m.NumPieces()),
+			pieces:      pieces,
+			shortfall:   (pieces * uint64(m.PieceLength)) - uint64(m.TotalLength()),
 			cmaximum:    numChunks(m.TotalLength(), m.PieceLength, int64(clength)),
 			clength:     int64(clength),
 			gracePeriod: 2 * time.Minute,
@@ -152,6 +155,10 @@ type chunkstate struct {
 	meta *metainfo.Info
 
 	pieces uint64
+
+	// shortfall how many bytes the last piece falls short of a full piece length. zero when
+	// the torrent length divides evenly by the piece length, and when there are no pieces.
+	shortfall uint64
 
 	// chunk length
 	clength int64
@@ -775,7 +782,7 @@ func (t *chunks) String() string {
 	)
 }
 
-// copSnapshot populates the chunk counts of the given stats.
+// copSnapshot populates the chunk counts and downloaded/optimistic/remaining bytes of the given stats.
 func copSnapshot(s *Stats) ChunkOp[*Stats] {
 	return func(c *chunks) *Stats {
 		s.Missing = int(c.missing.GetCardinality())
@@ -783,6 +790,32 @@ func copSnapshot(s *Stats) ChunkOp[*Stats] {
 		s.Unverified = int(c.unverified.GetCardinality())
 		s.Failed = int(c.failed.GetCardinality())
 		s.Completed = int(c.completed.GetCardinality())
+
+		// only pieces known to be good are downloaded: the completed pieces and the pieces credited
+		// when the torrent was resumed. unverified chunks may not match what the torrent expects.
+		// every piece is assumed to be a full PieceLength, except the last piece of the torrent,
+		// which is frequently shorter.
+		tlength := c.meta.TotalLength()
+		// when there are no pieces this wraps to MaxUint32, which is safe: the piece bitmaps are empty
+		// so it is never contained, and the shortfall is zero so nothing would be subtracted anyway.
+		last := uint32(c.pieces - 1)
+
+		downloaded := int64(c.completed.OrCardinality(c.credited)) * c.meta.PieceLength
+		if c.completed.Contains(last) || c.credited.Contains(last) {
+			downloaded -= int64(c.shortfall)
+		}
+
+		// optimistically assume the unverified chunks are good as well, only the completed pieces
+		// are counted by piece since the chunks of credited pieces are already unverified.
+		optimistic := int64(s.Completed)*c.meta.PieceLength + int64(s.Unverified)*c.clength
+		if c.completed.Contains(last) {
+			optimistic -= int64(c.shortfall)
+		}
+
+		s.Downloaded = downloaded
+		s.DownloadedOptimistic = optimistic
+		s.Remaining = tlength - s.Downloaded
+
 		return s
 	}
 }

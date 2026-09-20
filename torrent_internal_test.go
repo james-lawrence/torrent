@@ -103,12 +103,12 @@ func TestBytesLeftLastPieceShorterThanNominal(t *testing.T) {
 	tor := &torrent{info: info, chunks: newChunks(defaultChunkSize, info)}
 	require.EqualValues(t, 1, tor.chunks.pieces, "sanity: total length below piece length means a single piece")
 
-	require.EqualValues(t, 100, tor.bytesLeft(), "nothing completed yet: everything is left")
+	require.EqualValues(t, 100, tor.chunks.Read(copSnapshot(&Stats{})).Remaining, "nothing completed yet: everything is left")
 
 	tor.chunks.Complete(0)
 
-	require.EqualValues(t, 0, tor.bytesLeft(), "the only piece is complete: nothing should be left, regardless of nominal piece length")
-	require.EqualValues(t, 100, tor.bytesCompleted())
+	require.EqualValues(t, 0, tor.chunks.Read(copSnapshot(&Stats{})).Remaining, "the only piece is complete: nothing should be left, regardless of nominal piece length")
+	require.EqualValues(t, 100, tor.chunks.Read(copSnapshot(&Stats{})).Downloaded)
 }
 
 // // This benchmark is from the observation that a lot of overlapping Readers on
