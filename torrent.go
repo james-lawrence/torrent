@@ -741,6 +741,11 @@ type torrent struct {
 	readabledataavailable atomic.Bool
 	metainfoAvailable     atomic.Bool
 
+	// set by the first Client.Start of the torrent. the client also loads torrents on its own
+	// (a peer connecting, a dht announce) to seed them, those loads do not set it, so the first
+	// Start of a torrent loaded that way is still the one that added it.
+	started atomic.Bool
+
 	// The bencoded bytes of the info dict. This is actively manipulated if
 	// the info bytes aren't initially available, and we try to fetch them
 	// from peers.

@@ -1385,3 +1385,74 @@ func TestVerifyTorrentComplete(t *testing.T) {
 		}
 	})
 }
+
+// TestClientStart covers the added result of Client.Start. callers use it to decide who is responsible for
+// running the download of a torrent: whoever adds the torrent to the client. the client also loads torrents on its
+// own to seed them, a peer connecting or announcing for a torrent whose metadata is stored loads the torrent, that
+// must not stop the first call to Start from being told it added the torrent, otherwise nothing ever runs the download.
+func TestClientStart(t *testing.T) {
+	const torrentlen = 256 * bytesx.KiB
+
+	t.Run("a second start of a running torrent is not added", func(t *testing.T) {
+		t.Parallel()
+
+		info, _, err := torrenttest.Random(t.TempDir(), torrentlen)
+		require.NoError(t, err)
+
+		md, err := torrent.NewFromInfo(info)
+		require.NoError(t, err)
+
+		c := torrenttestx.QuickClient(t)
+		defer c.Close()
+
+		_, added, err := c.Start(md)
+		require.NoError(t, err)
+		require.True(t, added)
+
+		_, added, err = c.Start(md)
+		require.NoError(t, err)
+		require.False(t, added)
+	})
+
+	t.Run("a torrent loaded by an inbound peer is added by the first start", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, done := testx.Context(t)
+		defer done()
+
+		sdir := t.TempDir()
+		info, _, err := torrenttest.Random(sdir, torrentlen)
+		require.NoError(t, err)
+
+		smd, err := torrent.NewFromInfo(info, torrent.OptionStorage(storage.NewFile(sdir)))
+		require.NoError(t, err)
+
+		sclient := torrenttestx.QuickClient(t)
+		defer sclient.Close()
+
+		sdl, _, err := sclient.Start(smd)
+		require.NoError(t, err)
+		require.NoError(t, torrent.Verify(ctx, sdl))
+
+		// the leecher has the torrent's metadata stored, which is what lets it load the torrent for a peer
+		// without anyone having started it.
+		ldir := t.TempDir()
+		lstore := torrent.NewMetadataCache(ldir)
+		lmd, err := torrent.NewFromInfo(info)
+		require.NoError(t, err)
+		require.NoError(t, lstore.Write(lmd))
+
+		lclient := torrenttestx.Client(t, autobind.NewLoopback(autobind.EnableDHT(torrenttestx.QuickDHT(t))), lstore, storage.NewFile(ldir))
+		defer lclient.Close()
+
+		// the seeder connects to the leecher, the leecher loads the torrent to answer the handshake.
+		require.NoError(t, sdl.Tune(torrent.TuneClientPeer(lclient), torrent.TuneNewConns))
+		require.Eventually(t, func() bool {
+			return sdl.Stats().ActivePeers > 0
+		}, 10*time.Second, 10*time.Millisecond, "the seeder must connect to the leecher")
+
+		_, added, err := lclient.Start(lmd)
+		require.NoError(t, err)
+		require.True(t, added, "the torrent was only loaded to seed it, the first start must report it as added")
+	})
+}

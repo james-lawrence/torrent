@@ -166,12 +166,16 @@ func (cl *Client) start(md Metadata, options ...Tuner) (dlt *torrent, added bool
 		return nil, false, err
 	}
 
-	if cached {
-		return dlt, false, nil
+	if !cached {
+		if dlt, err = cl.torrents.Insert(md, cl.newTorrent, tuneMerge(md), langx.ComposeErr(options...)); err != nil {
+			return nil, false, err
+		}
 	}
 
-	if dlt, err = cl.torrents.Insert(md, cl.newTorrent, tuneMerge(md), langx.ComposeErr(options...)); err != nil {
-		return nil, false, err
+	// a torrent that is already loaded may have been loaded by a peer or dht announce to seed it,
+	// only the first Start counts as adding it. it is also the one that sets up the announcing.
+	if !dlt.started.CompareAndSwap(false, true) {
+		return dlt, false, nil
 	}
 
 	cl.AddDHTNodes(dlt.md.DHTNodes)
