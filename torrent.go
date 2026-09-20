@@ -125,7 +125,7 @@ func TuneReadBytesRemaining(v *int64) Tuner {
 		t.rLock()
 		defer t.rUnlock()
 
-		*v = max(t.chunks.Read(copSnapshot(&Stats{})).Remaining, 0)
+		*v = max(int64(t.chunks.Read(copSnapshot(&Stats{})).Remaining), 0)
 		return nil
 	}
 }

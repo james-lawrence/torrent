@@ -800,21 +800,21 @@ func copSnapshot(s *Stats) ChunkOp[*Stats] {
 		// so it is never contained, and the shortfall is zero so nothing would be subtracted anyway.
 		last := uint32(c.pieces - 1)
 
-		downloaded := int64(c.completed.OrCardinality(c.credited)) * c.meta.PieceLength
+		downloaded := c.completed.OrCardinality(c.credited) * uint64(c.meta.PieceLength)
 		if c.completed.Contains(last) || c.credited.Contains(last) {
-			downloaded -= int64(c.shortfall)
+			downloaded -= c.shortfall
 		}
 
 		// optimistically assume the unverified chunks are good as well, only the completed pieces
 		// are counted by piece since the chunks of credited pieces are already unverified.
-		optimistic := int64(s.Completed)*c.meta.PieceLength + int64(s.Unverified)*c.clength
+		optimistic := uint64(s.Completed)*uint64(c.meta.PieceLength) + uint64(s.Unverified)*uint64(c.clength)
 		if c.completed.Contains(last) {
-			optimistic -= int64(c.shortfall)
+			optimistic -= c.shortfall
 		}
 
 		s.Downloaded = downloaded
 		s.DownloadedOptimistic = optimistic
-		s.Remaining = tlength - s.Downloaded
+		s.Remaining = uint64(tlength) - s.Downloaded
 
 		return s
 	}

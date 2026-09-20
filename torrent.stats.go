@@ -24,15 +24,15 @@ type Stats struct {
 	// torrent was resumed. Chunks of incomplete pieces and unverified chunks are not included.
 	// Do not use this for download rate, as it can go down when pieces are lost or fail checks.
 	// Sample ConnStats.DataBytesRead for actual file data download rate.
-	Downloaded int64
+	Downloaded uint64
 
 	// DownloadedOptimistic number of bytes of the entire torrent we have, assuming the unverified
 	// chunks are good. This is the sum of completed pieces and unverified chunks, and can
 	// overcount when an unverified chunk turns out to be bad or the last chunk is short.
-	DownloadedOptimistic int64
+	DownloadedOptimistic uint64
 
 	// Remaining number of bytes of the entire torrent still to be downloaded.
-	Remaining int64
+	Remaining uint64
 
 	// Ordered by expected descending quantities (if all is well).
 	MaximumAllowedPeers int
