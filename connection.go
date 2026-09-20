@@ -828,7 +828,9 @@ func (cn *connection) ReadOne(ctx context.Context, decoder *pp.Decoder, ws *writ
 
 		req := newRequestFromMessage(&msg)
 		cn.chunksRejected.Add(1)
-		ws.mutate(func(ws *writerstate) { ws.clearRequestsLocked(req) })
+		// the peer will never serve this request, hand the chunk back to the pool. merely forgetting the
+		// request leaves the chunk inflight forever, only missing chunks are requested outside of endgame.
+		ws.mutate(func(ws *writerstate) { ws.releaseRequestLocked(req) })
 		return msg, nil
 	case pp.AllowedFast:
 		min, max := cn.t.chunks.Range(uint64(msg.Index))
@@ -1024,6 +1026,9 @@ func (cn *connection) receiveChunk(msg *pp.Message, ws *writerstate) error {
 	// cn.cfg.debug().Printf("c(%p) - received chunk d(%020d) r(%d,%d,%d)\n", cn, req.Digest, req.Index, req.Begin, req.Length)
 
 	if err := cn.t.writeChunk(int(msg.Index), int64(msg.Begin), msg.Piece); err != nil {
+		// the request is no longer tracked by the connection, so nothing else will release the chunk.
+		// return it to the pool or it stays inflight forever.
+		cn.t.chunks.Retry(req)
 		return errorsx.Wrap(err, "failed to write chunk")
 	}
 
