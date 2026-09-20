@@ -447,7 +447,16 @@ func TuneRecordMetadata(t *torrent) error {
 func tuneMerge(md Metadata) Tuner {
 	return func(t *torrent) error {
 		t.md.DisplayName = langx.FirstNonZero(md.DisplayName, t.md.DisplayName)
-		t.md.Trackers = append(t.md.Trackers, md.Trackers...)
+		// trackers are in priority order, keep the first occurrence of each.
+		seen := make(map[string]struct{}, len(t.md.Trackers)+len(md.Trackers))
+		t.md.Trackers = slicesx.Filter(func(tracker string) bool {
+			if _, ok := seen[tracker]; ok {
+				return false
+			}
+
+			seen[tracker] = struct{}{}
+			return true
+		}, slicesx.Flatten(t.md.Trackers, md.Trackers)...)
 
 		if md.ChunkSize != t.md.ChunkSize && md.ChunkSize != 0 {
 			log.Println("merging set chunk size")

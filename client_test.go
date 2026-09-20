@@ -1414,6 +1414,38 @@ func TestClientStart(t *testing.T) {
 		require.False(t, added)
 	})
 
+	t.Run("merges the metadata into a torrent created from stored metadata once", func(t *testing.T) {
+		t.Parallel()
+
+		info, _, err := torrenttest.Random(t.TempDir(), torrentlen)
+		require.NoError(t, err)
+
+		cdir := t.TempDir()
+		cstore := torrent.NewMetadataCache(cdir)
+		stored, err := torrent.NewFromInfo(info)
+		require.NoError(t, err)
+		require.NoError(t, cstore.Write(stored))
+
+		c := torrenttestx.Client(t, autobind.NewLoopback(autobind.EnableDHT(torrenttestx.QuickDHT(t))), cstore, storage.NewFile(cdir))
+		defer c.Close()
+
+		// trackers are in priority order, deliberately not sorted.
+		trackers := []string{"udp://tracker.b.invalid:1337", "udp://tracker.a.invalid:1337"}
+		md, err := torrent.NewFromInfo(info, torrent.OptionTrackers(trackers...))
+		require.NoError(t, err)
+
+		dl, added, err := c.Start(md)
+		require.NoError(t, err)
+		require.True(t, added)
+		require.Equal(t, trackers, dl.Metadata().Trackers)
+
+		// starting a running torrent merges again, the trackers must still be unique and in the same order.
+		dl, added, err = c.Start(md)
+		require.NoError(t, err)
+		require.False(t, added)
+		require.Equal(t, trackers, dl.Metadata().Trackers)
+	})
+
 	t.Run("a torrent loaded by an inbound peer is added by the first start", func(t *testing.T) {
 		t.Parallel()
 
