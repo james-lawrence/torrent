@@ -1117,7 +1117,7 @@ func (t *torrent) bytesLeft() (left int64) {
 		return -1
 	}
 
-	s := t.chunks.Snapshot(&Stats{})
+	s := t.chunks.Read(copSnapshot(&Stats{}))
 
 	// every completed piece is assumed to be a full PieceLength, except the
 	// last piece of the torrent, which is frequently shorter.
@@ -1492,7 +1492,7 @@ func (t *torrent) statsLocked() (ret Stats) {
 	ret.PendingPeers, ret.HalfOpenPeers = t.peers.Stats()
 	ret.LastConnection = langx.Zero(t.lastConnection.Load())
 	ret.LastActivity = langx.Zero(t.lastActivity.Load())
-	t.chunks.Snapshot(&ret)
+	t.chunks.Read(copSnapshot(&ret))
 
 	// TODO: these can be moved to the connections directly.
 	// moving it will reduce the need to iterate the connections

@@ -619,17 +619,6 @@ func (t *chunks) Incomplete() bool {
 	return (int(t.missing.GetCardinality()) + int(t.inflight.GetCardinality()) + int(t.unverified.GetCardinality())) > 0
 }
 
-func (t *chunks) Snapshot(s *Stats) *Stats {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	s.Missing = int(t.missing.GetCardinality())
-	s.Outstanding = int(t.inflight.GetCardinality())
-	s.Unverified = int(t.unverified.GetCardinality())
-	s.Failed = int(t.failed.GetCardinality())
-	s.Completed = int(t.completed.GetCardinality())
-	return s
-}
-
 // FailuresReset - used to clear failures
 func (t *chunks) FailuresReset() {
 	t.mu.Lock()
@@ -784,6 +773,18 @@ func (t *chunks) String() string {
 		t.completed.GetCardinality(),
 		t.pieces,
 	)
+}
+
+// copSnapshot populates the chunk counts of the given stats.
+func copSnapshot(s *Stats) ChunkOp[*Stats] {
+	return func(c *chunks) *Stats {
+		s.Missing = int(c.missing.GetCardinality())
+		s.Outstanding = int(c.inflight.GetCardinality())
+		s.Unverified = int(c.unverified.GetCardinality())
+		s.Failed = int(c.failed.GetCardinality())
+		s.Completed = int(c.completed.GetCardinality())
+		return s
+	}
 }
 
 type copCompletedOutstanding struct{ completed, outstanding int }
