@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"runtime/trace"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -83,6 +84,11 @@ func AnnouncePeer(n addressable, implied bool) AnnounceOpt {
 // Traverses the DHT graph toward nodes that store peers for the infohash, streaming them to the
 // caller.
 func (s *Server) AnnounceTraversal(ctx context.Context, id int160.T, opts ...AnnounceOpt) (_ *Announce, err error) {
+	// a task covers the whole announce, from the traversal through announcing to the closest nodes. it
+	// nests under the caller's task, and is ended by the traversal goroutine or on failing to start.
+	ctx, task := trace.NewTask(ctx, "dht.announce")
+	trace.Logf(ctx, "dht.infohash", "%s", id)
+
 	a := &Announce{
 		Peers:         make(chan PeersValues),
 		server:        s,
@@ -107,21 +113,34 @@ func (s *Server) AnnounceTraversal(ctx context.Context, id int160.T, opts ...Ann
 	nodes, err := s.TraversalStartingNodes()
 	if err != nil {
 		a.traversal.Stop()
+		trace.Log(ctx, "dht.announce", "no starting nodes")
+		task.End()
 		return
 	}
 	a.traversal.AddNodes(nodes)
+	trace.Logf(ctx, "dht.announce", "starting nodes=%d", len(nodes))
 	go func() {
+		defer task.End()
+
+		region := trace.StartRegion(ctx, "dht.traversal")
 		select {
 		case <-a.traversal.Stalled():
 			// log.Println("traversal stalled")
+			trace.Log(ctx, "dht.announce", "traversal stalled")
 		case <-ctx.Done():
 			// log.Println("traversal", ctx.Err())
+			trace.Log(ctx, "dht.announce", "traversal context done")
 		}
 
 		a.traversal.Stop()
 		<-a.traversal.Stopped()
+		region.End()
+		trace.Logf(ctx, "dht.announce", "traversal contacted=%d", a.NumContacted())
+
 		if a.announcePeerOpts != nil {
+			region := trace.StartRegion(ctx, "dht.announce_peer")
 			a.announceClosest(ctx)
+			region.End()
 		}
 
 		a.endtranversal.Do(func() {
@@ -134,15 +153,28 @@ func (s *Server) AnnounceTraversal(ctx context.Context, id int160.T, opts ...Ann
 }
 
 func (a *Announce) announceClosest(ctx context.Context) {
-	var wg sync.WaitGroup
+	var (
+		wg     sync.WaitGroup
+		nodes  atomic.Int32
+		failed atomic.Int32
+	)
+
 	a.traversal.Closest().Range(func(elem dhtutil.Elem) {
 		wg.Add(1)
 		go func() {
-			a.logger().Printf("announce_peer to %s - %s: %v\n", elem.ID, elem.Addr.AddrPort, a.announcePeer(ctx, elem))
+			err := a.announcePeer(ctx, elem)
+			a.logger().Printf("announce_peer to %s - %s: %v\n", elem.ID, elem.Addr.AddrPort, err)
+			nodes.Add(1)
+			if err != nil {
+				failed.Add(1)
+			}
 			wg.Done()
 		}()
 	})
 	wg.Wait()
+
+	// only counts, the addresses of the nodes are not ours to put in a trace.
+	trace.Logf(ctx, "dht.announce", "announce_peer nodes=%d failed=%d", nodes.Load(), failed.Load())
 }
 
 func (a *Announce) announcePeer(ctx context.Context, peer dhtutil.Elem) error {

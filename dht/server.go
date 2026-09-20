@@ -89,8 +89,7 @@ type Server struct {
 	// Initial IP blocklist to use. Applied before serving and bootstrapping
 	// begins.
 	blocklist iplist.Ranger
-	// TODO: Expose Peers, to return NodeInfo for received get_peers queries.
-	peers peer_store.Interface
+	peers     peer_store.Interface
 	// BEP-44: Storing arbitrary data in the DHT.
 	store       bep44.Store
 	log         logging
@@ -200,6 +199,7 @@ func NewServer(k int, options ...Option) (s *Server, err error) {
 		},
 		dnscache:          net.DefaultResolver,
 		store:             bep44.NewWrapper(bep44.NewMemory(), 2*time.Hour),
+		peers:             &peer_store.InMemory{},
 		closed:            make(chan struct{}),
 		resolvepublicaddr: PublicAddrPortFromPacketConn,
 		computeBestAddr:   netx.ComputeBestAddr,

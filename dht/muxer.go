@@ -80,10 +80,8 @@ func (t HandlerPeers) Handle(ctx context.Context, src Addr, srv *Server, b Bindi
 		return srv.sendError(ctx, b, src, msg.T, krpcErrMissingArguments)
 	}
 
-	if ps := srv.peers; ps != nil {
-		r.Values = filterPeers(src.IP(), msg.A.Want, ps.GetPeers(peer_store.InfoHash(msg.A.InfoHash)))
-		r.Token = new(srv.createToken(src))
-	}
+	r.Values = filterPeers(src.IP(), msg.A.Want, srv.peers.GetPeers(peer_store.InfoHash(msg.A.InfoHash)))
+	r.Token = new(srv.createToken(src))
 
 	if len(r.Values) == 0 {
 		if err := srv.setReturnNodes(b, &r, *msg, src); err != nil {
@@ -117,12 +115,10 @@ func (t HandlerAnnounce) Handle(ctx context.Context, source Addr, s *Server, b B
 		go h.Announced(int160.FromByteArray(m.A.InfoHash), source.AddrPort(), portOk)
 	}
 
-	if ps := s.peers; ps != nil {
-		go ps.AddPeer(
-			peer_store.InfoHash(m.A.InfoHash),
-			krpc.NewNodeAddrFromIPPort(source.IP(), port),
-		)
-	}
+	s.peers.AddPeer(
+		peer_store.InfoHash(m.A.InfoHash),
+		krpc.NewNodeAddrFromIPPort(source.IP(), port),
+	)
 
 	return s.reply(ctx, b, source, m.T, krpc.Return{})
 }
