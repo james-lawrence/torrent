@@ -21,7 +21,8 @@ type Binder interface {
 
 type BinderOption func(v *binder)
 
-// EnableDHT enables DHT.
+// BinderOptionDHT serves the dht server on the packet sockets, replacing the socketless
+// dht server clients start with.
 func BinderOptionDHT(d *dht.Server) BinderOption {
 	return func(v *binder) {
 		v.dht = d
@@ -62,17 +63,13 @@ func (t binder) Bind(cl *Client, err error) (*Client, error) {
 		return nil, errorsx.Errorf("at least one socket is required")
 	}
 
+	// the dht goes first, the client identifies itself with it as soon as it accepts connections.
+	cl.BindDHT(t.dht)
+
 	for _, s := range t.sockets {
 		if err = cl.Bind(s); err != nil {
 			cl.Close()
 			return nil, err
-		}
-
-		if t.dht != nil {
-			if err = cl.BindDHT(t.dht, s); err != nil {
-				cl.Close()
-				return nil, err
-			}
 		}
 	}
 

@@ -74,7 +74,10 @@ type Client struct {
 	// in outgoingConnection - which bans the address it dialed, taking every
 	// other peer sharing it down with it.
 	self *connections.BloomBanIP
-	dht  *dht.Server
+	// the dht server the client uses to identify itself and discover peers. never nil, it has no
+	// sockets until a packet socket is bound (see Bind) and until then identifies the client but doesn't
+	// talk to anyone. see BindDHT to replace it.
+	dht *dht.Server
 
 	dialing  *netx.RacingDialer
 	torrents *memoryseeding
@@ -231,6 +234,13 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 		)
 	}
 
+	// a client identifies itself to peers by the id of its dht server, so it always has one. a server
+	// with sockets replaces this when it is bound, see BindDHT.
+	d, err := dht.NewServer(32)
+	if err != nil {
+		return nil, err
+	}
+
 	cl := &Client{
 		config:   cfg,
 		closed:   make(chan struct{}),
@@ -239,6 +249,7 @@ func NewClient(cfg *ClientConfig) (_ *Client, err error) {
 		dialing:  netx.NewRacing(cfg.dialPoolSize),
 		// our own addresses do not stop being ours, so this never expires.
 		self: connections.NewBloomBanIP(math.MaxInt64),
+		dht:  d,
 	}
 
 	defer func() {
@@ -255,8 +266,15 @@ func (cl *Client) Config() *ClientConfig {
 	return cl.config
 }
 
-// Bind the socket to this client.
+// Bind the socket to this client. packet sockets are also served by the dht server of the client.
 func (cl *Client) Bind(s sockets.Socket) (err error) {
+	if pc, ok := s.(net.PacketConn); ok {
+		cl.config.debug().Printf("serving dht server %p on %v\n", cl.dht, pc.LocalAddr())
+		if err = cl.dht.Serve(context.Background(), pc); err != nil {
+			return err
+		}
+	}
+
 	go cl.acceptConnections(s)
 
 	cl.lock()
@@ -271,26 +289,18 @@ func (cl *Client) Bind(s sockets.Socket) (err error) {
 	return nil
 }
 
-func (cl *Client) BindDHT(d *dht.Server, s sockets.Socket) (err error) {
-	var (
-		ok bool
-		pc net.PacketConn
-	)
-
-	if pc, ok = s.(net.PacketConn); !ok {
-		cl.config.debug().Println("dht bind ignored: not a packet conn")
-		return nil
+// BindDHT replaces the dht server of the client, nil is ignored. do this before binding sockets (see Bind),
+// the client identifies itself to peers with the id of its dht server and packet sockets are served by it.
+func (cl *Client) BindDHT(d *dht.Server) {
+	if d == nil {
+		return
 	}
 
-	cl.config.debug().Printf("binding dht server to client %p - %v\n", d, pc.LocalAddr())
-	cl.lock()
-	// the check above isnt entirely sufficient to prevent changing the dht.
-	// take the first non-nil of the the two once the lock is acquired.
-	cl.dht = langx.FirstNonZero(cl.dht, d)
-	cl.unlock()
-
 	d.AttachAnnouncer(dht.PeerAnnounceFn(cl.onDHTAnnouncePeer))
-	return d.Serve(context.Background(), pc)
+
+	cl.lock()
+	cl.dht = d
+	cl.unlock()
 }
 
 // Closed returns a channel to detect when the client is closed.
@@ -679,6 +689,11 @@ type Handle interface {
 
 // AddDHTNodes adds nodes to the DHT servers.
 func (cl *Client) AddDHTNodes(nodes []string) {
+	// a server without sockets isn't talking to anyone, nodes added to it are never used.
+	if !cl.dht.Available() {
+		return
+	}
+
 	for _, n := range nodes {
 		addrport, err := netip.ParseAddrPort(n)
 		if err != nil {

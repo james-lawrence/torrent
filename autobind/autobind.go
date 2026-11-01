@@ -48,6 +48,8 @@ func DisableIPv6(a *Autobind) {
 	a.DisableIPv6 = true
 }
 
+// EnableDHT serves the dht server on the packet sockets, replacing the socketless
+// dht server clients start with.
 func EnableDHT(d *dht.Server) Option {
 	return func(a *Autobind) {
 		a.dht = d
@@ -158,17 +160,14 @@ func (t Autobind) Bind(cl *torrent.Client, err error) (*torrent.Client, error) {
 		return nil, err
 	}
 
+	// the dht goes first, the client identifies itself with it as soon as it accepts connections.
+	cl.BindDHT(t.dht)
+
 	for _, s := range sockets {
 		n := parseNetworkString(s.Addr().Network())
 		if t.peerNetworkEnabled(n) {
 			if err = cl.Bind(s); err != nil {
 				return nil, err
-			}
-
-			if t.dht != nil {
-				if err = cl.BindDHT(t.dht, s); err != nil {
-					return nil, err
-				}
 			}
 		}
 	}

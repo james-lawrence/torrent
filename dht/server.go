@@ -219,7 +219,7 @@ func NewServer(k int, options ...Option) (s *Server, err error) {
 }
 
 func (s *Server) Binding(addr netip.AddrPort) *socketbinding {
-	// clients without a packet socket never bind a dht server.
+	// a nil server has no bindings.
 	if s == nil {
 		return nil
 	}
@@ -771,13 +771,36 @@ func (s *Server) addTransaction(k transactionKey, t *transaction) {
 	s.transactions.Add(k, t)
 }
 
-// ID returns the node ID for the binding matching the given source address.
+// ID returns the node ID for the binding matching the given source address. a server that
+// isn't available (nothing bound, the default state of a server) has no bindings to ask, its id
+// is the node id of the server. its how a client without a packet socket tells its own connections
+// apart from those of its peers.
 func (s *Server) ID(addr netip.AddrPort) int160.T {
+	if s == nil {
+		return int160.Zero()
+	}
+
+	if !s.Available() {
+		return langx.Zero(s.id.Load())
+	}
+
 	b := s.Binding(addr)
 	if b == nil {
 		return int160.Zero()
 	}
 	return b.ID()
+}
+
+// Available reports whether the server is serving any socket. a server that isn't has no one to talk to,
+// but still has an identity (see ID), which is all a client without a packet socket needs from it.
+func (s *Server) Available() bool {
+	if s == nil {
+		return false
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.bindings) > 0
 }
 
 func (s *Server) createToken(addr Addr) string {

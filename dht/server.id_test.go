@@ -41,10 +41,11 @@ func TestServerID(t *testing.T) {
 			wantValid: false,
 		},
 		{
+			// the default state of a server, its id is its node id.
 			name:      "no_bindings",
 			setup:     func(t *testing.T) *Server { return mustNewServer(t, OptionNodeID(wantID)) },
 			source:    netip.MustParseAddrPort("127.0.0.1:12345"),
-			wantValid: false,
+			wantValid: true,
 		},
 		{
 			name: "reachable_loopback",
@@ -101,4 +102,24 @@ func TestServerID(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServerAvailable(t *testing.T) {
+	t.Run("nil_server", func(t *testing.T) {
+		var s *Server
+		require.False(t, s.Available())
+	})
+
+	t.Run("no_bindings", func(t *testing.T) {
+		require.False(t, mustNewServer(t).Available())
+	})
+
+	t.Run("with_binding", func(t *testing.T) {
+		s := mustNewServer(t)
+		pc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = pc.Close() })
+		backgroundServe(t, s, pc)
+		require.True(t, s.Available())
+	})
 }

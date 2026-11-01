@@ -1432,7 +1432,7 @@ func (t *torrent) announceToDht(ctx context.Context, s *dht.Server, impliedPort 
 }
 
 func (t *torrent) dhtAnnouncer(s *dht.Server) {
-	if s == nil {
+	if !s.Available() {
 		return
 	}
 
@@ -1755,7 +1755,7 @@ func (t *torrent) String() string {
 }
 
 func (t *torrent) ping(addr net.UDPAddr) {
-	if t.cln.dht == nil {
+	if !t.cln.dht.Available() {
 		return
 	}
 

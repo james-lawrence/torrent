@@ -37,11 +37,12 @@ func TestDynamicAddrPort(t *testing.T) {
 		require.True(t, got.Addr().Is4(), "expected IPv4, got %s", got)
 	})
 
-	t.Run("ID returns zero when dynamicaddrport is unspecified", func(t *testing.T) {
-		s := mustNewServer(t)
+	t.Run("ID returns the node id when dynamicaddrport is unspecified", func(t *testing.T) {
+		id := int160.Random()
+		s := mustNewServer(t, OptionNodeID(id))
 		dap := s.DynamicAddrPort()
 		require.True(t, dap.Addr().IsUnspecified())
-		require.Equal(t, int160.Zero(), s.ID(dap))
+		require.Equal(t, id, s.ID(dap))
 	})
 
 	t.Run("ID returns binding id after dynamicaddrport resolves", func(t *testing.T) {
