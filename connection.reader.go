@@ -16,7 +16,9 @@ import (
 	"github.com/james-lawrence/torrent/internal/bytesx"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
+	"github.com/james-lawrence/torrent/internal/slogx"
 	"github.com/james-lawrence/torrent/internal/timex"
+	"golang.org/x/time/rate"
 )
 
 // connreaderinit takes writer explicitly (constructed in RunHandshookConn
@@ -38,6 +40,7 @@ func connreaderinit(ctx context.Context, cn *connection, writer *writerstate, to
 		keepAliveTimeout: to,
 		chokeduntil:      ts.Add(-1 * time.Minute),
 		uploadavailable:  atomicx.Pointer(ts),
+		uploadwarnrate:   rate.NewLimiter(rate.Every(time.Minute), 1),
 		seed:             cn.t.seeding(),
 		Idler:            cstate.Idle(ctx, cn.upload),
 		requestbuffer:    new(bytes.Buffer),
@@ -63,6 +66,7 @@ type readerstate struct {
 	uploadavailable  *atomic.Pointer[time.Time]
 	pool             *sync.Pool    // buffer pool for storing chunks
 	requestbuffer    *bytes.Buffer // message buffer
+	uploadwarnrate   *rate.Limiter
 	*cstate.Idler
 }
 
@@ -172,7 +176,9 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 		}
 
 		if delay := res.Delay(); delay > 0 {
-			t.cfg.errors().Printf("c(%p) seed(%t) maximum upload rate exceed n(%d) - delay(%v) - %s req(%d)\n", t.connection, t.seed, uploaded, delay, r, t.peerRequestsLen())
+			slogx.With(t.cfg.debug()).
+				Limit(t.uploadwarnrate).
+				Info(fmt.Sprintf("c(%p) seed(%t) maximum upload rate exceed n(%d) - delay(%v) - %s req(%d)", t.connection, t.seed, uploaded, delay, r, t.peerRequestsLen()))
 			res.Cancel()
 			return delay, nil
 		}
