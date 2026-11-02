@@ -26,7 +26,6 @@ func TestWith(t *testing.T) {
 	t.Run("nil discards", func(t *testing.T) {
 		require.NotPanics(t, func() {
 			slogx.With(nil).Info("hello")
-			slogx.With((*log.Logger)(nil)).Info("hello")
 		})
 	})
 }

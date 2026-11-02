@@ -15,15 +15,19 @@ type Logger struct {
 	*slog.Logger
 }
 
-// With wraps either a *log.Logger or *slog.Logger into a slog compatible logger.
+// With wraps a *slog.Logger, or anything exposing Writer() io.Writer (e.g. *log.Logger), into a slog compatible logger.
 // a nil logger discards all records.
 func With(l any) Logger {
+	type logging interface {
+		Writer() io.Writer
+	}
+
 	switch v := l.(type) {
 	case *slog.Logger:
 		if v != nil {
 			return Logger{Logger: v}
 		}
-	case *log.Logger:
+	case logging:
 		if v != nil {
 			return Logger{Logger: slog.New(slog.NewTextHandler(v.Writer(), nil))}
 		}
@@ -31,7 +35,7 @@ func With(l any) Logger {
 		log.Printf("slogx.With: unsupported logger type %T, discarding\n", l)
 	}
 
-	return Logger{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	return Logger{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}.If(false)
 }
 
 // If creates a logger that only outputs when enabled is true, e.g.)

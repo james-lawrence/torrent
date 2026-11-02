@@ -6,6 +6,7 @@ import (
 )
 
 type logging interface {
+	Writer() io.Writer
 	Println(v ...any)
 	Printf(format string, v ...any)
 	Print(v ...any)
@@ -15,6 +16,10 @@ type discard struct{}
 
 func (discard) Output(int, string) error {
 	return nil
+}
+
+func (discard) Writer() io.Writer {
+	return io.Discard
 }
 
 // Println replicates the behaviour of the standard logger.
