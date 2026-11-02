@@ -513,6 +513,26 @@ func DownloadInto(ctx context.Context, dst io.Writer, m Torrent, options ...Tune
 	return n, nil
 }
 
+// Downloader returns a ReadSeekCloser for the torrent. blocks until the metadata has been retrieved,
+// if that fails (ctx done, tune failure) the returned reader yields the cause as its error.
+func Downloader(ctx context.Context, m Torrent, options ...Tuner) io.ReadSeekCloser {
+	if err := m.Tune(options...); err != nil {
+		return iox.ErrReader(err)
+	}
+
+	select {
+	case <-m.GotInfo():
+	case <-ctx.Done():
+		return iox.ErrReader(errorsx.Compact(context.Cause(ctx), ctx.Err()))
+	}
+
+	if err := m.Tune(TuneRecordMetadata, TuneAutoDownload, TuneNewConns, TuneAnnounceOnce(tracker.AnnounceOptionEventStarted)); err != nil {
+		return iox.ErrReader(err)
+	}
+
+	return NewReader(m)
+}
+
 // Return a ReadSeeker for the given range
 func DownloadRange(ctx context.Context, m Torrent, off int64, length int64, options ...Tuner) (_ io.ReadSeekCloser) {
 	if err := m.Tune(options...); err != nil {

@@ -301,7 +301,7 @@ func TestAddMetainfoWithNodes(t *testing.T) {
 	tt, _, err := cl.Start(ts)
 	require.NoError(t, err)
 
-	assert.Len(t, tt.Metadata().Trackers, 10)
+	assert.Len(t, tt.Metadata().Trackers, 5)
 	assert.Len(t, tt.Metadata().DHTNodes, 12)
 
 	require.Eventually(t, func() bool {
