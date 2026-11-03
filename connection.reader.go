@@ -187,8 +187,18 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 		if err != nil {
 			slogx.With(t.cfg.errors()).
 				Limit(t.lograte).Error(
-				fmt.Sprintln("error sending chunk to peer, choking peer", err),
+				fmt.Sprintln("error sending chunk to peer, choking peer", r, err),
 			)
+
+			// drop the request that failed, Choke is a noop when the peer is already choked
+			// which would leave it queued and retried in a tight loop.
+			t.cmu().Lock()
+			delete(t.PeerRequests, r)
+			t.cmu().Unlock()
+
+			if t.supported(btprotocol.ExtensionBitFast) {
+				t.writer.Post(r.ToMsg(btprotocol.Reject))
+			}
 
 			// If we failed to send a chunk, choke the peer to ensure they
 			// flush all their requests. We've probably dropped a piece,

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 
+	pp "github.com/james-lawrence/torrent/btprotocol"
 	"github.com/james-lawrence/torrent/cstate"
 	"github.com/james-lawrence/torrent/internal/atomicx"
 	"github.com/james-lawrence/torrent/metainfo"
@@ -123,4 +125,62 @@ func TestConnReaderAllowRequestsDoesNotMutateChokeState(t *testing.T) {
 	_connreaderAllowRequests{readerstate: ws, next: connReaderUpload(ws)}.Update(ctx, nil)
 
 	require.True(t, c.Choked.Load(), "reader loop must not decide choke state - that must be left solely to the writer loop")
+}
+
+func TestConnReaderUpload(t *testing.T) {
+	t.Run("request whose data cannot be read is dropped and rejected", func(t *testing.T) {
+		cfg := TestingConfig(t, t.TempDir(), ClientConfigSeed(true))
+		cl, err := NewClient(cfg)
+		require.NoError(t, err)
+		defer cl.Close()
+
+		ts, err := New(metainfo.Hash{})
+		require.NoError(t, err)
+		tt := newTorrent(cl, ts)
+		require.NoError(t, tt.setInfo(&metainfo.Info{
+			Pieces:      make([]byte, metainfo.HashSize*3),
+			Length:      24 * (1 << 10),
+			PieceLength: 8 * (1 << 10),
+		}))
+
+		c := cl.newConnection(nil, false, netip.AddrPort{})
+		c.setTorrent(tt)
+		c.PeerExtensionBytes.SetBit(pp.ExtensionBitFast)
+		// already choked, which makes Choke() a no-op, with the choke window expired so uploads are allowed.
+		c.Choked.Store(true)
+
+		// nothing was ever written to storage, so the read for this request comes up short.
+		r := newRequest(0, 0, 1024)
+		c.cmu().Lock()
+		c.PeerRequests[r] = struct{}{}
+		c.cmu().Unlock()
+
+		ctx, done := context.WithCancel(t.Context())
+		defer done()
+
+		ws := &readerstate{
+			connection:       c,
+			writer:           newWriterState(c),
+			keepAliveTimeout: 10 * time.Minute,
+			chokeduntil:      time.Now().Add(-time.Minute),
+			uploadavailable:  atomicx.Pointer(time.Now()),
+			lograte:          rate.NewLimiter(rate.Inf, 1),
+			seed:             true,
+			Idler:            cstate.Idle(ctx, c.upload),
+			requestbuffer:    new(bytes.Buffer),
+			pool: &sync.Pool{
+				New: func() interface{} {
+					b := make([]byte, defaultChunkSize)
+					return &b
+				},
+			},
+		}
+		defer ws.Idler.Stop()
+
+		_, err = _connreaderUpload{readerstate: ws}.upload()
+		require.NoError(t, err)
+
+		require.Zero(t, c.peerRequestsLen(), "a request that failed to be read must be dropped, otherwise it is retried (and logged) in a tight loop")
+		require.NotZero(t, wsBufferLen(ws.writer), "the peer must be told the request was rejected")
+	})
 }
