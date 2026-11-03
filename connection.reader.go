@@ -40,7 +40,7 @@ func connreaderinit(ctx context.Context, cn *connection, writer *writerstate, to
 		keepAliveTimeout: to,
 		chokeduntil:      ts.Add(-1 * time.Minute),
 		uploadavailable:  atomicx.Pointer(ts),
-		uploadwarnrate:   rate.NewLimiter(rate.Every(time.Minute), 1),
+		lograte:          rate.NewLimiter(rate.Every(time.Minute), 5),
 		seed:             cn.t.seeding(),
 		Idler:            cstate.Idle(ctx, cn.upload),
 		requestbuffer:    new(bytes.Buffer),
@@ -66,7 +66,7 @@ type readerstate struct {
 	uploadavailable  *atomic.Pointer[time.Time]
 	pool             *sync.Pool    // buffer pool for storing chunks
 	requestbuffer    *bytes.Buffer // message buffer
-	uploadwarnrate   *rate.Limiter
+	lograte          *rate.Limiter
 	*cstate.Idler
 }
 
@@ -177,7 +177,7 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 
 		if delay := res.Delay(); delay > 0 {
 			slogx.With(t.cfg.debug()).
-				Limit(t.uploadwarnrate).
+				Limit(t.lograte).
 				Info(fmt.Sprintf("c(%p) seed(%t) maximum upload rate exceed n(%d) - delay(%v) - %s req(%d)", t.connection, t.seed, uploaded, delay, r, t.peerRequestsLen()))
 			res.Cancel()
 			return delay, nil
@@ -185,7 +185,11 @@ func (t _connreaderUpload) upload() (time.Duration, error) {
 
 		ok, err := t.writechunk(r)
 		if err != nil {
-			t.cfg.errors().Println("error sending chunk to peer, choking peer", err)
+			slogx.With(t.cfg.errors()).
+				Limit(t.lograte).Error(
+				fmt.Sprintln("error sending chunk to peer, choking peer", err),
+			)
+
 			// If we failed to send a chunk, choke the peer to ensure they
 			// flush all their requests. We've probably dropped a piece,
 			// but there's no way to communicate this to the peer. If they
