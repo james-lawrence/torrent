@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/netip"
 	"runtime/trace"
@@ -30,6 +31,7 @@ import (
 	"github.com/james-lawrence/torrent/internal/langx"
 	"github.com/james-lawrence/torrent/internal/netx"
 	"github.com/james-lawrence/torrent/internal/slicesx"
+	"github.com/james-lawrence/torrent/internal/timex"
 	"github.com/james-lawrence/torrent/tracker"
 
 	"github.com/james-lawrence/torrent/bencode"
@@ -68,6 +70,44 @@ func TuneMaxConnections(max int) Tuner {
 func TunePeers(peers ...Peer) Tuner {
 	return func(t *torrent) error {
 		t.addPeersLocked(peers)
+		return nil
+	}
+}
+
+// PeerSource provides the current set of peers for a torrent, it is called each time the peers are added.
+// the set can change between calls, for example as the membership of a cluster changes.
+type PeerSource func() []Peer
+
+// TunePeersPeriodic adds the peers from the source to the torrent, and again every interval until the context
+// is cancelled or the torrent closes. peers are discarded after repeated failed connection attempts (see ClientConfigPeerMaxAttempts),
+// adding them again gives the ones that were discarded another chance, and peers that joined the source since
+// are picked up. peers still in play are not duplicated.
+//
+// each application spawns its own loop, applying it repeatedly to the same torrent is on the caller.
+// a zero interval only adds the peers once.
+func TunePeersPeriodic(ctx context.Context, interval time.Duration, source PeerSource) Tuner {
+	return func(t *torrent) error {
+		t.addPeersLocked(source())
+
+		if interval <= 0 {
+			return nil
+		}
+
+		lctx, done := context.WithCancel(ctx)
+		go func() {
+			defer done()
+
+			select {
+			case <-t.closed:
+			case <-lctx.Done():
+			}
+		}()
+
+		go timex.NowAndEvery(lctx, interval, func(context.Context) error {
+			t.addPeersLocked(source())
+			return nil
+		})
+
 		return nil
 	}
 }
@@ -597,7 +637,7 @@ func zeroTorrent(md Metadata, options ...Tuner) *torrent {
 	tmp := &torrent{
 		_mu: mu,
 		md:  md,
-		peers: newPeerPool(32, func(p Peer) peerPriority {
+		peers: newPeerPool(32, math.MaxUint64, func(p Peer) peerPriority {
 			return 0
 		}),
 		conns:                   newconnset(2 * defaultMaxEstablishedConns),
@@ -628,7 +668,7 @@ func newTorrent(cl *Client, src Metadata, options ...Tuner) *torrent {
 		md:  src,
 		cln: cl,
 		_mu: m,
-		peers: newPeerPool(32, func(p Peer) peerPriority {
+		peers: newPeerPool(32, cl.config.PeerMaxAttempts, func(p Peer) peerPriority {
 			return bep40PriorityIgnoreError(cl.publicAddr(p.AddrPort), p.AddrPort)
 		}),
 		conns:                   newconnset(2 * defaultMaxEstablishedConns),

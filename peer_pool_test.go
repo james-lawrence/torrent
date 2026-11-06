@@ -1,6 +1,7 @@
 package torrent
 
 import (
+	"math"
 	"net/netip"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 )
 
 func TestPrioritizedPeers(t *testing.T) {
-	pp := newPeerPool(3, func(p Peer) peerPriority {
+	pp := newPeerPool(3, math.MaxUint64, func(p Peer) peerPriority {
 		return bep40PriorityIgnoreError(p.AddrPort, errorsx.Must(netip.ParseAddrPort("0.0.0.0:0")))
 	})
 	_, ok := pp.DeleteMin()
@@ -67,7 +68,7 @@ func TestPrioritizedPeers(t *testing.T) {
 // its eventual Loaned call, finds the peer in none of attempted/available/
 // loaned, and is wrongly treated as a brand new peer.
 func TestPeerPoolPopMaxReservesAtomically(t *testing.T) {
-	pp := newPeerPool(8, func(Peer) peerPriority { return 0 })
+	pp := newPeerPool(8, math.MaxUint64, func(Peer) peerPriority { return 0 })
 	p := NewPeer(int160.Zero(), errorsx.Must(netip.ParseAddrPort("1.2.3.4:6001")), PeerOptionTrusted(true))
 
 	require.False(t, pp.Add(p), "sanity: first add is a genuinely new insert")

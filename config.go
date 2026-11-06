@@ -2,6 +2,7 @@ package torrent
 
 import (
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -108,6 +109,8 @@ type ClientConfig struct {
 	TorrentPeersHighWater int
 	// Minumum number of peers before effort is made to obtain more peers.
 	TorrentPeersLowWater int
+	// Failed connection attempts after which a torrent discards a peer. see ClientConfigPeerMaxAttempts.
+	PeerMaxAttempts uint64
 
 	// Limit how long handshake can take. This is to reduce the lingering
 	// impact of a few bad apples. 4s loses 1% of successful handshakes that
@@ -338,6 +341,14 @@ func ClientConfigPeerLimits[T constraints.Integer](low, high T) ClientConfigOpti
 	}
 }
 
+// specify the number of failed connection attempts after which a torrent discards a peer. a discarded peer
+// is only used again if it is added again, see TunePeersPeriodic.
+func ClientConfigPeerMaxAttempts[T constraints.Integer](n T) ClientConfigOption {
+	return func(cc *ClientConfig) {
+		cc.PeerMaxAttempts = uint64(max(n, 0))
+	}
+}
+
 // specify the limit to the number of peers a torrent will attempt to connect to concurrently.
 func ClientConfigMaxConnecting[T constraints.Integer](connecting T) ClientConfigOption {
 	return func(cc *ClientConfig) {
@@ -398,6 +409,7 @@ func NewDefaultClientConfig(mdstore MetadataStore, store storage.ClientImpl, opt
 		halfOpenConnsPerTorrent:        64,
 		TorrentPeersHighWater:          64,
 		TorrentPeersLowWater:           16,
+		PeerMaxAttempts:                math.MaxUint64, // peers are never discarded.
 		handshakesTimeout:              4 * time.Second,
 		keepAliveTimeout:               10 * time.Second,
 		UploadRateLimiter:              rate.NewLimiter(rate.Limit(128*bytesx.MiB), bytesx.MiB),

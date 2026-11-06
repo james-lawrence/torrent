@@ -34,15 +34,16 @@ func priorityPeerCmp(a, b prioritizedPeer) bool {
 	).Less()
 }
 
-func newPeerPool(n int, prio func(Peer) peerPriority) peerPool {
+func newPeerPool(n int, maxAttempts uint64, prio func(Peer) peerPriority) peerPool {
 	return peerPool{
-		m:         &sync.RWMutex{},
-		untried:   btree.NewG(n, priorityPeerCmp),
-		attempted: btree.NewG(n, priorityPeerCmp),
-		available: btree.NewG(n, priorityPeerCmp),
-		loaned:    make(map[netip.AddrPort]Peer, 32),
-		getPrio:   prio,
-		nextswap:  time.Now().Add(time.Minute),
+		maxAttempts: maxAttempts,
+		m:           &sync.RWMutex{},
+		untried:     btree.NewG(n, priorityPeerCmp),
+		attempted:   btree.NewG(n, priorityPeerCmp),
+		available:   btree.NewG(n, priorityPeerCmp),
+		loaned:      make(map[netip.AddrPort]Peer, 32),
+		getPrio:     prio,
+		nextswap:    time.Now().Add(time.Minute),
 	}
 }
 
@@ -54,6 +55,8 @@ type peerPool struct {
 	loaned    map[netip.AddrPort]Peer
 	getPrio   func(Peer) peerPriority
 	nextswap  time.Time
+	// failed attempts after which a peer is discarded.
+	maxAttempts uint64
 }
 
 func (t peerPool) prioritized(p Peer) prioritizedPeer {
@@ -98,14 +101,17 @@ func (t *peerPool) Len() int {
 
 // Peer is returned to the pool
 func (t *peerPool) Attempted(p Peer, attempts uint64) {
-	if attempts > 3 {
+	t.m.Lock()
+	defer t.m.Unlock()
+	delete(t.loaned, p.AddrPort)
+
+	// too many failures, the peer is discarded. it is no longer reserved so it can be added again,
+	// see TunePeersPeriodic.
+	if attempts > t.maxAttempts {
 		return
 	}
 
-	t.m.Lock()
-	defer t.m.Unlock()
 	p.Attempts = attempts
-	delete(t.loaned, p.AddrPort)
 
 	if attempts == 0 {
 		t.available.ReplaceOrInsert(t.prioritized(p))
