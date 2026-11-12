@@ -7,35 +7,35 @@ import (
 	"net/netip"
 	"sort"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/james-lawrence/torrent/internal/errorsx"
+	"github.com/james-lawrence/torrent/internal/uuidx"
 )
 
 func Random[T any](v T) Paired[T] {
 	bi := new(big.Int).Lsh(big.NewInt(1), 128)
-	bi.SetBytes(uuid.Must(uuid.NewV4()).Bytes())
+	bi.SetBytes(uuidx.NewV4().Bytes())
 	return Paired[T]{N: v, Bi: bi}
 }
 
 func Seeded[T any](s io.Reader, v T) Paired[T] {
-	var buf uuid.UUID
+	var buf uuidx.UUID
 	bi := new(big.Int).Lsh(big.NewInt(1), uint(len(buf))*8)
 	errorsx.Must(io.ReadFull(s, buf[:]))
 	bi.SetBytes(buf[:])
 	return Paired[T]{N: v, Bi: bi}
 }
 
-func SeededN(n uint16, s io.Reader) (res []Paired[uuid.UUID]) {
-	res = make([]Paired[uuid.UUID], 0, n)
+func SeededN(n uint16, s io.Reader) (res []Paired[uuidx.UUID]) {
+	res = make([]Paired[uuidx.UUID], 0, n)
 	for range n {
 		var (
-			buf uuid.UUID
+			buf uuidx.UUID
 		)
 
 		bi := new(big.Int).Lsh(big.NewInt(1), uint(len(buf))*8)
 		errorsx.Must(io.ReadFull(s, buf[:]))
 		bi.SetBytes(buf[:])
-		res = append(res, Paired[uuid.UUID]{N: buf, Bi: bi})
+		res = append(res, Paired[uuidx.UUID]{N: buf, Bi: bi})
 	}
 
 	return res

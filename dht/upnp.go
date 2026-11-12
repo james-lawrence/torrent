@@ -8,9 +8,9 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/james-lawrence/torrent/internal/errorsx"
 	"github.com/james-lawrence/torrent/internal/langx"
+	"github.com/james-lawrence/torrent/internal/uuidx"
 	"github.com/james-lawrence/torrent/upnp"
 )
 
@@ -42,7 +42,7 @@ func addPortMapping(ctx context.Context, d upnp.Device, proto upnp.Protocol, int
 }
 
 func UPnPPortForward(ctx context.Context, id string, port uint16, fallback netip.AddrPort) (iter.Seq[netip.AddrPort], error) {
-	id = langx.FirstNonZero(id, errorsx.Must(uuid.NewV7()).String())
+	id = langx.FirstNonZero(id, uuidx.NewV7().String())
 	return func(yield func(netip.AddrPort) bool) {
 		const lease = time.Hour
 		for {
