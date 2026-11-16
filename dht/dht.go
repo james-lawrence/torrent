@@ -180,6 +180,15 @@ func OptionQueryResendDelay(d time.Duration) Option {
 
 func OptionNoop(sc *Server) {}
 
+// OptionPassive when true the server never serves a socket, it takes no part in the dht (no queries sent,
+// none answered) but retains its identity (see OptionNodeID), which clients use to tell their own connections
+// from those of their peers.
+func OptionPassive(passive bool) Option {
+	return func(sc *Server) {
+		sc.passive = passive
+	}
+}
+
 func OptionLogger(m logging) Option {
 	return func(sc *Server) {
 		sc.log = m

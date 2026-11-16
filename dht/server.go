@@ -60,6 +60,7 @@ type Server struct {
 	id          *atomic.Pointer[int160.T]
 	dynamicaddr *atomic.Pointer[netip.AddrPort]
 	bindings    []*socketbinding
+	passive     bool // never serve sockets, see OptionPassive.
 
 	mu            sync.RWMutex
 	wg            sync.WaitGroup
@@ -251,6 +252,10 @@ func (s *Server) ServeBinding(ctx context.Context, pc net.PacketConn, bestaddr n
 }
 
 func (s *Server) serveBinding(ctx context.Context, pc net.PacketConn, bestaddr netip.AddrPort, dedup bool) (Binding, error) {
+	if s.passive {
+		return nil, errorsx.New("passive dht server cannot serve sockets")
+	}
+
 	_dedup := func(pc net.PacketConn) (*socketbinding, bool) {
 		incoming := errorsx.Zero(netx.AddrPort(pc.LocalAddr()))
 		return slicesx.Find(func(b *socketbinding) bool {
@@ -328,6 +333,11 @@ func (s *Server) serveBinding(ctx context.Context, pc net.PacketConn, bestaddr n
 }
 
 func (s *Server) Serve(ctx context.Context, pc net.PacketConn) error {
+	// a passive server ignores sockets, it only provides an identity.
+	if s.passive {
+		return nil
+	}
+
 	bound := pc.LocalAddr()
 
 	ap, err := netx.AddrPort(bound)

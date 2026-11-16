@@ -14,6 +14,17 @@ import (
 )
 
 func TestServeBinding(t *testing.T) {
+	t.Run("passive server refuses to serve a binding", func(t *testing.T) {
+		s := mustNewServer(t, OptionPassive(true))
+		pc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = pc.Close() })
+
+		_, err = s.ServeBinding(t.Context(), pc, netx.ComputeBestAddr(pc.LocalAddr()))
+		require.Error(t, err)
+		require.False(t, s.Available())
+	})
+
 	t.Run("does not bind same listener twice", func(t *testing.T) {
 		s := mustNewServer(t)
 		pc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
@@ -76,6 +87,19 @@ func TestServeBinding(t *testing.T) {
 }
 
 func TestServe(t *testing.T) {
+	t.Run("passive server ignores the socket and keeps its node id", func(t *testing.T) {
+		id := int160.Random()
+		s := mustNewServer(t, OptionNodeID(id), OptionPassive(true))
+		pc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = pc.Close() })
+
+		require.NoError(t, s.Serve(t.Context(), pc))
+		require.False(t, s.Available())
+		require.Zero(t, s.numBindings())
+		require.Equal(t, id, s.ID(netip.MustParseAddrPort("127.0.0.1:12345")))
+	})
+
 	t.Run("ipv4 socket creates a single binding", func(t *testing.T) {
 		s := mustNewServer(t)
 		pc, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
