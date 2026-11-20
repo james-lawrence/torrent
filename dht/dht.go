@@ -189,9 +189,19 @@ func OptionPassive(passive bool) Option {
 	}
 }
 
+// OptionLogger sets the info logger, used for general server activity
+// (bootstrapping, routing table maintenance, errors).
 func OptionLogger(m logging) Option {
 	return func(sc *Server) {
 		sc.log = m
+	}
+}
+
+// OptionDebugLogger sets the debug logger, used to trace every method
+// executed by the server: inbound queries handled and outbound queries sent.
+func OptionDebugLogger(m logging) Option {
+	return func(sc *Server) {
+		sc.debug = m
 	}
 }
 
